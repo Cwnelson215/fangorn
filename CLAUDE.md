@@ -45,16 +45,25 @@ npm run destroy          # Tear down infra
 
 All shared resources (VPC, ALB, ECS cluster, Route53, ACM, CloudWatch log group, RDS) come from the platform stack and are imported via `pulumi.StackReference`.
 
+## Project Status
+
+Infrastructure is complete. The Go backend, SvelteKit frontend, and database migrations are not yet implemented.
+
 ## Key Files
 
+- `index.ts` — Pulumi infrastructure definition (~378 lines, the main codebase currently)
+- `Pulumi.yaml` / `Pulumi.dev.yaml` — Project metadata and environment config
+- `Dockerfile` — Multi-stage build: `golang:1.22-alpine` → `alpine:3.19`, runs as non-root user
+- `.github/workflows/deploy.yml.txt` — CI/CD pipeline (renamed to .txt for local development)
+
+**Expected application structure (to be created):**
 - `cmd/server/` — Go server entry point
 - `internal/` — Go application code (handlers, services, models, plaid client)
 - `frontend/` — SvelteKit app with D3.js visualizations
-- `index.ts` — Pulumi infrastructure definition
-- `Pulumi.yaml` — Project metadata
-- `Pulumi.dev.yaml` — Environment config
-- `Dockerfile` — Multi-stage Go build
-- `.github/workflows/deploy.yml` — CI/CD pipeline
+
+## Dockerfile Contract
+
+The Go binary must build as: `CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server`. The Dockerfile expects `go.mod` and `go.sum` at the repo root. The runtime container uses Alpine with `ca-certificates` and `curl` installed.
 
 ## Conventions
 
@@ -64,6 +73,8 @@ All shared resources (VPC, ALB, ECS cluster, Route53, ACM, CloudWatch log group,
 - **Platform stack reference:** `cwnelson/portfolio-platform/dev`
 - **Health check:** `GET /health` must return HTTP 200.
 - **Environment variables injected by infra:** `PORT`, `PLAID_ENV`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `PLAID_CLIENT_ID`, `PLAID_SECRET`, `ENCRYPTION_KEY`
+- **ECS config:** 256 CPU / 512 MB memory, Fargate Spot with On-Demand fallback, us-east-1
+- **CI/CD:** GitHub Actions on push to main — builds Docker image, tags with commit SHA + `latest`, pushes to ECR, runs `pulumi up`, force-deploys ECS service
 
 ## Security Notes
 

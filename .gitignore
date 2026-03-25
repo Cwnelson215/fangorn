@@ -1,0 +1,19 @@
+# Go
+/server
+*.exe
+
+# Frontend
+node_modules/
+frontend/build/
+frontend/.svelte-kit/
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
