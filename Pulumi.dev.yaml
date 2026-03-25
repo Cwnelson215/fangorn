@@ -1,0 +1,14 @@
+config:
+  aws:region: us-east-1
+  fangorn:appName: fangorn
+  fangorn:subdomain: fangorn
+  fangorn:platformStack: cwnelson/portfolio-platform/dev
+  fangorn:cpu: "256"
+  fangorn:memory: "512"
+  fangorn:desiredCount: "1"
+  fangorn:containerPort: "3000"
+  fangorn:useFargateSpot: "true"
+  fangorn:enableScheduledScaling: "true"
+  fangorn:scaleUpHour: "6"
+  fangorn:scaleDownHour: "22"
+  fangorn:scheduleTimezone: "America/Denver"
