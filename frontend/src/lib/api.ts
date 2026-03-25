@@ -1,4 +1,4 @@
-import type { Account, Transaction, Dashboard } from './types';
+import type { Account, Transaction, Dashboard, Transfer } from './types';
 
 const BASE = '';
 
@@ -63,4 +63,33 @@ export async function getDashboard(from?: string, to?: string): Promise<Dashboar
 	if (to) params.set('to', to);
 	const qs = params.toString();
 	return fetchJSON<Dashboard>(`/api/dashboard${qs ? '?' + qs : ''}`);
+}
+
+export async function createTransfer(sourceAccountId: number, destinationAccountId: number, amount: number, description?: string): Promise<Transfer> {
+	return fetchJSON<Transfer>('/api/transfers', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			source_account_id: sourceAccountId,
+			destination_account_id: destinationAccountId,
+			amount,
+			description: description || ''
+		})
+	});
+}
+
+export async function getTransfers(limit?: number, offset?: number): Promise<Transfer[]> {
+	const params = new URLSearchParams();
+	if (limit) params.set('limit', String(limit));
+	if (offset) params.set('offset', String(offset));
+	const qs = params.toString();
+	return fetchJSON<Transfer[]>(`/api/transfers${qs ? '?' + qs : ''}`);
+}
+
+export async function refreshTransfer(id: number): Promise<Transfer> {
+	return fetchJSON<Transfer>(`/api/transfers/${id}/refresh`, { method: 'POST' });
+}
+
+export async function cancelTransfer(id: number): Promise<void> {
+	await fetchJSON(`/api/transfers/${id}/cancel`, { method: 'POST' });
 }

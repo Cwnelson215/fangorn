@@ -46,6 +46,26 @@ type Transaction struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+type Transfer struct {
+	ID                     int       `json:"id"`
+	SourceAccountID        int       `json:"source_account_id"`
+	DestinationAccountID   int       `json:"destination_account_id"`
+	Amount                 float64   `json:"amount"`
+	Description            *string   `json:"description"`
+	Status                 string    `json:"status"`
+	DebitPlaidTransferID   *string   `json:"-"`
+	CreditPlaidTransferID  *string   `json:"-"`
+	DebitAuthorizationID   *string   `json:"-"`
+	CreditAuthorizationID  *string   `json:"-"`
+	DebitStatus            *string   `json:"debit_status"`
+	CreditStatus           *string   `json:"credit_status"`
+	FailureReason          *string   `json:"failure_reason"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	SourceAccountName      string    `json:"source_account_name,omitempty"`
+	DestinationAccountName string    `json:"destination_account_name,omitempty"`
+}
+
 type NetWorthSnapshot struct {
 	ID               int       `json:"id"`
 	TotalAssets      float64   `json:"total_assets"`

@@ -13,6 +13,8 @@ type Config struct {
 	PlaidClientID string
 	PlaidSecret   string
 	EncryptionKey string
+	DBSSLMode     string
+	AppPassword   string
 }
 
 func Load() *Config {
@@ -27,6 +29,8 @@ func Load() *Config {
 		PlaidClientID: os.Getenv("PLAID_CLIENT_ID"),
 		PlaidSecret:   os.Getenv("PLAID_SECRET"),
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
+		DBSSLMode:     getEnv("DB_SSLMODE", "require"),
+		AppPassword:   os.Getenv("APP_PASSWORD"),
 	}
 }
 
@@ -36,7 +40,7 @@ func (c *Config) DSN() string {
 		" user=" + c.DBUser +
 		" password=" + c.DBPassword +
 		" dbname=" + c.DBName +
-		" sslmode=require"
+		" sslmode=" + c.DBSSLMode
 }
 
 func getEnv(key, fallback string) string {

@@ -1,23 +1,52 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 
 	let { children }: { children: Snippet } = $props();
+	let authChecked = $state(false);
+	let isLoginPage = $derived(page.url.pathname === '/login');
+
+	onMount(async () => {
+		if (isLoginPage) {
+			authChecked = true;
+			return;
+		}
+
+		try {
+			const res = await fetch('/api/auth/status');
+			const data = await res.json();
+			if (data.required && !data.authenticated) {
+				goto('/login');
+				return;
+			}
+		} catch {
+			// If auth check fails, allow access (server may not require auth)
+		}
+		authChecked = true;
+	});
 </script>
 
-<div class="app">
-	<nav>
-		<div class="nav-brand">Fangorn</div>
-		<div class="nav-links">
-			<a href="/">Dashboard</a>
-			<a href="/accounts">Accounts</a>
-			<a href="/transactions">Transactions</a>
-			<a href="/link">Link Account</a>
-		</div>
-	</nav>
-	<main>
-		{@render children()}
-	</main>
-</div>
+{#if isLoginPage}
+	{@render children()}
+{:else if authChecked}
+	<div class="app">
+		<nav>
+			<div class="nav-brand">Fangorn</div>
+			<div class="nav-links">
+				<a href="/">Dashboard</a>
+				<a href="/accounts">Accounts</a>
+				<a href="/transactions">Transactions</a>
+				<a href="/transfers">Transfers</a>
+				<a href="/link">Link Account</a>
+			</div>
+		</nav>
+		<main>
+			{@render children()}
+		</main>
+	</div>
+{/if}
 
 <style>
 	:global(*) {

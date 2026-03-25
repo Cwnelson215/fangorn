@@ -34,14 +34,21 @@ func main() {
 
 	plaidSvc := services.NewPlaidService(cfg)
 	syncSvc := services.NewSyncService(db, plaidSvc, cfg.EncryptionKey)
+	transferSvc := services.NewTransferService(db, plaidSvc, cfg.EncryptionKey)
 
+	authH := handlers.NewAuthHandler(cfg.AppPassword)
 	plaidH := handlers.NewPlaidHandler(plaidSvc, syncSvc)
 	accountsH := handlers.NewAccountsHandler(db)
 	txnH := handlers.NewTransactionsHandler(db)
 	syncH := handlers.NewSyncHandler(syncSvc)
 	dashH := handlers.NewDashboardHandler(db)
+	transferH := handlers.NewTransferHandler(transferSvc)
 
 	mux := http.NewServeMux()
+
+	// Auth routes
+	mux.HandleFunc("POST /api/login", authH.Login)
+	mux.HandleFunc("GET /api/auth/status", authH.Status)
 
 	// API routes
 	mux.HandleFunc("GET /health", handlers.Health)
@@ -51,6 +58,11 @@ func main() {
 	mux.HandleFunc("GET /api/transactions", txnH.List)
 	mux.HandleFunc("POST /api/sync", syncH.Sync)
 	mux.HandleFunc("GET /api/dashboard", dashH.Get)
+	mux.HandleFunc("POST /api/transfers", transferH.Create)
+	mux.HandleFunc("GET /api/transfers", transferH.List)
+	mux.HandleFunc("GET /api/transfers/{id}", transferH.Get)
+	mux.HandleFunc("POST /api/transfers/{id}/refresh", transferH.Refresh)
+	mux.HandleFunc("POST /api/transfers/{id}/cancel", transferH.Cancel)
 
 	// Serve embedded frontend with SPA fallback
 	frontendFS, err := fs.Sub(fangorn.FrontendAssets, "frontend/build")
@@ -79,7 +91,7 @@ func main() {
 	})
 
 	// Apply middleware
-	handler := middleware.Logging(middleware.CORS(mux))
+	handler := middleware.Logging(middleware.Auth(cfg.AppPassword)(middleware.CORS(mux)))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,

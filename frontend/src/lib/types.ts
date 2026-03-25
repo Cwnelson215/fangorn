@@ -37,6 +37,22 @@ export interface NetWorthPoint {
 	net_worth: number;
 }
 
+export interface Transfer {
+	id: number;
+	source_account_id: number;
+	destination_account_id: number;
+	amount: number;
+	description: string | null;
+	status: string;
+	debit_status: string | null;
+	credit_status: string | null;
+	failure_reason: string | null;
+	created_at: string;
+	updated_at: string;
+	source_account_name: string;
+	destination_account_name: string;
+}
+
 export interface Dashboard {
 	from: string;
 	to: string;

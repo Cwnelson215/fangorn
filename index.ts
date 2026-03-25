@@ -141,6 +141,12 @@ const encryptionKeySecret = new aws.secretsmanager.Secret(`${appName}-encryption
   tags,
 });
 
+const appPasswordSecret = new aws.secretsmanager.Secret(`${appName}-app-password`, {
+  name: `${appName}/app-password`,
+  description: "Application login password",
+  tags,
+});
+
 // =============================================================================
 // Target Group
 // =============================================================================
@@ -225,8 +231,9 @@ const taskDefinition = new aws.ecs.TaskDefinition(`${appName}-task`, {
       plaidClientIdSecret.arn,
       plaidSecretSecret.arn,
       encryptionKeySecret.arn,
+      appPasswordSecret.arn,
     ])
-    .apply(([repoUrl, logGroup, awsRegion, dbHost, dbSecretArn, plaidClientIdArn, plaidSecretArn, encKeyArn]) => {
+    .apply(([repoUrl, logGroup, awsRegion, dbHost, dbSecretArn, plaidClientIdArn, plaidSecretArn, encKeyArn, appPwdArn]) => {
       const env = [...containerEnv];
       const secrets: { name: string; valueFrom: string }[] = [];
 
@@ -245,6 +252,7 @@ const taskDefinition = new aws.ecs.TaskDefinition(`${appName}-task`, {
       secrets.push({ name: "PLAID_CLIENT_ID", valueFrom: plaidClientIdArn });
       secrets.push({ name: "PLAID_SECRET", valueFrom: plaidSecretArn });
       secrets.push({ name: "ENCRYPTION_KEY", valueFrom: encKeyArn });
+      secrets.push({ name: "APP_PASSWORD", valueFrom: appPwdArn });
 
       return JSON.stringify([
         {

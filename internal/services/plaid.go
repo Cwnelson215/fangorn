@@ -43,7 +43,7 @@ func (s *PlaidService) CreateLinkToken(ctx context.Context) (string, error) {
 			ClientUserId: "user-1",
 		},
 	)
-	req.SetProducts([]plaid.Products{plaid.PRODUCTS_TRANSACTIONS})
+	req.SetProducts([]plaid.Products{plaid.PRODUCTS_TRANSACTIONS, plaid.PRODUCTS_TRANSFER})
 
 	resp, _, err := s.client.PlaidApi.LinkTokenCreate(ctx).LinkTokenCreateRequest(*req).Execute()
 	if err != nil {
@@ -110,4 +110,71 @@ func (s *PlaidService) GetAccounts(ctx context.Context, accessToken string) ([]p
 	}
 
 	return resp.GetAccounts(), nil
+}
+
+func (s *PlaidService) AuthorizeTransfer(ctx context.Context, accessToken, accountID string, transferType plaid.TransferType, amount, legalName string) (string, error) {
+	user := *plaid.NewTransferAuthorizationUserInRequest(legalName)
+	req := plaid.NewTransferAuthorizationCreateRequest(
+		accessToken,
+		accountID,
+		transferType,
+		plaid.TRANSFERNETWORK_ACH,
+		amount,
+		user,
+	)
+	req.SetAchClass(plaid.ACHCLASS_PPD)
+
+	resp, _, err := s.client.PlaidApi.TransferAuthorizationCreate(ctx).TransferAuthorizationCreateRequest(*req).Execute()
+	if err != nil {
+		return "", fmt.Errorf("authorizing transfer: %w", err)
+	}
+
+	auth := resp.GetAuthorization()
+	decision := auth.GetDecision()
+	if decision != "approved" {
+		rationale := auth.GetDecisionRationale()
+		return "", fmt.Errorf("transfer authorization %s: %s", decision, rationale.GetDescription())
+	}
+
+	return auth.GetId(), nil
+}
+
+func (s *PlaidService) CreateTransfer(ctx context.Context, accessToken, accountID, authorizationID, amount, description string) (string, error) {
+	if len(description) > 15 {
+		description = description[:15]
+	}
+	req := plaid.NewTransferCreateRequest(accessToken, accountID, authorizationID, description)
+	req.SetAmount(amount)
+
+	resp, _, err := s.client.PlaidApi.TransferCreate(ctx).TransferCreateRequest(*req).Execute()
+	if err != nil {
+		return "", fmt.Errorf("creating transfer: %w", err)
+	}
+
+	transfer := resp.GetTransfer()
+	return transfer.GetId(), nil
+}
+
+func (s *PlaidService) GetTransferStatus(ctx context.Context, transferID string) (string, error) {
+	req := plaid.NewTransferGetRequest()
+	req.SetTransferId(transferID)
+
+	resp, _, err := s.client.PlaidApi.TransferGet(ctx).TransferGetRequest(*req).Execute()
+	if err != nil {
+		return "", fmt.Errorf("getting transfer: %w", err)
+	}
+
+	transfer := resp.GetTransfer()
+	return string(transfer.GetStatus()), nil
+}
+
+func (s *PlaidService) SimulateTransfer(ctx context.Context, transferID, eventType string) error {
+	req := plaid.NewSandboxTransferSimulateRequest(transferID, eventType)
+
+	_, _, err := s.client.PlaidApi.SandboxTransferSimulate(ctx).SandboxTransferSimulateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("simulating transfer: %w", err)
+	}
+
+	return nil
 }
