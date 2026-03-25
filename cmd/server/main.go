@@ -32,12 +32,13 @@ func main() {
 		log.Fatalf("Database migration failed: %v", err)
 	}
 
-	plaidSvc := services.NewPlaidService(cfg)
-	syncSvc := services.NewSyncService(db, plaidSvc, cfg.EncryptionKey)
-	transferSvc := services.NewTransferService(db, plaidSvc, cfg.EncryptionKey)
+	tellerSvc := services.NewTellerService(cfg)
+	syncSvc := services.NewSyncService(db, tellerSvc, cfg.EncryptionKey)
+	transferSvc := services.NewTransferService(db, cfg.EncryptionKey)
 
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
-	plaidH := handlers.NewPlaidHandler(plaidSvc, syncSvc)
+	configH := handlers.NewConfigHandler(cfg.TellerAppID)
+	linkH := handlers.NewLinkHandler(syncSvc)
 	accountsH := handlers.NewAccountsHandler(db)
 	txnH := handlers.NewTransactionsHandler(db)
 	syncH := handlers.NewSyncHandler(syncSvc)
@@ -52,8 +53,8 @@ func main() {
 
 	// API routes
 	mux.HandleFunc("GET /health", handlers.Health)
-	mux.HandleFunc("POST /api/link-token", plaidH.CreateLinkToken)
-	mux.HandleFunc("POST /api/exchange-token", plaidH.ExchangeToken)
+	mux.HandleFunc("GET /api/config", configH.Get)
+	mux.HandleFunc("POST /api/link-account", linkH.LinkAccount)
 	mux.HandleFunc("GET /api/accounts", accountsH.List)
 	mux.HandleFunc("GET /api/transactions", txnH.List)
 	mux.HandleFunc("POST /api/sync", syncH.Sync)

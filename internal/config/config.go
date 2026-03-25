@@ -4,14 +4,15 @@ import "os"
 
 type Config struct {
 	Port          string
-	PlaidEnv      string
+	TellerAppID   string
+	TellerEnv     string
+	TellerCertPath string
+	TellerKeyPath  string
 	DBHost        string
 	DBPort        string
 	DBName        string
 	DBUser        string
 	DBPassword    string
-	PlaidClientID string
-	PlaidSecret   string
 	EncryptionKey string
 	DBSSLMode     string
 	AppPassword   string
@@ -19,18 +20,19 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		Port:          getEnv("PORT", "3000"),
-		PlaidEnv:      getEnv("PLAID_ENV", "sandbox"),
-		DBHost:        getEnv("DB_HOST", "localhost"),
-		DBPort:        getEnv("DB_PORT", "5432"),
-		DBName:        getEnv("DB_NAME", "fangorn"),
-		DBUser:        getEnv("DB_USER", "postgres"),
-		DBPassword:    os.Getenv("DB_PASSWORD"),
-		PlaidClientID: os.Getenv("PLAID_CLIENT_ID"),
-		PlaidSecret:   os.Getenv("PLAID_SECRET"),
-		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
-		DBSSLMode:     getEnv("DB_SSLMODE", "require"),
-		AppPassword:   os.Getenv("APP_PASSWORD"),
+		Port:           getEnv("PORT", "3000"),
+		TellerAppID:    os.Getenv("TELLER_APP_ID"),
+		TellerEnv:      getEnv("TELLER_ENV", "sandbox"),
+		TellerCertPath: os.Getenv("TELLER_CERT_PATH"),
+		TellerKeyPath:  os.Getenv("TELLER_KEY_PATH"),
+		DBHost:         getEnv("DB_HOST", "localhost"),
+		DBPort:         getEnv("DB_PORT", "5432"),
+		DBName:         getEnv("DB_NAME", "fangorn"),
+		DBUser:         getEnv("DB_USER", "postgres"),
+		DBPassword:     os.Getenv("DB_PASSWORD"),
+		EncryptionKey:  os.Getenv("ENCRYPTION_KEY"),
+		DBSSLMode:      getEnv("DB_SSLMODE", "require"),
+		AppPassword:    os.Getenv("APP_PASSWORD"),
 	}
 }
 

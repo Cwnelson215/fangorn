@@ -22,9 +22,9 @@ func (h *TransactionsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
-	query := `SELECT t.id, t.plaid_transaction_id, t.account_id, t.amount,
+	query := `SELECT t.id, t.teller_transaction_id, t.account_id, t.amount,
 	                 t.iso_currency_code, t.date, t.name, t.merchant_name,
-	                 t.category, t.plaid_category, t.pending, a.name as account_name
+	                 t.category, t.pending, a.name as account_name
 	          FROM transactions t
 	          JOIN accounts a ON t.account_id = a.id
 	          WHERE 1=1`
@@ -70,26 +70,25 @@ func (h *TransactionsHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type txnResp struct {
-		ID                 int      `json:"id"`
-		PlaidTransactionID string   `json:"plaid_transaction_id"`
-		AccountID          int      `json:"account_id"`
-		Amount             float64  `json:"amount"`
-		IsoCurrencyCode    string   `json:"iso_currency_code"`
-		Date               string   `json:"date"`
-		Name               string   `json:"name"`
-		MerchantName       *string  `json:"merchant_name"`
-		Category           *string  `json:"category"`
-		PlaidCategory      *string  `json:"plaid_category"`
-		Pending            bool     `json:"pending"`
-		AccountName        string   `json:"account_name"`
+		ID                  int     `json:"id"`
+		TellerTransactionID string  `json:"teller_transaction_id"`
+		AccountID           int     `json:"account_id"`
+		Amount              float64 `json:"amount"`
+		IsoCurrencyCode     string  `json:"iso_currency_code"`
+		Date                string  `json:"date"`
+		Name                string  `json:"name"`
+		MerchantName        *string `json:"merchant_name"`
+		Category            *string `json:"category"`
+		Pending             bool    `json:"pending"`
+		AccountName         string  `json:"account_name"`
 	}
 
 	var transactions []txnResp
 	for rows.Next() {
 		var t txnResp
-		if err := rows.Scan(&t.ID, &t.PlaidTransactionID, &t.AccountID, &t.Amount,
+		if err := rows.Scan(&t.ID, &t.TellerTransactionID, &t.AccountID, &t.Amount,
 			&t.IsoCurrencyCode, &t.Date, &t.Name, &t.MerchantName,
-			&t.Category, &t.PlaidCategory, &t.Pending, &t.AccountName); err != nil {
+			&t.Category, &t.Pending, &t.AccountName); err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to scan transaction")
 			return
 		}

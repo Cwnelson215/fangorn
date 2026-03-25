@@ -1,26 +1,26 @@
 <script lang="ts">
-	import { createLinkToken, exchangeToken } from '$lib/api';
+	import { linkAccount, getConfig } from '$lib/api';
 	import { goto } from '$app/navigation';
 
 	let loading = $state(false);
 	let error: string | null = $state(null);
 	let success = $state(false);
 
-	async function openPlaidLink() {
+	async function openTellerConnect() {
 		try {
 			loading = true;
 			error = null;
 
-			const linkToken = await createLinkToken();
+			const config = await getConfig();
 
-			const handler = (window as any).Plaid.create({
-				token: linkToken,
-				onSuccess: async (publicToken: string, metadata: any) => {
+			const teller = (window as any).TellerConnect.setup({
+				applicationId: config.teller_app_id,
+				onSuccess: async (enrollment: any) => {
 					try {
-						await exchangeToken(
-							publicToken,
-							metadata.institution?.institution_id || '',
-							metadata.institution?.name || ''
+						await linkAccount(
+							enrollment.accessToken,
+							enrollment.enrollment?.id || '',
+							enrollment.enrollment?.institution?.name || ''
 						);
 						success = true;
 						setTimeout(() => goto('/accounts'), 1500);
@@ -28,17 +28,18 @@
 						error = e instanceof Error ? e.message : 'Failed to link account';
 					}
 				},
-				onExit: (err: any) => {
+				onExit: () => {
 					loading = false;
-					if (err) {
-						error = err.display_message || err.error_message || 'Link exited with error';
-					}
+				},
+				onFailure: (failure: any) => {
+					loading = false;
+					error = failure?.message || 'Connection failed';
 				}
 			});
 
-			handler.open();
+			teller.open();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to start Plaid Link';
+			error = e instanceof Error ? e.message : 'Failed to start Teller Connect';
 			loading = false;
 		}
 	}
@@ -46,6 +47,7 @@
 
 <svelte:head>
 	<title>Fangorn - Link Account</title>
+	<script src="https://cdn.teller.io/connect/connect.js"></script>
 </svelte:head>
 
 <div class="link-page">
@@ -58,8 +60,8 @@
 				Account linked successfully! Redirecting...
 			</div>
 		{:else}
-			<button onclick={openPlaidLink} disabled={loading}>
-				{loading ? 'Opening Plaid...' : 'Connect Bank Account'}
+			<button onclick={openTellerConnect} disabled={loading}>
+				{loading ? 'Connecting...' : 'Connect Bank Account'}
 			</button>
 		{/if}
 
@@ -68,7 +70,7 @@
 		{/if}
 
 		<div class="info">
-			<p>Your credentials are handled securely by Plaid and never stored on our servers.</p>
+			<p>Your credentials are handled securely by Teller and never stored on our servers.</p>
 		</div>
 	</div>
 </div>

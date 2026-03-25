@@ -1,6 +1,6 @@
 export interface Account {
 	id: number;
-	plaid_account_id: string;
+	teller_account_id: string;
 	name: string;
 	official_name: string | null;
 	type: string;
@@ -14,7 +14,7 @@ export interface Account {
 
 export interface Transaction {
 	id: number;
-	plaid_transaction_id: string;
+	teller_transaction_id: string;
 	account_id: number;
 	amount: number;
 	iso_currency_code: string;
@@ -22,7 +22,6 @@ export interface Transaction {
 	name: string;
 	merchant_name: string | null;
 	category: string | null;
-	plaid_category: string | null;
 	pending: boolean;
 	account_name: string;
 }
@@ -44,8 +43,6 @@ export interface Transfer {
 	amount: number;
 	description: string | null;
 	status: string;
-	debit_status: string | null;
-	credit_status: string | null;
 	failure_reason: string | null;
 	created_at: string;
 	updated_at: string;

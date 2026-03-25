@@ -1,54 +1,39 @@
 <script lang="ts">
 	type Step = { label: string; state: 'done' | 'active' | 'waiting' | 'error' };
 
-	let { debitStatus, creditStatus, overallStatus }: {
-		debitStatus: string | null;
-		creditStatus: string | null;
+	let { overallStatus }: {
 		overallStatus: string;
 	} = $props();
 
 	const steps = $derived.by((): Step[] => {
 		if (overallStatus === 'failed') {
-			const failedAt = getFailedStep(debitStatus, creditStatus);
 			return [
-				{ label: 'Authorized', state: 'done' },
-				{ label: 'Debiting', state: failedAt === 'debit' ? 'error' : 'done' },
-				{ label: 'In Transit', state: failedAt === 'credit' ? 'error' : (failedAt === 'debit' ? 'waiting' : 'done') },
-				{ label: 'Crediting', state: failedAt === 'credit' ? 'error' : 'waiting' },
+				{ label: 'Created', state: 'done' },
+				{ label: 'Processing', state: 'error' },
 				{ label: 'Complete', state: 'waiting' }
 			];
 		}
 		if (overallStatus === 'cancelled') {
 			return [
-				{ label: 'Authorized', state: 'done' },
+				{ label: 'Created', state: 'done' },
 				{ label: 'Cancelled', state: 'error' },
-				{ label: 'In Transit', state: 'waiting' },
-				{ label: 'Crediting', state: 'waiting' },
 				{ label: 'Complete', state: 'waiting' }
 			];
 		}
-
-		const debitDone = isSettled(debitStatus);
-		const creditDone = isSettled(creditStatus);
-
+		if (overallStatus === 'completed') {
+			return [
+				{ label: 'Created', state: 'done' },
+				{ label: 'Processing', state: 'done' },
+				{ label: 'Complete', state: 'done' }
+			];
+		}
+		// pending or processing
 		return [
-			{ label: 'Authorized', state: 'done' },
-			{ label: 'Debiting', state: debitDone ? 'done' : (debitStatus ? 'active' : 'waiting') },
-			{ label: 'In Transit', state: debitDone && !creditDone ? 'active' : (debitDone && creditDone ? 'done' : 'waiting') },
-			{ label: 'Crediting', state: creditDone ? 'done' : (debitDone ? 'active' : 'waiting') },
-			{ label: 'Complete', state: overallStatus === 'completed' ? 'done' : 'waiting' }
+			{ label: 'Created', state: 'done' },
+			{ label: 'Processing', state: 'active' },
+			{ label: 'Complete', state: 'waiting' }
 		];
 	});
-
-	function isSettled(status: string | null): boolean {
-		return status === 'settled' || status === 'posted';
-	}
-
-	function getFailedStep(debit: string | null, credit: string | null): string {
-		if (debit === 'failed' || debit === 'returned') return 'debit';
-		if (credit === 'failed' || credit === 'returned') return 'credit';
-		return 'unknown';
-	}
 </script>
 
 <div class="status-bar">

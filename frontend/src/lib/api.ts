@@ -11,18 +11,13 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 	return res.json();
 }
 
-export async function createLinkToken(): Promise<string> {
-	const data = await fetchJSON<{ link_token: string }>('/api/link-token', { method: 'POST' });
-	return data.link_token;
-}
-
-export async function exchangeToken(publicToken: string, institutionId: string, institutionName: string): Promise<void> {
-	await fetchJSON('/api/exchange-token', {
+export async function linkAccount(accessToken: string, enrollmentId: string, institutionName: string): Promise<void> {
+	await fetchJSON('/api/link-account', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
-			public_token: publicToken,
-			institution_id: institutionId,
+			access_token: accessToken,
+			enrollment_id: enrollmentId,
 			institution_name: institutionName
 		})
 	});
@@ -92,4 +87,8 @@ export async function refreshTransfer(id: number): Promise<Transfer> {
 
 export async function cancelTransfer(id: number): Promise<void> {
 	await fetchJSON(`/api/transfers/${id}/cancel`, { method: 'POST' });
+}
+
+export async function getConfig(): Promise<{ teller_app_id: string }> {
+	return fetchJSON<{ teller_app_id: string }>('/api/config');
 }

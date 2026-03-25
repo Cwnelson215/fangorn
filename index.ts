@@ -120,24 +120,18 @@ const appSg = new aws.ec2.SecurityGroup(`${appName}-sg`, {
 });
 
 // =============================================================================
-// Plaid API Secrets
+// Teller API Secrets
 // =============================================================================
 
-const plaidClientIdSecret = new aws.secretsmanager.Secret(`${appName}-plaid-client-id`, {
-  name: `${appName}/plaid-client-id`,
-  description: "Plaid API client ID",
-  tags,
-});
-
-const plaidSecretSecret = new aws.secretsmanager.Secret(`${appName}-plaid-secret`, {
-  name: `${appName}/plaid-secret`,
-  description: "Plaid API secret key",
+const tellerAppIdSecret = new aws.secretsmanager.Secret(`${appName}-teller-app-id`, {
+  name: `${appName}/teller-app-id`,
+  description: "Teller application ID",
   tags,
 });
 
 const encryptionKeySecret = new aws.secretsmanager.Secret(`${appName}-encryption-key`, {
   name: `${appName}/encryption-key`,
-  description: "Application encryption key for encrypting Plaid access tokens at rest",
+  description: "Application encryption key for encrypting Teller access tokens at rest",
   tags,
 });
 
@@ -209,7 +203,7 @@ const listenerRule = new aws.lb.ListenerRule(`${appName}-rule`, {
 // Build environment variables
 const containerEnv = [
   { name: "PORT", value: containerPort.toString() },
-  { name: "PLAID_ENV", value: "sandbox" },
+  { name: "TELLER_ENV", value: "sandbox" },
 ];
 
 // Task definition
@@ -228,12 +222,11 @@ const taskDefinition = new aws.ecs.TaskDefinition(`${appName}-task`, {
       region,
       dbEndpoint,
       dbPasswordSecretArn,
-      plaidClientIdSecret.arn,
-      plaidSecretSecret.arn,
+      tellerAppIdSecret.arn,
       encryptionKeySecret.arn,
       appPasswordSecret.arn,
     ])
-    .apply(([repoUrl, logGroup, awsRegion, dbHost, dbSecretArn, plaidClientIdArn, plaidSecretArn, encKeyArn, appPwdArn]) => {
+    .apply(([repoUrl, logGroup, awsRegion, dbHost, dbSecretArn, tellerAppIdArn, encKeyArn, appPwdArn]) => {
       const env = [...containerEnv];
       const secrets: { name: string; valueFrom: string }[] = [];
 
@@ -248,9 +241,8 @@ const taskDefinition = new aws.ecs.TaskDefinition(`${appName}-task`, {
         secrets.push({ name: "DB_PASSWORD", valueFrom: dbSecretArn });
       }
 
-      // Add Plaid secrets
-      secrets.push({ name: "PLAID_CLIENT_ID", valueFrom: plaidClientIdArn });
-      secrets.push({ name: "PLAID_SECRET", valueFrom: plaidSecretArn });
+      // Add Teller and app secrets
+      secrets.push({ name: "TELLER_APP_ID", valueFrom: tellerAppIdArn });
       secrets.push({ name: "ENCRYPTION_KEY", valueFrom: encKeyArn });
       secrets.push({ name: "APP_PASSWORD", valueFrom: appPwdArn });
 

@@ -167,8 +167,6 @@
 					</div>
 				</div>
 				<TransferStatus
-					debitStatus={transfer.debit_status}
-					creditStatus={transfer.credit_status}
 					overallStatus={transfer.status}
 				/>
 				<div class="transfer-meta">

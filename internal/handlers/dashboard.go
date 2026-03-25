@@ -26,7 +26,7 @@ func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 		to = time.Now().Format("2006-01-02")
 	}
 
-	// Income (negative amounts in Plaid = money in)
+	// Income (negative amounts = money in, positive = money out)
 	var income, expenses float64
 	err := h.db.QueryRowContext(r.Context(),
 		`SELECT COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
@@ -41,10 +41,10 @@ func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	// Category breakdown (expenses only)
 	catRows, err := h.db.QueryContext(r.Context(),
-		`SELECT COALESCE(COALESCE(category, plaid_category), 'Uncategorized'), SUM(amount)
+		`SELECT COALESCE(category, 'Uncategorized'), SUM(amount)
 		 FROM transactions
 		 WHERE date >= $1 AND date <= $2 AND amount > 0 AND pending = false
-		 GROUP BY COALESCE(COALESCE(category, plaid_category), 'Uncategorized')
+		 GROUP BY COALESCE(category, 'Uncategorized')
 		 ORDER BY SUM(amount) DESC`,
 		from, to,
 	)

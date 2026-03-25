@@ -5,108 +5,114 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/cwnelson/fangorn/internal/crypto"
 )
 
 type SyncService struct {
-	db    *sql.DB
-	plaid *PlaidService
-	key   string
+	db     *sql.DB
+	teller *TellerService
+	key    string
 }
 
-func NewSyncService(db *sql.DB, plaid *PlaidService, encryptionKey string) *SyncService {
-	return &SyncService{db: db, plaid: plaid, key: encryptionKey}
+func NewSyncService(db *sql.DB, teller *TellerService, encryptionKey string) *SyncService {
+	return &SyncService{db: db, teller: teller, key: encryptionKey}
 }
 
-// LinkItem exchanges a public token, encrypts the access token, stores the item, and syncs accounts.
-func (s *SyncService) LinkItem(ctx context.Context, publicToken string, institutionID, institutionName string) error {
-	accessToken, _, err := s.plaid.ExchangePublicToken(ctx, publicToken)
-	if err != nil {
-		return fmt.Errorf("exchanging token: %w", err)
-	}
-
+// LinkInstitution stores a new linked institution and fetches its accounts.
+func (s *SyncService) LinkInstitution(ctx context.Context, accessToken string, institutionID, institutionName string) error {
 	encrypted, err := crypto.Encrypt(accessToken, s.key)
 	if err != nil {
 		return fmt.Errorf("encrypting access token: %w", err)
 	}
 
-	var itemID int
+	var instID int
 	err = s.db.QueryRowContext(ctx,
-		`INSERT INTO plaid_items (institution_id, institution_name, encrypted_access_token)
+		`INSERT INTO linked_institutions (institution_id, institution_name, encrypted_access_token)
 		 VALUES ($1, $2, $3) RETURNING id`,
 		institutionID, institutionName, encrypted,
-	).Scan(&itemID)
+	).Scan(&instID)
 	if err != nil {
-		return fmt.Errorf("inserting plaid item: %w", err)
+		return fmt.Errorf("inserting linked institution: %w", err)
 	}
 
 	// Fetch and store accounts
-	accounts, err := s.plaid.GetAccounts(ctx, accessToken)
+	accounts, err := s.teller.GetAccounts(ctx, accessToken)
 	if err != nil {
 		return fmt.Errorf("fetching accounts: %w", err)
 	}
 
 	for _, acct := range accounts {
-		balances := acct.GetBalances()
+		// Fetch balances for each account
 		var currentBal, availBal *float64
-		if v, ok := balances.GetCurrentOk(); ok && v != nil {
-			f := float64(*v)
-			currentBal = &f
-		}
-		if v, ok := balances.GetAvailableOk(); ok && v != nil {
-			f := float64(*v)
-			availBal = &f
+		balance, err := s.teller.GetAccountBalances(ctx, accessToken, acct.ID)
+		if err != nil {
+			log.Printf("Warning: could not fetch balances for account %s: %v", acct.ID, err)
+		} else {
+			if balance.Ledger != nil {
+				if f, err := strconv.ParseFloat(*balance.Ledger, 64); err == nil {
+					currentBal = &f
+				}
+			}
+			if balance.Available != nil {
+				if f, err := strconv.ParseFloat(*balance.Available, 64); err == nil {
+					availBal = &f
+				}
+			}
 		}
 
-		_, err := s.db.ExecContext(ctx,
-			`INSERT INTO accounts (plaid_item_id, plaid_account_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code)
+		currency := acct.Currency
+		if currency == "" {
+			currency = "USD"
+		}
+
+		_, err = s.db.ExecContext(ctx,
+			`INSERT INTO accounts (linked_institution_id, teller_account_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			 ON CONFLICT (plaid_account_id) DO UPDATE SET
+			 ON CONFLICT (teller_account_id) DO UPDATE SET
 			   name = EXCLUDED.name, current_balance = EXCLUDED.current_balance,
 			   available_balance = EXCLUDED.available_balance, updated_at = NOW()`,
-			itemID, acct.GetAccountId(), acct.GetName(),
-			nullStr(acct.GetOfficialName()), string(acct.GetType()),
-			nullStr(string(acct.GetSubtype())), nullStr(acct.GetMask()),
-			currentBal, availBal,
-			orDefault(balances.GetIsoCurrencyCode(), "USD"),
+			instID, acct.ID, acct.Name,
+			nullStr(acct.Name), acct.Type,
+			nullStr(acct.Subtype), nullStr(acct.LastFour),
+			currentBal, availBal, currency,
 		)
 		if err != nil {
-			return fmt.Errorf("upserting account %s: %w", acct.GetAccountId(), err)
+			return fmt.Errorf("upserting account %s: %w", acct.ID, err)
 		}
 	}
 
-	log.Printf("Linked item with %d accounts", len(accounts))
+	log.Printf("Linked institution with %d accounts", len(accounts))
 	return nil
 }
 
-// SyncAll syncs transactions for all linked items.
+// SyncAll syncs transactions for all linked institutions.
 func (s *SyncService) SyncAll(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, encrypted_access_token, cursor FROM plaid_items`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, encrypted_access_token, last_synced_at FROM linked_institutions`)
 	if err != nil {
-		return fmt.Errorf("querying items: %w", err)
+		return fmt.Errorf("querying institutions: %w", err)
 	}
 	defer rows.Close()
 
-	type item struct {
-		id        int
-		token     string
-		cursor    *string
+	type inst struct {
+		id           int
+		token        string
+		lastSyncedAt *time.Time
 	}
-	var items []item
+	var institutions []inst
 	for rows.Next() {
-		var it item
-		if err := rows.Scan(&it.id, &it.token, &it.cursor); err != nil {
-			return fmt.Errorf("scanning item: %w", err)
+		var it inst
+		if err := rows.Scan(&it.id, &it.token, &it.lastSyncedAt); err != nil {
+			return fmt.Errorf("scanning institution: %w", err)
 		}
-		items = append(items, it)
+		institutions = append(institutions, it)
 	}
 
-	for _, it := range items {
-		if err := s.syncItem(ctx, it.id, it.token, it.cursor); err != nil {
-			log.Printf("Error syncing item %d: %v", it.id, err)
+	for _, it := range institutions {
+		if err := s.syncInstitution(ctx, it.id, it.token, it.lastSyncedAt); err != nil {
+			log.Printf("Error syncing institution %d: %v", it.id, err)
 			continue
 		}
 	}
@@ -114,92 +120,120 @@ func (s *SyncService) SyncAll(ctx context.Context) error {
 	return nil
 }
 
-func (s *SyncService) syncItem(ctx context.Context, itemID int, encryptedToken string, cursor *string) error {
+func (s *SyncService) syncInstitution(ctx context.Context, instID int, encryptedToken string, lastSyncedAt *time.Time) error {
 	accessToken, err := crypto.Decrypt(encryptedToken, s.key)
 	if err != nil {
 		return fmt.Errorf("decrypting access token: %w", err)
 	}
 
-	cursorStr := ""
-	if cursor != nil {
-		cursorStr = *cursor
-	}
-
-	result, err := s.plaid.SyncTransactions(ctx, accessToken, cursorStr)
+	// Fetch accounts for this institution
+	accounts, err := s.teller.GetAccounts(ctx, accessToken)
 	if err != nil {
-		return fmt.Errorf("syncing transactions: %w", err)
+		return fmt.Errorf("fetching accounts: %w", err)
 	}
 
-	// Update account balances
-	for _, acct := range result.Accounts {
-		balances := acct.GetBalances()
-		var currentBal, availBal *float64
-		if v, ok := balances.GetCurrentOk(); ok && v != nil {
-			f := float64(*v)
-			currentBal = &f
-		}
-		if v, ok := balances.GetAvailableOk(); ok && v != nil {
-			f := float64(*v)
-			availBal = &f
-		}
-
-		_, err := s.db.ExecContext(ctx,
-			`UPDATE accounts SET current_balance = $1, available_balance = $2, updated_at = NOW()
-			 WHERE plaid_account_id = $3`,
-			currentBal, availBal, acct.GetAccountId(),
-		)
-		if err != nil {
-			log.Printf("Error updating account %s balance: %v", acct.GetAccountId(), err)
-		}
+	// Determine sync date range: 10 days before last sync to catch pending→posted changes
+	fromDate := ""
+	if lastSyncedAt != nil {
+		fromDate = lastSyncedAt.AddDate(0, 0, -10).Format("2006-01-02")
 	}
 
-	// Upsert added/modified transactions
-	for _, txn := range append(result.Added, result.Modified...) {
-		var accountID int
-		err := s.db.QueryRowContext(ctx,
-			`SELECT id FROM accounts WHERE plaid_account_id = $1`, txn.GetAccountId(),
-		).Scan(&accountID)
+	totalAdded := 0
+	totalUpdated := 0
+
+	for _, acct := range accounts {
+		// Update account balances
+		balance, err := s.teller.GetAccountBalances(ctx, accessToken, acct.ID)
 		if err != nil {
-			log.Printf("Account not found for transaction %s: %v", txn.GetTransactionId(), err)
+			log.Printf("Warning: could not fetch balances for account %s: %v", acct.ID, err)
+		} else {
+			var currentBal, availBal *float64
+			if balance.Ledger != nil {
+				if f, err := strconv.ParseFloat(*balance.Ledger, 64); err == nil {
+					currentBal = &f
+				}
+			}
+			if balance.Available != nil {
+				if f, err := strconv.ParseFloat(*balance.Available, 64); err == nil {
+					availBal = &f
+				}
+			}
+			_, err = s.db.ExecContext(ctx,
+				`UPDATE accounts SET current_balance = $1, available_balance = $2, updated_at = NOW()
+				 WHERE teller_account_id = $3`,
+				currentBal, availBal, acct.ID,
+			)
+			if err != nil {
+				log.Printf("Error updating account %s balance: %v", acct.ID, err)
+			}
+		}
+
+		// Fetch transactions
+		transactions, err := s.teller.GetTransactions(ctx, accessToken, acct.ID, fromDate, "", 500)
+		if err != nil {
+			log.Printf("Error fetching transactions for account %s: %v", acct.ID, err)
 			continue
 		}
 
-		category := strings.Join(txn.GetCategory(), " > ")
-
-		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO transactions (plaid_transaction_id, account_id, amount, iso_currency_code, date, name, merchant_name, plaid_category, pending)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			 ON CONFLICT (plaid_transaction_id) DO UPDATE SET
-			   amount = EXCLUDED.amount, name = EXCLUDED.name, merchant_name = EXCLUDED.merchant_name,
-			   plaid_category = EXCLUDED.plaid_category, pending = EXCLUDED.pending, updated_at = NOW()`,
-			txn.GetTransactionId(), accountID, txn.GetAmount(),
-			orDefault(txn.GetIsoCurrencyCode(), "USD"),
-			txn.GetDate(), txn.GetName(), nullStr(txn.GetMerchantName()),
-			nilIfEmpty(category), txn.GetPending(),
-		)
+		// Get internal account ID
+		var accountID int
+		err = s.db.QueryRowContext(ctx,
+			`SELECT id FROM accounts WHERE teller_account_id = $1`, acct.ID,
+		).Scan(&accountID)
 		if err != nil {
-			log.Printf("Error upserting transaction %s: %v", txn.GetTransactionId(), err)
+			log.Printf("Account not found for teller account %s: %v", acct.ID, err)
+			continue
+		}
+
+		for _, txn := range transactions {
+			amount, err := strconv.ParseFloat(txn.Amount, 64)
+			if err != nil {
+				log.Printf("Invalid amount for transaction %s: %v", txn.ID, err)
+				continue
+			}
+
+			// Teller amounts are negative for debits, positive for credits
+			// Our convention: positive = expense (money out), negative = income (money in)
+			// Teller: negative = money out, positive = money in
+			// So we negate to match our convention
+			amount = -amount
+
+			pending := txn.Status == "pending"
+			merchantName := txn.Details.Counterparty.Name
+			category := txn.Details.Category
+
+			result, err := s.db.ExecContext(ctx,
+				`INSERT INTO transactions (teller_transaction_id, account_id, amount, iso_currency_code, date, name, merchant_name, category, pending)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				 ON CONFLICT (teller_transaction_id) DO UPDATE SET
+				   amount = EXCLUDED.amount, name = EXCLUDED.name, merchant_name = EXCLUDED.merchant_name,
+				   category = EXCLUDED.category, pending = EXCLUDED.pending, updated_at = NOW()`,
+				txn.ID, accountID, amount, "USD",
+				txn.Date, txn.Description, nullStr(merchantName),
+				nilIfEmpty(category), pending,
+			)
+			if err != nil {
+				log.Printf("Error upserting transaction %s: %v", txn.ID, err)
+				continue
+			}
+
+			rowsAffected, _ := result.RowsAffected()
+			if rowsAffected > 0 {
+				totalAdded++
+			} else {
+				totalUpdated++
+			}
 		}
 	}
 
-	// Remove deleted transactions
-	for _, removed := range result.Removed {
-		_, err := s.db.ExecContext(ctx,
-			`DELETE FROM transactions WHERE plaid_transaction_id = $1`,
-			removed.GetTransactionId(),
-		)
-		if err != nil {
-			log.Printf("Error removing transaction %s: %v", removed.GetTransactionId(), err)
-		}
-	}
-
-	// Update cursor
+	// Update last synced timestamp
+	now := time.Now()
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE plaid_items SET cursor = $1, updated_at = NOW() WHERE id = $2`,
-		result.Cursor, itemID,
+		`UPDATE linked_institutions SET last_synced_at = $1, updated_at = NOW() WHERE id = $2`,
+		now, instID,
 	)
 	if err != nil {
-		return fmt.Errorf("updating cursor: %w", err)
+		return fmt.Errorf("updating last_synced_at: %w", err)
 	}
 
 	// Snapshot net worth
@@ -207,8 +241,7 @@ func (s *SyncService) syncItem(ctx context.Context, itemID int, encryptedToken s
 		log.Printf("Error snapshotting net worth: %v", err)
 	}
 
-	log.Printf("Synced item %d: %d added, %d modified, %d removed",
-		itemID, len(result.Added), len(result.Modified), len(result.Removed))
+	log.Printf("Synced institution %d: %d transactions processed", instID, totalAdded+totalUpdated)
 	return nil
 }
 
@@ -248,11 +281,4 @@ func nilIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func orDefault(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
 }
