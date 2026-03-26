@@ -69,16 +69,18 @@ func main() {
 		log.Println("Teller integration enabled")
 	}
 
-	// Gmail watcher (behind feature flag)
-	var gmailCancel context.CancelFunc
+	// Gmail watchers (behind feature flag, one per account)
+	var gmailCancels []context.CancelFunc
 	if cfg.GmailEnabled {
-		gmailSvc, err := services.NewGmailService(db, cfg)
-		if err != nil {
-			log.Printf("Warning: Gmail service failed to start: %v", err)
-		} else {
-			var gmailCtx context.Context
-			gmailCtx, gmailCancel = context.WithCancel(context.Background())
-			go gmailSvc.Start(gmailCtx)
+		for _, acct := range cfg.GmailAccounts {
+			gmailSvc, err := services.NewGmailService(db, acct, cfg.GmailPollInterval)
+			if err != nil {
+				log.Printf("Warning: Gmail service [%s] failed to start: %v", acct.Name, err)
+				continue
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			gmailCancels = append(gmailCancels, cancel)
+			go gmailSvc.Start(ctx)
 		}
 	}
 
@@ -131,9 +133,9 @@ func main() {
 	<-quit
 	log.Println("Shutting down server...")
 
-	// Stop Gmail watcher
-	if gmailCancel != nil {
-		gmailCancel()
+	// Stop Gmail watchers
+	for _, cancel := range gmailCancels {
+		cancel()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -21,42 +21,44 @@ import (
 type GmailService struct {
 	db            *sql.DB
 	gmailSvc      *gmail.Service
+	name          string
 	senderFilters []string
 	pollInterval  time.Duration
 }
 
-func NewGmailService(db *sql.DB, cfg *config.Config) (*GmailService, error) {
-	interval, err := time.ParseDuration(cfg.GmailPollInterval)
+func NewGmailService(db *sql.DB, acct config.GmailAccount, pollInterval string) (*GmailService, error) {
+	interval, err := time.ParseDuration(pollInterval)
 	if err != nil {
 		interval = 5 * time.Minute
 	}
 
 	oauthCfg := &oauth2.Config{
-		ClientID:     cfg.GmailClientID,
-		ClientSecret: cfg.GmailClientSecret,
+		ClientID:     acct.ClientID,
+		ClientSecret: acct.ClientSecret,
 		Endpoint:     google.Endpoint,
 		Scopes:       []string{gmail.GmailReadonlyScope},
 	}
 
-	token := &oauth2.Token{RefreshToken: cfg.GmailRefreshToken}
+	token := &oauth2.Token{RefreshToken: acct.RefreshToken}
 	client := oauthCfg.Client(context.Background(), token)
 
 	gmailSvc, err := gmail.NewService(context.Background(), option.WithHTTPClient(client))
 	if err != nil {
-		return nil, fmt.Errorf("creating Gmail service: %w", err)
+		return nil, fmt.Errorf("creating Gmail service for %s: %w", acct.Name, err)
 	}
 
 	return &GmailService{
 		db:            db,
 		gmailSvc:      gmailSvc,
-		senderFilters: cfg.GmailSenderFilters,
+		name:          acct.Name,
+		senderFilters: acct.SenderFilters,
 		pollInterval:  interval,
 	}, nil
 }
 
 // Start runs the Gmail polling loop until the context is cancelled.
 func (s *GmailService) Start(ctx context.Context) {
-	log.Printf("Gmail watcher started (polling every %s, watching %d senders)", s.pollInterval, len(s.senderFilters))
+	log.Printf("Gmail watcher [%s] started (polling every %s, watching %d senders)", s.name, s.pollInterval, len(s.senderFilters))
 
 	// Initial poll
 	s.poll(ctx)
@@ -67,7 +69,7 @@ func (s *GmailService) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Gmail watcher stopped")
+			log.Printf("Gmail watcher [%s] stopped", s.name)
 			return
 		case <-ticker.C:
 			s.poll(ctx)
@@ -135,7 +137,7 @@ func (s *GmailService) poll(ctx context.Context) {
 	}
 
 	if newTxns > 0 {
-		log.Printf("Gmail: processed %d new transactions", newTxns)
+		log.Printf("Gmail [%s]: processed %d new transactions", s.name, newTxns)
 		if err := SnapshotNetWorth(ctx, s.db); err != nil {
 			log.Printf("Gmail: error snapshotting net worth: %v", err)
 		}
