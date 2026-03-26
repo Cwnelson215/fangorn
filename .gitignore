@@ -19,5 +19,8 @@ frontend/.svelte-kit/
 # Teller credentials
 teller/
 
+# Google OAuth credentials
+client_secret*.json
+
 # OS
 .DS_Store

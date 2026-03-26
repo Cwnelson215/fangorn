@@ -20,10 +20,8 @@ type EmailParser interface {
 var registry []EmailParser
 
 func init() {
-	registry = []EmailParser{
-		&ChaseParser{},
-		&BofAParser{},
-	}
+	// Gesa and Fidelity email parsers will be added once sample emails are available.
+	registry = []EmailParser{}
 }
 
 // FindParser returns the first parser that can handle the given email.

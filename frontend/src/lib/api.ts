@@ -1,4 +1,4 @@
-import type { Account, Transaction, Dashboard, Transfer, ImportResult } from './types';
+import type { Account, Transaction, Dashboard, Transfer, ImportResult, DetectResult, BankFormatConfig } from './types';
 
 const BASE = '';
 
@@ -109,4 +109,24 @@ export async function importCSV(file: File, bankName: string, accountId?: number
 		throw new Error(body.error || res.statusText);
 	}
 	return res.json();
+}
+
+export async function detectCSVHeaders(file: File): Promise<DetectResult> {
+	const formData = new FormData();
+	formData.append('file', file);
+
+	const res = await fetch('/api/import/csv/detect', { method: 'POST', body: formData });
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({ error: res.statusText }));
+		throw new Error(body.error || res.statusText);
+	}
+	return res.json();
+}
+
+export async function saveBankFormat(format: BankFormatConfig): Promise<void> {
+	await fetchJSON('/api/import/csv/format', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(format)
+	});
 }

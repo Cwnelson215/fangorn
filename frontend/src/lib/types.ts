@@ -58,6 +58,20 @@ export interface Transfer {
 	destination_account_name: string;
 }
 
+export interface DetectResult {
+	headers: string[];
+	preview_rows: string[][];
+}
+
+export interface BankFormatConfig {
+	bank_name: string;
+	date_column: string;
+	amount_column: string;
+	description_column: string;
+	category_column?: string;
+	negate_amounts: boolean;
+}
+
 export interface Dashboard {
 	from: string;
 	to: string;

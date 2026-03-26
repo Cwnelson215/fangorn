@@ -36,6 +36,8 @@ func main() {
 	accountsH := handlers.NewAccountsHandler(db)
 	txnH := handlers.NewTransactionsHandler(db)
 	dashH := handlers.NewDashboardHandler(db)
+	transferSvc := services.NewTransferService(db, cfg.EncryptionKey)
+	transferH := handlers.NewTransferHandler(transferSvc)
 
 	mux := http.NewServeMux()
 
@@ -51,9 +53,20 @@ func main() {
 
 	// CSV import routes
 	importSvc := services.NewCSVImportService(db)
+	if err := importSvc.LoadBankFormats(context.Background()); err != nil {
+		log.Printf("Warning: failed to load saved bank formats: %v", err)
+	}
 	importH := handlers.NewCSVImportHandler(importSvc)
 	mux.HandleFunc("POST /api/import/csv", importH.Upload)
 	mux.HandleFunc("GET /api/import/banks", importH.SupportedBanks)
+	mux.HandleFunc("POST /api/import/csv/detect", importH.DetectHeaders)
+	mux.HandleFunc("POST /api/import/csv/format", importH.SaveBankFormat)
+
+	// Transfer routes
+	mux.HandleFunc("POST /api/transfers", transferH.Create)
+	mux.HandleFunc("GET /api/transfers", transferH.List)
+	mux.HandleFunc("POST /api/transfers/{id}/refresh", transferH.Refresh)
+	mux.HandleFunc("POST /api/transfers/{id}/cancel", transferH.Cancel)
 
 	// Teller routes (behind feature flag)
 	if cfg.TellerEnabled {

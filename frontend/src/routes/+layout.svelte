@@ -38,8 +38,8 @@
 				<a href="/">Dashboard</a>
 				<a href="/accounts">Accounts</a>
 				<a href="/transactions">Transactions</a>
+				<a href="/transfers">Transfers</a>
 				<a href="/import">Import</a>
-				<a href="/link">Link Account</a>
 			</div>
 		</nav>
 		<main>
