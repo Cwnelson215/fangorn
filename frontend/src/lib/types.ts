@@ -1,6 +1,6 @@
 export interface Account {
 	id: number;
-	teller_account_id: string;
+	external_account_id: string | null;
 	name: string;
 	official_name: string | null;
 	type: string;
@@ -10,11 +10,12 @@ export interface Account {
 	available_balance: number | null;
 	iso_currency_code: string;
 	institution_name: string | null;
+	source: string;
 }
 
 export interface Transaction {
 	id: number;
-	teller_transaction_id: string;
+	external_id: string | null;
 	account_id: number;
 	amount: number;
 	iso_currency_code: string;
@@ -24,6 +25,13 @@ export interface Transaction {
 	category: string | null;
 	pending: boolean;
 	account_name: string;
+	source: string;
+}
+
+export interface ImportResult {
+	imported: number;
+	skipped: number;
+	account_id: number;
 }
 
 export interface CategoryBreakdown {

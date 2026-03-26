@@ -32,19 +32,10 @@ func main() {
 		log.Fatalf("Database migration failed: %v", err)
 	}
 
-	tellerSvc := services.NewTellerService(cfg)
-	syncSvc := services.NewSyncService(db, tellerSvc, cfg.EncryptionKey)
-	// Transfer feature disabled — keeping code for future use
-	// transferSvc := services.NewTransferService(db, cfg.EncryptionKey)
-
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
-	configH := handlers.NewConfigHandler(cfg.TellerAppID)
-	linkH := handlers.NewLinkHandler(syncSvc)
 	accountsH := handlers.NewAccountsHandler(db)
 	txnH := handlers.NewTransactionsHandler(db)
-	syncH := handlers.NewSyncHandler(syncSvc)
 	dashH := handlers.NewDashboardHandler(db)
-	// transferH := handlers.NewTransferHandler(transferSvc)
 
 	mux := http.NewServeMux()
 
@@ -52,20 +43,44 @@ func main() {
 	mux.HandleFunc("POST /api/login", authH.Login)
 	mux.HandleFunc("GET /api/auth/status", authH.Status)
 
-	// API routes
+	// Core API routes
 	mux.HandleFunc("GET /health", handlers.Health)
-	mux.HandleFunc("GET /api/config", configH.Get)
-	mux.HandleFunc("POST /api/link-account", linkH.LinkAccount)
 	mux.HandleFunc("GET /api/accounts", accountsH.List)
 	mux.HandleFunc("GET /api/transactions", txnH.List)
-	mux.HandleFunc("POST /api/sync", syncH.Sync)
 	mux.HandleFunc("GET /api/dashboard", dashH.Get)
-	// Transfer endpoints disabled — keeping code for future use
-	// mux.HandleFunc("POST /api/transfers", transferH.Create)
-	// mux.HandleFunc("GET /api/transfers", transferH.List)
-	// mux.HandleFunc("GET /api/transfers/{id}", transferH.Get)
-	// mux.HandleFunc("POST /api/transfers/{id}/refresh", transferH.Refresh)
-	// mux.HandleFunc("POST /api/transfers/{id}/cancel", transferH.Cancel)
+
+	// CSV import routes
+	importSvc := services.NewCSVImportService(db)
+	importH := handlers.NewCSVImportHandler(importSvc)
+	mux.HandleFunc("POST /api/import/csv", importH.Upload)
+	mux.HandleFunc("GET /api/import/banks", importH.SupportedBanks)
+
+	// Teller routes (behind feature flag)
+	if cfg.TellerEnabled {
+		tellerSvc := services.NewTellerService(cfg)
+		syncSvc := services.NewSyncService(db, tellerSvc, cfg.EncryptionKey)
+		configH := handlers.NewConfigHandler(cfg.TellerAppID)
+		linkH := handlers.NewLinkHandler(syncSvc)
+		syncH := handlers.NewSyncHandler(syncSvc)
+
+		mux.HandleFunc("GET /api/config", configH.Get)
+		mux.HandleFunc("POST /api/link-account", linkH.LinkAccount)
+		mux.HandleFunc("POST /api/sync", syncH.Sync)
+		log.Println("Teller integration enabled")
+	}
+
+	// Gmail watcher (behind feature flag)
+	var gmailCancel context.CancelFunc
+	if cfg.GmailEnabled {
+		gmailSvc, err := services.NewGmailService(db, cfg)
+		if err != nil {
+			log.Printf("Warning: Gmail service failed to start: %v", err)
+		} else {
+			var gmailCtx context.Context
+			gmailCtx, gmailCancel = context.WithCancel(context.Background())
+			go gmailSvc.Start(gmailCtx)
+		}
+	}
 
 	// Serve embedded frontend with SPA fallback
 	frontendFS, err := fs.Sub(fangorn.FrontendAssets, "frontend/build")
@@ -115,6 +130,11 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down server...")
+
+	// Stop Gmail watcher
+	if gmailCancel != nil {
+		gmailCancel()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

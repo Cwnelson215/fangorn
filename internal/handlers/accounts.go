@@ -15,11 +15,11 @@ func NewAccountsHandler(db *sql.DB) *AccountsHandler {
 
 func (h *AccountsHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT a.id, a.teller_account_id, a.name, a.official_name, a.type, a.subtype,
+		`SELECT a.id, a.external_account_id, a.name, a.official_name, a.type, a.subtype,
 		        a.mask, a.current_balance, a.available_balance, a.iso_currency_code,
-		        li.institution_name
+		        a.source, li.institution_name
 		 FROM accounts a
-		 JOIN linked_institutions li ON a.linked_institution_id = li.id
+		 LEFT JOIN linked_institutions li ON a.linked_institution_id = li.id
 		 ORDER BY a.type, a.name`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to fetch accounts")
@@ -28,25 +28,26 @@ func (h *AccountsHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type accountResp struct {
-		ID               int      `json:"id"`
-		TellerAccountID  string   `json:"teller_account_id"`
-		Name             string   `json:"name"`
-		OfficialName     *string  `json:"official_name"`
-		Type             string   `json:"type"`
-		Subtype          *string  `json:"subtype"`
-		Mask             *string  `json:"mask"`
-		CurrentBalance   *float64 `json:"current_balance"`
-		AvailableBalance *float64 `json:"available_balance"`
-		IsoCurrencyCode  string   `json:"iso_currency_code"`
-		InstitutionName  *string  `json:"institution_name"`
+		ID                int      `json:"id"`
+		ExternalAccountID *string  `json:"external_account_id"`
+		Name              string   `json:"name"`
+		OfficialName      *string  `json:"official_name"`
+		Type              string   `json:"type"`
+		Subtype           *string  `json:"subtype"`
+		Mask              *string  `json:"mask"`
+		CurrentBalance    *float64 `json:"current_balance"`
+		AvailableBalance  *float64 `json:"available_balance"`
+		IsoCurrencyCode   string   `json:"iso_currency_code"`
+		Source            string   `json:"source"`
+		InstitutionName   *string  `json:"institution_name"`
 	}
 
 	var accounts []accountResp
 	for rows.Next() {
 		var a accountResp
-		if err := rows.Scan(&a.ID, &a.TellerAccountID, &a.Name, &a.OfficialName,
+		if err := rows.Scan(&a.ID, &a.ExternalAccountID, &a.Name, &a.OfficialName,
 			&a.Type, &a.Subtype, &a.Mask, &a.CurrentBalance, &a.AvailableBalance,
-			&a.IsoCurrencyCode, &a.InstitutionName); err != nil {
+			&a.IsoCurrencyCode, &a.Source, &a.InstitutionName); err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to scan account")
 			return
 		}

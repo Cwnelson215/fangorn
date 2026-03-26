@@ -18,7 +18,7 @@ type LinkedInstitution struct {
 type Account struct {
 	ID                  int              `json:"id"`
 	LinkedInstitutionID int              `json:"linked_institution_id"`
-	TellerAccountID     string           `json:"teller_account_id"`
+	ExternalAccountID   *string          `json:"external_account_id"`
 	Name                string           `json:"name"`
 	OfficialName        *string          `json:"official_name"`
 	Type                string           `json:"type"`
@@ -27,22 +27,24 @@ type Account struct {
 	CurrentBalance      *sql.NullFloat64 `json:"current_balance"`
 	AvailableBalance    *sql.NullFloat64 `json:"available_balance"`
 	IsoCurrencyCode     string           `json:"iso_currency_code"`
+	Source              string           `json:"source"`
 	UpdatedAt           time.Time        `json:"updated_at"`
 }
 
 type Transaction struct {
-	ID                   int       `json:"id"`
-	TellerTransactionID  string    `json:"teller_transaction_id"`
-	AccountID            int       `json:"account_id"`
-	Amount               float64   `json:"amount"`
-	IsoCurrencyCode      string    `json:"iso_currency_code"`
-	Date                 string    `json:"date"`
-	Name                 string    `json:"name"`
-	MerchantName         *string   `json:"merchant_name"`
-	Category             *string   `json:"category"`
-	Pending              bool      `json:"pending"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID              int       `json:"id"`
+	ExternalID      *string   `json:"external_id"`
+	AccountID       int       `json:"account_id"`
+	Amount          float64   `json:"amount"`
+	IsoCurrencyCode string    `json:"iso_currency_code"`
+	Date            string    `json:"date"`
+	Name            string    `json:"name"`
+	MerchantName    *string   `json:"merchant_name"`
+	Category        *string   `json:"category"`
+	Pending         bool      `json:"pending"`
+	Source          string    `json:"source"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Transfer struct {

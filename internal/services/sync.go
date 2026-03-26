@@ -69,9 +69,9 @@ func (s *SyncService) LinkInstitution(ctx context.Context, accessToken string, i
 		}
 
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO accounts (linked_institution_id, teller_account_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code)
+			`INSERT INTO accounts (linked_institution_id, external_account_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			 ON CONFLICT (teller_account_id) DO UPDATE SET
+			 ON CONFLICT (external_account_id) DO UPDATE SET
 			   name = EXCLUDED.name, current_balance = EXCLUDED.current_balance,
 			   available_balance = EXCLUDED.available_balance, updated_at = NOW()`,
 			instID, acct.ID, acct.Name,
@@ -160,7 +160,7 @@ func (s *SyncService) syncInstitution(ctx context.Context, instID int, encrypted
 			}
 			_, err = s.db.ExecContext(ctx,
 				`UPDATE accounts SET current_balance = $1, available_balance = $2, updated_at = NOW()
-				 WHERE teller_account_id = $3`,
+				 WHERE external_account_id = $3`,
 				currentBal, availBal, acct.ID,
 			)
 			if err != nil {
@@ -178,7 +178,7 @@ func (s *SyncService) syncInstitution(ctx context.Context, instID int, encrypted
 		// Get internal account ID
 		var accountID int
 		err = s.db.QueryRowContext(ctx,
-			`SELECT id FROM accounts WHERE teller_account_id = $1`, acct.ID,
+			`SELECT id FROM accounts WHERE external_account_id = $1`, acct.ID,
 		).Scan(&accountID)
 		if err != nil {
 			log.Printf("Account not found for teller account %s: %v", acct.ID, err)
@@ -203,9 +203,9 @@ func (s *SyncService) syncInstitution(ctx context.Context, instID int, encrypted
 			category := txn.Details.Category
 
 			result, err := s.db.ExecContext(ctx,
-				`INSERT INTO transactions (teller_transaction_id, account_id, amount, iso_currency_code, date, name, merchant_name, category, pending)
+				`INSERT INTO transactions (external_id, account_id, amount, iso_currency_code, date, name, merchant_name, category, pending)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-				 ON CONFLICT (teller_transaction_id) DO UPDATE SET
+				 ON CONFLICT (external_id) DO UPDATE SET
 				   amount = EXCLUDED.amount, name = EXCLUDED.name, merchant_name = EXCLUDED.merchant_name,
 				   category = EXCLUDED.category, pending = EXCLUDED.pending, updated_at = NOW()`,
 				txn.ID, accountID, amount, "USD",
@@ -237,7 +237,7 @@ func (s *SyncService) syncInstitution(ctx context.Context, instID int, encrypted
 	}
 
 	// Snapshot net worth
-	if err := s.snapshotNetWorth(ctx); err != nil {
+	if err := SnapshotNetWorth(ctx, s.db); err != nil {
 		log.Printf("Error snapshotting net worth: %v", err)
 	}
 
@@ -245,29 +245,6 @@ func (s *SyncService) syncInstitution(ctx context.Context, instID int, encrypted
 	return nil
 }
 
-func (s *SyncService) snapshotNetWorth(ctx context.Context) error {
-	var assets, liabilities float64
-
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN type IN ('depository', 'investment') THEN COALESCE(current_balance, 0) ELSE 0 END), 0),
-		        COALESCE(SUM(CASE WHEN type IN ('credit', 'loan') THEN COALESCE(current_balance, 0) ELSE 0 END), 0)
-		 FROM accounts`,
-	).Scan(&assets, &liabilities)
-	if err != nil {
-		return err
-	}
-
-	today := time.Now().Format("2006-01-02")
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO net_worth_snapshots (total_assets, total_liabilities, net_worth, snapshot_date)
-		 VALUES ($1, $2, $3, $4)
-		 ON CONFLICT (snapshot_date) DO UPDATE SET
-		   total_assets = EXCLUDED.total_assets, total_liabilities = EXCLUDED.total_liabilities,
-		   net_worth = EXCLUDED.net_worth`,
-		assets, liabilities, assets-liabilities, today,
-	)
-	return err
-}
 
 func nullStr(s string) *string {
 	if s == "" {

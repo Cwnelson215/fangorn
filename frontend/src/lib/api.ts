@@ -1,4 +1,4 @@
-import type { Account, Transaction, Dashboard, Transfer } from './types';
+import type { Account, Transaction, Dashboard, Transfer, ImportResult } from './types';
 
 const BASE = '';
 
@@ -91,4 +91,22 @@ export async function cancelTransfer(id: number): Promise<void> {
 
 export async function getConfig(): Promise<{ teller_app_id: string }> {
 	return fetchJSON<{ teller_app_id: string }>('/api/config');
+}
+
+export async function getSupportedBanks(): Promise<string[]> {
+	return fetchJSON<string[]>('/api/import/banks');
+}
+
+export async function importCSV(file: File, bankName: string, accountId?: number): Promise<ImportResult> {
+	const formData = new FormData();
+	formData.append('file', file);
+	formData.append('bank_name', bankName);
+	if (accountId !== undefined) formData.append('account_id', String(accountId));
+
+	const res = await fetch('/api/import/csv', { method: 'POST', body: formData });
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({ error: res.statusText }));
+		throw new Error(body.error || res.statusText);
+	}
+	return res.json();
 }
