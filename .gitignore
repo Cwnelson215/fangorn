@@ -10,10 +10,14 @@ frontend/.svelte-kit/
 # Environment
 .env
 .env.*
+!.env.example
 
 # IDE
 .vscode/
 .idea/
+
+# Teller credentials
+teller/
 
 # OS
 .DS_Store

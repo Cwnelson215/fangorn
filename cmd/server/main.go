@@ -34,7 +34,8 @@ func main() {
 
 	tellerSvc := services.NewTellerService(cfg)
 	syncSvc := services.NewSyncService(db, tellerSvc, cfg.EncryptionKey)
-	transferSvc := services.NewTransferService(db, cfg.EncryptionKey)
+	// Transfer feature disabled — keeping code for future use
+	// transferSvc := services.NewTransferService(db, cfg.EncryptionKey)
 
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
 	configH := handlers.NewConfigHandler(cfg.TellerAppID)
@@ -43,7 +44,7 @@ func main() {
 	txnH := handlers.NewTransactionsHandler(db)
 	syncH := handlers.NewSyncHandler(syncSvc)
 	dashH := handlers.NewDashboardHandler(db)
-	transferH := handlers.NewTransferHandler(transferSvc)
+	// transferH := handlers.NewTransferHandler(transferSvc)
 
 	mux := http.NewServeMux()
 
@@ -59,11 +60,12 @@ func main() {
 	mux.HandleFunc("GET /api/transactions", txnH.List)
 	mux.HandleFunc("POST /api/sync", syncH.Sync)
 	mux.HandleFunc("GET /api/dashboard", dashH.Get)
-	mux.HandleFunc("POST /api/transfers", transferH.Create)
-	mux.HandleFunc("GET /api/transfers", transferH.List)
-	mux.HandleFunc("GET /api/transfers/{id}", transferH.Get)
-	mux.HandleFunc("POST /api/transfers/{id}/refresh", transferH.Refresh)
-	mux.HandleFunc("POST /api/transfers/{id}/cancel", transferH.Cancel)
+	// Transfer endpoints disabled — keeping code for future use
+	// mux.HandleFunc("POST /api/transfers", transferH.Create)
+	// mux.HandleFunc("GET /api/transfers", transferH.List)
+	// mux.HandleFunc("GET /api/transfers/{id}", transferH.Get)
+	// mux.HandleFunc("POST /api/transfers/{id}/refresh", transferH.Refresh)
+	// mux.HandleFunc("POST /api/transfers/{id}/cancel", transferH.Cancel)
 
 	// Serve embedded frontend with SPA fallback
 	frontendFS, err := fs.Sub(fangorn.FrontendAssets, "frontend/build")
