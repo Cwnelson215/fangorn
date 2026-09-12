@@ -4,80 +4,156 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Repo Is
 
-A personal finance dashboard that connects to real bank accounts via the Teller API, syncs transactions, categorizes spending, tracks income/expenses, calculates net worth, and visualizes financial data. Go backend, SvelteKit frontend with D3.js visualizations. Deployed on the portfolio platform as a containerized service on AWS ECS Fargate.
+A **family finance app kept on paper**. You enter each account's starting balance, and everyone in
+the household logs transactions by hand from there — nothing connects to a bank. It tracks accounts
+and running balances, categorized income and spending, transfers between your own accounts,
+recurring subscriptions and scheduled transfers that post themselves, monthly category budgets,
+savings goals, and net worth over time. Go backend, SvelteKit frontend with D3 visualizations.
+
+It **used** to sync real accounts through the Teller API, import CSV statements, and scrape bank
+notification emails out of Gmail. That code is not deleted — it lives in `_deprecated/`, which the
+Go toolchain ignores because the directory name starts with `_`. See `_deprecated/README.md`.
 
 ## Tech Stack
 
-- **Backend:** Go, PostgreSQL (shared platform RDS)
-- **Frontend:** SvelteKit, TypeScript, D3.js (data visualization)
-- **External APIs:** Teller (bank account linking, transaction sync)
-- **Infrastructure:** Pulumi (TypeScript), AWS ECS Fargate, Secrets Manager
+- **Backend:** Go (stdlib `net/http`, `database/sql` + `lib/pq`, `golang-migrate`) — no ORM, no
+  router library, no DI framework. Raw SQL, written out.
+- **Frontend:** SvelteKit (Svelte 5 runes), TypeScript, D3. Static adapter — a pure SPA that the Go
+  binary embeds and serves. No Tailwind, no component library.
+- **Database:** PostgreSQL
+- **Infrastructure:** Pulumi (TypeScript), AWS ECS Fargate — see "Migration status" below
 
 ## Commands
 
 ```bash
-# Application (Go backend)
-go run ./cmd/server      # Run locally (http://localhost:3000)
-go build ./cmd/server    # Build binary
-go test ./...            # Run tests
-
-# Frontend (SvelteKit)
-cd frontend && npm run dev    # Dev server
-cd frontend && npm run build  # Production build
-
-# Infrastructure (Pulumi)
-npm run preview          # Preview infra changes
-npm run up               # Deploy infra
-npm run destroy          # Tear down infra
+docker compose up -d          # Postgres for local dev
+source .env && go run ./cmd/server   # backend on :3000
+go test ./...
+cd frontend && npm run dev    # Vite on :5173, proxies /api and /health to :3000
+cd frontend && npm run check  # svelte-check — keep this clean
+cd frontend && npm run build  # required before `go build`; the binary embeds frontend/build
 ```
+
+## The Two Conventions That Matter
+
+**1. Amounts are signed relative to the account.** Positive = money in, negative = money out.
+Liability accounts (`credit_card`, `loan`) therefore carry **negative** balances. This makes both of
+these correct for every account type with no special-casing:
+
+```
+balance   = starting_balance + SUM(amount)
+net worth = SUM(balance)
+```
+
+The API accepts a **positive magnitude** and applies the sign from `kind` — nobody logging groceries
+should have to type a minus sign. Same for account starting balances: the form asks a credit card
+for "amount owed" as a positive number and negates it.
+
+**2. A transfer is two transaction rows, not a table.** Both share a `transfer_group_id`: a negative
+leg on the source, a positive leg on the destination. Each side appears in its own account's
+register for free, and income/expense totals everywhere exclude `kind = 'transfer'` — moving your
+own money is neither earning nor spending it. Mutations go through `ledger.CreateTransfer` /
+`UpdateTransfer` / `DeleteTransfer`, which operate on the whole group in one transaction. Editing a
+single leg through `/api/transactions` is rejected; deleting one leg deletes both.
 
 ## Architecture
 
-**App contract:** The container must (1) listen on the configured port (default 3000) and (2) expose `GET /health` returning HTTP 200.
+**App contract:** listen on `PORT` (default 3000), expose `GET /health` (dependency-free, 200) and
+`GET /ready` (pings the DB, 503 when it is down).
 
-**Infrastructure (`index.ts`):** Defines app-specific AWS resources:
-- ECR repository (`portfolio/fangorn`) with lifecycle policy (keep last 10 images)
-- Security group allowing traffic from the shared ALB
-- ALB target group + host-based listener rule (`fangorn.cwnel.com`)
-- ECS Fargate task definition + service (Fargate Spot by default)
-- Secrets Manager entries for Teller API credentials and encryption key
-- Scheduled scaling (scale to zero at 10 PM, up at 6 AM Mountain)
+```
+cmd/server/main.go        wiring: config -> db -> migrate -> ledger service -> routes -> scheduler
+internal/config/          env -> Config
+internal/database/        Connect, RunMigrations, embedded migrations/
+internal/models/          domain types + the enum constants; ClassForType
+internal/recurring/       PURE date engine — no DB, no clock. The best-tested code here.
+internal/ledger/          every read and write against the ledger
+internal/scheduler/       posts due recurring items, snapshots net worth
+internal/handlers/        HTTP layer
+internal/middleware/      auth, CORS, logging
+internal/crypto/          AES-GCM (unused today; kept for future invite tokens)
+frontend/                 SvelteKit SPA
+_deprecated/              the bank-sync era, not compiled
+```
 
-All shared resources (VPC, ALB, ECS cluster, Route53, ACM, CloudWatch log group, RDS) come from the platform stack and are imported via `pulumi.StackReference`.
+**`internal/ledger` is where SQL lives.** Handlers hold the service, not `*sql.DB`. That split
+exists because balance math, transfer pairing, and recurring posting are needed by both the HTTP
+layer and the background scheduler, and duplicating them is how the two drift apart.
 
-## Project Status
+**Tenancy:** every table carries `household_id` and every query filters on it. There is one
+household today and `main.go` resolves it once at boot, but the scoping is written in so adding real
+users is additive rather than a rewrite.
 
-Backend (Go), frontend (SvelteKit), and database migrations are implemented. Uses Teller API for bank account linking and transaction sync.
+## The Recurring Engine
 
-## Key Files
+`internal/recurring` computes occurrence dates by **index from a fixed anchor**, never by adding an
+interval to the previous occurrence. That is what makes month-end rules behave: a rule anchored on
+the 31st fires Feb 28, then returns to Mar 31 rather than sticking at the 28th. It also means no
+accumulated drift. Supports daily, weekly, biweekly, semimonthly, monthly, quarterly, yearly, each
+with an interval multiplier.
 
-- `index.ts` — Pulumi infrastructure definition
-- `Pulumi.yaml` / `Pulumi.dev.yaml` — Project metadata and environment config
-- `Dockerfile` — Multi-stage build: `golang:1.22-alpine` → `alpine:3.19`, runs as non-root user
-- `.github/workflows/deploy.yml.txt` — CI/CD pipeline (renamed to .txt for local development)
+`internal/scheduler` runs on a ticker (`SCHEDULER_INTERVAL`, default 5m) with an immediate pass on
+boot, under a `pg_try_advisory_lock`. It is **idempotent rather than reliable**:
 
-**Application structure:**
-- `cmd/server/` — Go server entry point
-- `internal/` — Go application code (handlers, services, models, Teller client)
-- `frontend/` — SvelteKit app with D3.js visualizations
+- `recurring_occurrences` has `UNIQUE (rule_id, due_date)` — re-materializing is a no-op
+- posting flips `scheduled` → `posted` in the same transaction that writes the ledger rows, guarded
+  by the current status, so a lost race rolls back instead of double-posting
+- net worth snapshots upsert on `(household_id, snapshot_date)`
 
-## Dockerfile Contract
+So a tick can run twice, overlap another process, or not run for a week, and the ledger still lands
+correct. That last case is not hypothetical: the AWS deployment scales to zero overnight
+(`Pulumi.dev.yaml: enableScheduledScaling`), so anything due at 2 AM has to be picked up when the
+container next wakes. "Today" is computed in the **household's** timezone, not the server's.
 
-The Go binary must build as: `CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server`. The Dockerfile expects `go.mod` and `go.sum` at the repo root. The runtime container uses Alpine with `ca-certificates` and `curl` installed.
+## Migrations
+
+`internal/database/migrations/NNN_snake_case.{up,down}.sql`, embedded and applied at every boot.
+`001`–`005` are the bank-sync era, kept as history. **`006_family_ledger` is the current schema** —
+it drops everything from before and creates households, accounts, categories, transactions,
+recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_worth_snapshots.
 
 ## Conventions
 
-- **Naming:** Resources prefixed with `appName`. All tagged with Project, App, ManagedBy.
-- **Config:** Environment-specific values in `Pulumi.{stack}.yaml`. Secrets via `pulumi config set --secret`.
-- **Logs:** CloudWatch at `/ecs/portfolio-dev/fangorn`, 14-day retention.
-- **Platform stack reference:** `cwnelson/portfolio-platform/dev`
-- **Health check:** `GET /health` must return HTTP 200.
-- **Environment variables injected by infra:** `PORT`, `TELLER_APP_ID`, `TELLER_ENV`, `TELLER_CERT_PATH`, `TELLER_KEY_PATH`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `ENCRYPTION_KEY`
-- **ECS config:** 256 CPU / 512 MB memory, Fargate Spot with On-Demand fallback, us-east-1
-- **CI/CD:** GitHub Actions on push to main — builds Docker image, tags with commit SHA + `latest`, pushes to ECR, runs `pulumi up`, force-deploys ECS service
+- **Errors:** `ledger.ErrNotFound` → 404, `ledger.ErrInvalid` → 400 with its message passed through
+  to the user, anything else → logged in full, 500 with a generic message. All via `handlers.fail`.
+- **Ownership:** foreign keys do not know about tenancy, so `assertAccount` / `assertCategory` check
+  household scope before any write that references them.
+- **JSON:** request decoding uses `DisallowUnknownFields` so a typo'd field name fails loudly.
+- **Dates:** `YYYY-MM-DD` everywhere, on the wire and in the DB. `lib/pq` returns `time.Time` for
+  DATE columns, so reads go through `ledger.dateStr`.
+- **Frontend:** shared formatters in `src/lib/format.ts`, design tokens as CSS custom properties in
+  `+layout.svelte`, form primitives in `src/lib/components/{Field,Button,Modal}.svelte`. Use them
+  rather than re-declaring `Intl.NumberFormat` or hex colours per page.
+- **Health check:** `GET /health` must return 200.
+- **Env vars:** `PORT`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`,
+  `APP_PASSWORD`, `SCHEDULER_INTERVAL`, `SCHEDULER_HORIZON_DAYS`
 
-## Security Notes
+## Auth
 
-- Teller access tokens (returned after account linking) must be encrypted at rest using `ENCRYPTION_KEY` before storing in PostgreSQL
-- Never log Teller access tokens or financial data
-- PII (account numbers, balances) should be treated as sensitive — no client-side caching in localStorage
+Still a **single shared password** (`APP_PASSWORD`) with an HMAC cookie, unchanged from before the
+pivot. Note what it is not: the cookie value is a constant, identical for every login forever, with
+no expiry and no revocation. If `APP_PASSWORD` is unset, auth is disabled entirely.
+
+Real accounts — email/password users, email invites, and passkey-or-PIN device unlock — are planned
+but not built. The schema is already shaped for it.
+
+## Gotchas
+
+- **`frontend/build` must exist before `go build`.** `frontend.go` embeds it with
+  `//go:embed all:frontend/build`, so a stale or missing build silently ships the wrong UI.
+- **Quote values in the Postgres DSN.** `lib/pq` skips whitespace after `=`, so an unquoted empty
+  value swallows the next token — `password= dbname=fangorn` parses as `password="dbname=fangorn"`
+  with no dbname, and libpq then connects to a database named after the user. `Config.DSN` quotes
+  and escapes every value; `internal/config/config_test.go` guards it.
+- **`Dockerfile` must match `go.mod`'s Go version.** They drifted once (1.22 vs 1.26) and the image
+  build failed.
+- **GHCR images are public.** `.dockerignore` excludes `.env*`, `teller/`, `client_secret*.json`,
+  `*.pem`, `*.key` — `Dockerfile` does `COPY . .`, and the GHA cache exports intermediate layers.
+
+## Migration Status
+
+Still on AWS ECS Fargate via Pulumi (`index.ts`), fronted by the shared platform ALB at
+`fangorn.cwnel.com`. **Moving to the k3s cluster** (`bulbasaur`) is planned but not started — it
+matters here because the ECS service scales to zero 10 PM–6 AM, which the scheduler's catch-up
+design already tolerates. Per the rule in `~/Dev/portfolio/CLAUDE.md`, the AWS stack stays
+authoritative until a k3s deploy is proven.

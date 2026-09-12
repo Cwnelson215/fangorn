@@ -18,9 +18,11 @@ func Auth(appPassword string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Exempt paths
+			// Exempt paths. /health and /ready are container probes and must stay
+			// reachable without a session or the pod never comes up.
 			path := r.URL.Path
-			if path == "/health" || path == "/api/login" || path == "/api/auth/status" ||
+			if path == "/health" || path == "/ready" || path == "/api/login" ||
+				path == "/api/logout" || path == "/api/auth/status" ||
 				path == "/login" || strings.HasPrefix(path, "/_app/") {
 				next.ServeHTTP(w, r)
 				return

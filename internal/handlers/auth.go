@@ -34,6 +34,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// Logout clears the session cookie. The route was never registered before the
+// pivot even though the middleware helper existed, so there was no way to sign
+// out of a shared-password session.
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	middleware.ClearSessionCookie(w)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if h.appPassword == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "required": false})

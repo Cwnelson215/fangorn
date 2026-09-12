@@ -1,120 +1,108 @@
 package config
 
 import (
-	"fmt"
+	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
-type GmailAccount struct {
-	Name          string   // label for logging (e.g. "personal", "work")
-	ClientID      string
-	ClientSecret  string
-	RefreshToken  string
-	SenderFilters []string
-}
-
 type Config struct {
-	Port           string
-	TellerAppID    string
-	TellerEnv      string
-	TellerCertPath string
-	TellerKeyPath  string
-	TellerEnabled  bool
-	DBHost         string
-	DBPort         string
-	DBName         string
-	DBUser         string
-	DBPassword     string
-	EncryptionKey  string
-	DBSSLMode      string
-	AppPassword    string
-	// Gmail watcher
-	GmailEnabled      bool
-	GmailAccounts     []GmailAccount
-	GmailPollInterval string
+	Port        string
+	DBHost      string
+	DBPort      string
+	DBName      string
+	DBUser      string
+	DBPassword  string
+	DBSSLMode   string
+	AppPassword string
+
+	// SchedulerInterval controls how often the recurring/snapshot scheduler ticks.
+	SchedulerInterval time.Duration
+	// SchedulerHorizonDays is how far past today occurrences are materialized so the
+	// UI can show upcoming charges without posting them.
+	SchedulerHorizonDays int
 }
 
 func Load() *Config {
-	// Load Gmail accounts: supports GMAIL_1_*, GMAIL_2_*, etc.
-	// Also supports legacy single-account GMAIL_CLIENT_ID for backwards compat.
-	var gmailAccounts []GmailAccount
-
-	for i := 1; i <= 10; i++ {
-		prefix := fmt.Sprintf("GMAIL_%d_", i)
-		clientID := os.Getenv(prefix + "CLIENT_ID")
-		if clientID == "" {
-			break
-		}
-		acct := GmailAccount{
-			Name:         getEnv(prefix+"NAME", fmt.Sprintf("account-%d", i)),
-			ClientID:     clientID,
-			ClientSecret: os.Getenv(prefix + "CLIENT_SECRET"),
-			RefreshToken: os.Getenv(prefix + "REFRESH_TOKEN"),
-		}
-		if sf := os.Getenv(prefix + "SENDER_FILTERS"); sf != "" {
-			for _, s := range strings.Split(sf, ",") {
-				if t := strings.TrimSpace(s); t != "" {
-					acct.SenderFilters = append(acct.SenderFilters, t)
-				}
-			}
-		}
-		gmailAccounts = append(gmailAccounts, acct)
-	}
-
-	// Legacy single-account fallback
-	if len(gmailAccounts) == 0 {
-		if clientID := os.Getenv("GMAIL_CLIENT_ID"); clientID != "" {
-			acct := GmailAccount{
-				Name:         "default",
-				ClientID:     clientID,
-				ClientSecret: os.Getenv("GMAIL_CLIENT_SECRET"),
-				RefreshToken: os.Getenv("GMAIL_REFRESH_TOKEN"),
-			}
-			if sf := os.Getenv("GMAIL_SENDER_FILTERS"); sf != "" {
-				for _, s := range strings.Split(sf, ",") {
-					if t := strings.TrimSpace(s); t != "" {
-						acct.SenderFilters = append(acct.SenderFilters, t)
-					}
-				}
-			}
-			gmailAccounts = append(gmailAccounts, acct)
-		}
-	}
-
 	return &Config{
-		Port:              getEnv("PORT", "3000"),
-		TellerAppID:       os.Getenv("TELLER_APP_ID"),
-		TellerEnv:         getEnv("TELLER_ENV", "sandbox"),
-		TellerCertPath:    os.Getenv("TELLER_CERT_PATH"),
-		TellerKeyPath:     os.Getenv("TELLER_KEY_PATH"),
-		TellerEnabled:     getEnv("TELLER_ENABLED", "false") == "true",
-		DBHost:            getEnv("DB_HOST", "localhost"),
-		DBPort:            getEnv("DB_PORT", "5432"),
-		DBName:            getEnv("DB_NAME", "fangorn"),
-		DBUser:            getEnv("DB_USER", "postgres"),
-		DBPassword:        os.Getenv("DB_PASSWORD"),
-		EncryptionKey:     os.Getenv("ENCRYPTION_KEY"),
-		DBSSLMode:         getEnv("DB_SSLMODE", "require"),
-		AppPassword:       os.Getenv("APP_PASSWORD"),
-		GmailEnabled:      getEnv("GMAIL_ENABLED", "false") == "true",
-		GmailAccounts:     gmailAccounts,
-		GmailPollInterval: getEnv("GMAIL_POLL_INTERVAL", "5m"),
+		Port:                 getEnv("PORT", "3000"),
+		DBHost:               getEnv("DB_HOST", "localhost"),
+		DBPort:               getEnv("DB_PORT", "5432"),
+		DBName:               getEnv("DB_NAME", "fangorn"),
+		DBUser:               getEnv("DB_USER", "postgres"),
+		DBPassword:           os.Getenv("DB_PASSWORD"),
+		DBSSLMode:            getEnv("DB_SSLMODE", "require"),
+		AppPassword:          os.Getenv("APP_PASSWORD"),
+		SchedulerInterval:    getEnvDuration("SCHEDULER_INTERVAL", 5*time.Minute),
+		SchedulerHorizonDays: getEnvInt("SCHEDULER_HORIZON_DAYS", 60),
 	}
 }
 
+// DSN builds a libpq keyword/value connection string.
+//
+// Every value is single-quoted, which is not cosmetic. lib/pq's parser skips
+// whitespace after `=`, so an unquoted empty value swallows the following token:
+// `password= dbname=fangorn` parses as password="dbname=fangorn" with no dbname
+// at all, and libpq then silently falls back to connecting to a database named
+// after the user. That is a very confusing way to end up querying the wrong
+// database, and an empty password is normal against a trust-auth local Postgres.
 func (c *Config) DSN() string {
-	return "host=" + c.DBHost +
-		" port=" + c.DBPort +
-		" user=" + c.DBUser +
-		" password=" + c.DBPassword +
-		" dbname=" + c.DBName +
-		" sslmode=" + c.DBSSLMode
+	parts := [][2]string{
+		{"host", c.DBHost},
+		{"port", c.DBPort},
+		{"user", c.DBUser},
+		{"password", c.DBPassword},
+		{"dbname", c.DBName},
+		{"sslmode", c.DBSSLMode},
+	}
+
+	var b strings.Builder
+	for i, kv := range parts {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(kv[0])
+		b.WriteString("='")
+		// Backslashes and quotes have to be escaped inside a quoted value.
+		b.WriteString(dsnEscape.Replace(kv[1]))
+		b.WriteByte('\'')
+	}
+	return b.String()
 }
+
+var dsnEscape = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		log.Printf("config: %s=%q is not a valid duration, using %s", key, v, fallback)
+		return fallback
+	}
+	return d
+}
+
+func getEnvInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		log.Printf("config: %s=%q is not a positive integer, using %d", key, v, fallback)
+		return fallback
+	}
+	return n
 }

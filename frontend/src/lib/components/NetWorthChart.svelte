@@ -2,20 +2,21 @@
 	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
 	import type { NetWorthPoint } from '$lib/types';
+	import { formatCurrencyWhole, parseDate } from '$lib/format';
 
-	let { data }: { data: NetWorthPoint[] } = $props();
+	// The gradient id must be unique per instance: two charts on one page would
+	// otherwise both reference the same <linearGradient> and the second would
+	// silently restyle the first.
+	let { data, id = 'nw' }: { data: NetWorthPoint[]; id?: string } = $props();
 	let container: HTMLDivElement;
-
-	function formatCurrency(n: number): string {
-		return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
-	}
+	let gradientId = $derived(`${id}-gradient`);
 
 	function render() {
-		if (!container || data.length < 2) return;
-
+		if (!container) return;
 		d3.select(container).selectAll('*').remove();
+		if (data.length < 2) return;
 
-		const parsed = data.map(d => ({ date: new Date(d.date), value: d.net_worth }));
+		const parsed = data.map((d) => ({ date: parseDate(d.date), value: d.net_worth }));
 
 		const margin = { top: 20, right: 20, bottom: 40, left: 70 };
 		const width = container.clientWidth - margin.left - margin.right;
@@ -74,7 +75,7 @@
 		// Gradient fill
 		const gradient = svg.append('defs')
 			.append('linearGradient')
-			.attr('id', 'nw-gradient')
+			.attr('id', gradientId)
 			.attr('x1', '0').attr('y1', '0')
 			.attr('x2', '0').attr('y2', '1');
 		gradient.append('stop').attr('offset', '0%').attr('stop-color', '#45b7d1').attr('stop-opacity', 0.3);
@@ -82,7 +83,7 @@
 
 		svg.append('path')
 			.datum(parsed)
-			.attr('fill', 'url(#nw-gradient)')
+			.attr('fill', `url(#${gradientId})`)
 			.attr('d', area);
 
 		svg.append('path')
@@ -107,7 +108,7 @@
 			.attr('font-size', '0.8rem')
 			.attr('font-weight', '600')
 			.attr('fill', '#45b7d1')
-			.text(formatCurrency(latest.value));
+			.text(formatCurrencyWhole(latest.value));
 	}
 
 	onMount(render);

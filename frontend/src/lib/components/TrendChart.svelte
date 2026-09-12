@@ -2,23 +2,25 @@
 	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
 	import type { Transaction } from '$lib/types';
+	import { parseDate } from '$lib/format';
 
 	let { transactions }: { transactions: Transaction[] } = $props();
 	let container: HTMLDivElement;
 
 	function render() {
-		if (!container || transactions.length === 0) return;
-
+		if (!container) return;
 		d3.select(container).selectAll('*').remove();
+		if (transactions.length === 0) return;
 
-		// Aggregate by week
+		// Weekly spend. Expenses are negative under the ledger's sign convention,
+		// so they are filtered on `kind` and negated into positive magnitudes for
+		// the chart. Transfers are excluded — moving money is not spending it.
 		const byWeek = new Map<string, number>();
 		for (const txn of transactions) {
-			if (txn.amount <= 0) continue; // only expenses
-			const date = new Date(txn.date);
-			const week = d3.timeWeek.floor(date);
+			if (txn.kind !== 'expense') continue;
+			const week = d3.timeWeek.floor(parseDate(txn.date));
 			const key = week.toISOString().slice(0, 10);
-			byWeek.set(key, (byWeek.get(key) || 0) + txn.amount);
+			byWeek.set(key, (byWeek.get(key) || 0) + -txn.amount);
 		}
 
 		const data = Array.from(byWeek.entries())

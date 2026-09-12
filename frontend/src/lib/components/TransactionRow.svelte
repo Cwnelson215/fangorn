@@ -1,80 +1,139 @@
 <script lang="ts">
 	import type { Transaction } from '$lib/types';
+	import { formatCurrency, formatDateShort, formatSigned } from '$lib/format';
 
-	let { transaction }: { transaction: Transaction } = $props();
+	let {
+		transaction,
+		showAccount = true,
+		showRunningBalance = false,
+		onedit
+	}: {
+		transaction: Transaction;
+		showAccount?: boolean;
+		showRunningBalance?: boolean;
+		onedit?: (transaction: Transaction) => void;
+	} = $props();
 
-	function formatCurrency(n: number): string {
-		return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Math.abs(n));
-	}
-
-	function formatDate(dateStr: string): string {
-		const date = new Date(dateStr + 'T00:00:00');
-		return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-	}
+	let isTransfer = $derived(transaction.kind === 'transfer');
+	let isIncome = $derived(transaction.amount > 0 && !isTransfer);
+	let isExpense = $derived(transaction.amount < 0 && !isTransfer);
 </script>
 
-<div class="transaction-row" class:pending={transaction.pending}>
-	<span class="col-date">{formatDate(transaction.date)}</span>
-	<span class="col-name">
-		<span class="name">{transaction.merchant_name || transaction.name}</span>
-		{#if transaction.merchant_name && transaction.merchant_name !== transaction.name}
-			<span class="subtext">{transaction.name}</span>
+{#snippet cells()}
+	<span class="date">{formatDateShort(transaction.date)}</span>
+
+	<span class="desc">
+		<span class="name">{transaction.description}</span>
+		<span class="subtext">
+			{#if transaction.merchant}{transaction.merchant}{/if}
+			{#if showAccount && transaction.account_name}
+				{#if transaction.merchant}·{/if}
+				{transaction.account_name}
+			{/if}
+			{#if transaction.source === 'recurring'}· auto{/if}
+		</span>
+	</span>
+
+	<span class="tags">
+		{#if isTransfer}
+			<span class="tag transfer">Transfer</span>
+		{:else if transaction.category_name}
+			<span class="tag">{transaction.category_name}</span>
 		{/if}
 	</span>
-	<span class="col-category">
-		{#if transaction.category}
-			<span class="category-tag">{transaction.category}</span>
-		{:else if transaction.plaid_category}
-			<span class="category-tag plaid">{transaction.plaid_category}</span>
-		{/if}
+
+	<span class="amount" class:pos={isIncome} class:neg={isExpense}>
+		{formatSigned(transaction.amount)}
 	</span>
-	<span class="col-amount" class:income={transaction.amount < 0} class:expense={transaction.amount > 0}>
-		{transaction.amount < 0 ? '+' : '-'}{formatCurrency(transaction.amount)}
-	</span>
-</div>
+
+	{#if showRunningBalance}
+		<span class="running">
+			{transaction.running_balance !== undefined ? formatCurrency(transaction.running_balance) : ''}
+		</span>
+	{/if}
+{/snippet}
+
+<!-- An editable row is a real <button>, not a div wearing role="button". That
+     gets keyboard activation, focus, and screen-reader semantics for free. -->
+{#if onedit}
+	<button class="row clickable" class:with-balance={showRunningBalance} onclick={() => onedit(transaction)}>
+		{@render cells()}
+	</button>
+{:else}
+	<div class="row" class:with-balance={showRunningBalance}>
+		{@render cells()}
+	</div>
+{/if}
 
 <style>
-	.transaction-row {
+	.row {
 		display: grid;
-		grid-template-columns: 100px 1fr 150px 120px;
+		grid-template-columns: 80px 1fr 150px 120px;
+		gap: 0.5rem;
 		padding: 0.75rem 1rem;
 		border-bottom: 1px solid #f0f0f0;
 		align-items: center;
 		font-size: 0.9rem;
+		text-align: left;
+		width: 100%;
+		/* Reset the button chrome so both branches render identically. */
+		background: none;
+		border-left: none;
+		border-right: none;
+		border-top: none;
+		font-family: inherit;
+		color: inherit;
 	}
 
-	.transaction-row:last-child {
+	.row.with-balance {
+		grid-template-columns: 80px 1fr 150px 120px 120px;
+	}
+
+	.row:last-child {
 		border-bottom: none;
 	}
 
-	.transaction-row:hover {
+	.clickable {
+		cursor: pointer;
+	}
+
+	.clickable:hover,
+	.clickable:focus-visible {
 		background: #fafafa;
+		outline: none;
 	}
 
-	.pending {
-		opacity: 0.6;
-	}
-
-	.col-date {
-		color: #999;
+	.date {
+		color: var(--muted-light);
 		font-size: 0.85rem;
 	}
 
-	.col-name {
+	.desc {
 		display: flex;
 		flex-direction: column;
+		min-width: 0;
 	}
 
 	.name {
 		font-weight: 500;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.subtext {
 		font-size: 0.75rem;
-		color: #999;
+		color: var(--muted-light);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.category-tag {
+	.subtext:empty {
+		display: none;
+	}
+
+	.tag {
 		display: inline-block;
 		font-size: 0.75rem;
 		background: #e8f5e9;
@@ -83,22 +142,26 @@
 		border-radius: 4px;
 	}
 
-	.category-tag.plaid {
+	.tag.transfer {
 		background: #e3f2fd;
 		color: #1565c0;
 	}
 
-	.col-amount {
+	.amount,
+	.running {
 		text-align: right;
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
 	}
 
-	.income {
-		color: #22c55e;
+	.running {
+		font-weight: 500;
+		color: var(--muted);
 	}
 
-	.expense {
-		color: #1a1a2e;
+	/* Transfers are intentionally neutral: money moving between your own accounts
+	   is neither income nor spending. */
+	.amount {
+		color: var(--ink);
 	}
 </style>

@@ -1,0 +1,32 @@
+# Published images are PUBLIC. Nothing secret may enter the build context —
+# not even in an intermediate builder layer, which the GHA cache exports.
+.git
+.github
+.vscode
+.idea
+
+# Secrets / credentials
+.env
+.env.*
+!.env.example
+teller/
+client_secret*.json
+*.pem
+*.key
+
+# Dependencies and build output
+node_modules
+frontend/node_modules
+frontend/build
+frontend/.svelte-kit
+server
+
+# Not compiled — see _deprecated/README.md
+_deprecated/
+
+# Infra + docs (not needed to build the binary)
+index.ts
+Pulumi*.yaml
+tsconfig.json
+docker-compose.yml
+*.md

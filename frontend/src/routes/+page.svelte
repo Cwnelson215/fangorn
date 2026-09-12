@@ -1,243 +1,385 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getDashboard, syncAll } from '$lib/api';
+	import { getDashboard } from '$lib/api';
 	import type { Dashboard } from '$lib/types';
+	import { formatCurrency, formatDate, relativeDays } from '$lib/format';
 	import SpendingChart from '$lib/components/SpendingChart.svelte';
 	import NetWorthChart from '$lib/components/NetWorthChart.svelte';
 
-	let dashboard: Dashboard | null = $state(null);
+	let data = $state<Dashboard | null>(null);
 	let loading = $state(true);
-	let syncing = $state(false);
-	let error: string | null = $state(null);
+	let error = $state<string | null>(null);
+
+	onMount(load);
 
 	async function load() {
+		loading = true;
+		error = null;
 		try {
-			loading = true;
-			error = null;
-			dashboard = await getDashboard();
+			data = await getDashboard();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load dashboard';
+			error = e instanceof Error ? e.message : 'Could not load your dashboard';
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function handleSync() {
-		try {
-			syncing = true;
-			await syncAll();
-			await load();
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Sync failed';
-		} finally {
-			syncing = false;
-		}
-	}
+	let hasAccounts = $derived((data?.accounts.length ?? 0) > 0);
+	let activeGoals = $derived(data?.goals.filter((g) => !g.achieved) ?? []);
 
-	onMount(load);
-
-	function formatCurrency(n: number): string {
-		return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+	function budgetPct(spent: number, amount: number): number {
+		if (amount <= 0) return 0;
+		return Math.min(100, (spent / amount) * 100);
 	}
 </script>
 
-<svelte:head>
-	<title>Fangorn - Dashboard</title>
-</svelte:head>
-
-<div class="dashboard">
-	<div class="header">
+<div class="page">
+	<div class="page-header">
 		<h1>Dashboard</h1>
-		<button onclick={handleSync} disabled={syncing}>
-			{syncing ? 'Syncing...' : 'Sync Transactions'}
-		</button>
+		{#if data}
+			<span class="muted">{formatDate(data.from)} – {formatDate(data.to)}</span>
+		{/if}
 	</div>
 
 	{#if loading}
-		<p class="status">Loading...</p>
+		<p class="muted">Loading…</p>
 	{:else if error}
-		<p class="status error">{error}</p>
-	{:else if dashboard}
-		<div class="summary-cards">
-			<div class="card income">
-				<div class="card-label">Income</div>
-				<div class="card-value">{formatCurrency(dashboard.income)}</div>
+		<p class="error-text">{error}</p>
+	{:else if data}
+		{#if !hasAccounts}
+			<div class="card empty">
+				<h2>Let's set up your accounts</h2>
+				<p class="muted">
+					Add each account with the balance it has today. Every transaction you log from then on
+					adjusts it from there.
+				</p>
+				<a class="cta" href="/accounts">Add your first account</a>
 			</div>
-			<div class="card expenses">
-				<div class="card-label">Expenses</div>
-				<div class="card-value">{formatCurrency(dashboard.expenses)}</div>
-			</div>
-			<div class="card net">
-				<div class="card-label">Net</div>
-				<div class="card-value" class:positive={dashboard.net >= 0} class:negative={dashboard.net < 0}>
-					{formatCurrency(dashboard.net)}
+		{:else}
+			<div class="stats">
+				<div class="card stat">
+					<span class="stat-label">Net Worth</span>
+					<span class="stat-value">{formatCurrency(data.net_worth)}</span>
+					<span class="muted">
+						{formatCurrency(data.total_assets)} assets · {formatCurrency(data.total_liabilities)} owed
+					</span>
+				</div>
+				<div class="card stat">
+					<span class="stat-label">Money In</span>
+					<span class="stat-value pos">{formatCurrency(data.income)}</span>
+					<span class="muted">last 30 days</span>
+				</div>
+				<div class="card stat">
+					<span class="stat-label">Money Out</span>
+					<span class="stat-value neg">{formatCurrency(data.expenses)}</span>
+					<span class="muted">last 30 days</span>
+				</div>
+				<div class="card stat">
+					<span class="stat-label">Net</span>
+					<span class="stat-value" class:pos={data.net >= 0} class:neg={data.net < 0}>
+						{formatCurrency(data.net)}
+					</span>
+					<span class="muted">in minus out</span>
 				</div>
 			</div>
-			<div class="card networth">
-				<div class="card-label">Net Worth</div>
-				<div class="card-value">
-					{dashboard.net_worth !== null ? formatCurrency(dashboard.net_worth) : '--'}
-				</div>
-			</div>
-		</div>
 
-		<div class="charts">
-			{#if dashboard.categories.length > 0}
-				<div class="chart-container">
+			<div class="card">
+				<h2>Accounts</h2>
+				<div class="account-list">
+					{#each data.accounts as account (account.id)}
+						<a class="account-line" href="/accounts/{account.id}">
+							<span class="account-name">{account.name}</span>
+							<span
+								class="account-balance"
+								class:neg={account.class === 'liability' && account.balance !== 0}
+							>
+								{formatCurrency(
+									account.class === 'liability' ? Math.abs(account.balance) : account.balance
+								)}
+							</span>
+						</a>
+					{/each}
+				</div>
+			</div>
+
+			{#if data.upcoming.length > 0}
+				<div class="card">
+					<div class="card-head">
+						<h2>Coming Up</h2>
+						<a class="link" href="/recurring">Manage</a>
+					</div>
+					<div class="upcoming-list">
+						{#each data.upcoming.slice(0, 8) as occurrence (occurrence.id)}
+							<div class="upcoming-row">
+								<span class="upcoming-name">
+									{occurrence.rule_name}
+									<span class="muted">
+										{occurrence.kind === 'transfer'
+											? `${occurrence.account_name} → ${occurrence.to_account_name}`
+											: occurrence.account_name}
+									</span>
+								</span>
+								<span class="upcoming-when">{relativeDays(occurrence.due_date)}</span>
+								<span class="upcoming-amount" class:neg={occurrence.kind === 'expense'}>
+									{formatCurrency(occurrence.amount ?? 0)}
+								</span>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
+			<div class="grid-2">
+				<div class="card">
+					<h2>Net Worth</h2>
+					{#if data.net_worth_history.length >= 2}
+						<NetWorthChart data={data.net_worth_history} id="dashboard-nw" />
+					{:else}
+						<p class="muted small">
+							History builds up one snapshot a day — check back tomorrow for a trend line.
+						</p>
+					{/if}
+				</div>
+
+				<div class="card">
 					<h2>Spending by Category</h2>
-					<SpendingChart data={dashboard.categories} />
+					{#if data.categories.length > 0}
+						<SpendingChart data={data.categories} />
+					{:else}
+						<p class="muted small">No spending logged in this period yet.</p>
+					{/if}
+				</div>
+			</div>
+
+			{#if data.budgets.length > 0}
+				<div class="card">
+					<div class="card-head">
+						<h2>This Month's Budgets</h2>
+						<a class="link" href="/budgets">Manage</a>
+					</div>
+					<div class="budget-list">
+						{#each data.budgets as budget (budget.id)}
+							{@const pct = budgetPct(budget.spent, budget.amount)}
+							{@const over = budget.spent > budget.amount}
+							<div class="budget">
+								<div class="budget-head">
+									<span>{budget.category_name}</span>
+									<span class="muted" class:neg={over}>
+										{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)}
+									</span>
+								</div>
+								<div class="bar">
+									<div
+										class="bar-fill"
+										class:over
+										style="width: {pct}%; background: {over
+											? 'var(--neg)'
+											: (budget.category_color ?? 'var(--accent)')}"
+									></div>
+								</div>
+							</div>
+						{/each}
+					</div>
 				</div>
 			{/if}
 
-			{#if dashboard.net_worth_history.length > 1}
-				<div class="chart-container">
-					<h2>Net Worth Over Time</h2>
-					<NetWorthChart data={dashboard.net_worth_history} />
+			{#if activeGoals.length > 0}
+				<div class="card">
+					<div class="card-head">
+						<h2>Goals</h2>
+						<a class="link" href="/budgets">Manage</a>
+					</div>
+					<div class="budget-list">
+						{#each activeGoals as goal (goal.id)}
+							{@const pct = Math.min(100, Math.max(0, (goal.saved / goal.target_amount) * 100))}
+							<div class="budget">
+								<div class="budget-head">
+									<span>{goal.name}</span>
+									<span class="muted">
+										{formatCurrency(goal.saved)} of {formatCurrency(goal.target_amount)}
+									</span>
+								</div>
+								<div class="bar">
+									<div class="bar-fill" style="width: {pct}%; background: var(--info)"></div>
+								</div>
+							</div>
+						{/each}
+					</div>
 				</div>
 			{/if}
-		</div>
-
-		<div class="date-range">
-			Showing {dashboard.from} to {dashboard.to}
-		</div>
-	{:else}
-		<div class="empty">
-			<h2>No data yet</h2>
-			<p>Link a bank account to get started.</p>
-			<a href="/link" class="btn">Link Account</a>
-		</div>
+		{/if}
 	{/if}
 </div>
 
 <style>
-	.dashboard {
-		display: flex;
-		flex-direction: column;
-		gap: 1.5rem;
+	h2 {
+		font-size: 1rem;
+		margin-bottom: 1rem;
 	}
 
-	.header {
+	.card-head {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		align-items: baseline;
+		margin-bottom: 1rem;
 	}
 
-	h1 {
-		font-size: 1.75rem;
-		font-weight: 700;
+	.card-head h2 {
+		margin-bottom: 0;
 	}
 
-	button {
-		background: #4ecca3;
-		color: #1a1a2e;
-		border: none;
-		padding: 0.5rem 1.25rem;
-		border-radius: 8px;
-		font-weight: 600;
-		cursor: pointer;
-		font-size: 0.9rem;
+	.link {
+		font-size: 0.8125rem;
+		color: var(--muted);
+		text-decoration: none;
 	}
 
-	button:hover {
-		background: #3db88f;
+	.link:hover {
+		color: var(--ink);
 	}
 
-	button:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.summary-cards {
+	.stats {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 		gap: 1rem;
 	}
 
-	.card {
-		background: white;
-		border-radius: 12px;
-		padding: 1.25rem;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	.stat {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
 	}
 
-	.card-label {
-		font-size: 0.85rem;
-		color: #666;
+	.stat-label {
+		font-size: 0.8125rem;
+		color: var(--muted);
 		font-weight: 500;
-		margin-bottom: 0.25rem;
 	}
 
-	.card-value {
-		font-size: 1.5rem;
+	.stat-value {
+		font-size: 1.75rem;
 		font-weight: 700;
+		font-variant-numeric: tabular-nums;
 	}
 
-	.positive {
-		color: #22c55e;
-	}
-
-	.negative {
-		color: #ef4444;
-	}
-
-	.charts {
+	.grid-2 {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
 		gap: 1.5rem;
 	}
 
-	.chart-container {
-		background: white;
-		border-radius: 12px;
-		padding: 1.5rem;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	.account-list,
+	.upcoming-list,
+	.budget-list {
+		display: flex;
+		flex-direction: column;
 	}
 
-	.chart-container h2 {
-		font-size: 1.1rem;
-		margin-bottom: 1rem;
+	.account-line {
+		display: flex;
+		justify-content: space-between;
+		padding: 0.625rem 0;
+		border-bottom: 1px solid #f0f0f0;
+		text-decoration: none;
+		color: inherit;
 	}
 
-	.date-range {
-		text-align: center;
-		color: #999;
-		font-size: 0.85rem;
+	.account-line:last-child {
+		border-bottom: none;
 	}
 
-	.status {
-		text-align: center;
-		padding: 3rem;
-		color: #666;
+	.account-line:hover .account-name {
+		color: var(--accent-hover);
 	}
 
-	.status.error {
-		color: #ef4444;
+	.account-balance {
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
 	}
 
-	.empty {
-		text-align: center;
-		padding: 4rem 2rem;
-		background: white;
-		border-radius: 12px;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	.upcoming-row {
+		display: grid;
+		grid-template-columns: 1fr auto auto;
+		gap: 1rem;
+		align-items: center;
+		padding: 0.625rem 0;
+		border-bottom: 1px solid #f0f0f0;
+	}
+
+	.upcoming-row:last-child {
+		border-bottom: none;
+	}
+
+	.upcoming-name {
+		display: flex;
+		flex-direction: column;
+		line-height: 1.3;
+	}
+
+	.upcoming-name .muted {
+		font-size: 0.75rem;
+	}
+
+	.upcoming-when {
+		font-size: 0.8125rem;
+		color: var(--muted);
+	}
+
+	.upcoming-amount {
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+		min-width: 90px;
+		text-align: right;
+	}
+
+	.budget {
+		padding: 0.625rem 0;
+	}
+
+	.budget-head {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.875rem;
+		margin-bottom: 0.375rem;
+	}
+
+	.bar {
+		height: 8px;
+		background: var(--divider);
+		border-radius: 999px;
+		overflow: hidden;
+	}
+
+	.bar-fill {
+		height: 100%;
+		border-radius: 999px;
+		transition: width 0.3s;
 	}
 
 	.empty h2 {
 		margin-bottom: 0.5rem;
 	}
 
-	.empty p {
-		color: #666;
-		margin-bottom: 1.5rem;
+	.empty .muted {
+		max-width: 30rem;
+		margin: 0 auto 1.5rem;
 	}
 
-	.btn {
+	.cta {
 		display: inline-block;
-		background: #4ecca3;
-		color: #1a1a2e;
-		text-decoration: none;
-		padding: 0.75rem 2rem;
-		border-radius: 8px;
+		background: var(--accent);
+		color: var(--ink);
+		padding: 0.625rem 1.25rem;
+		border-radius: var(--radius-sm);
 		font-weight: 600;
+		text-decoration: none;
+	}
+
+	.cta:hover {
+		background: var(--accent-hover);
+	}
+
+	.small {
+		font-size: 0.875rem;
 	}
 </style>

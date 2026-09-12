@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { login } from '$lib/api';
 
 	let password = $state('');
 	let error: string | null = $state(null);
@@ -11,21 +12,10 @@
 		error = null;
 
 		try {
-			const res = await fetch('/api/login', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ password })
-			});
-
-			if (!res.ok) {
-				const data = await res.json().catch(() => ({ error: 'Login failed' }));
-				error = data.error || 'Login failed';
-				return;
-			}
-
+			await login(password);
 			goto('/');
-		} catch {
-			error = 'Connection error';
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Login failed';
 		} finally {
 			loading = false;
 		}

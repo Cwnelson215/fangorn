@@ -3,10 +3,26 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { authStatus, logout } from '$lib/api';
 
 	let { children }: { children: Snippet } = $props();
 	let authChecked = $state(false);
+	let showLogout = $state(false);
 	let isLoginPage = $derived(page.url.pathname === '/login');
+
+	const NAV = [
+		{ href: '/', label: 'Dashboard' },
+		{ href: '/accounts', label: 'Accounts' },
+		{ href: '/transactions', label: 'Transactions' },
+		{ href: '/transfers', label: 'Transfers' },
+		{ href: '/recurring', label: 'Recurring' },
+		{ href: '/budgets', label: 'Budgets' }
+	];
+
+	function isActive(href: string): boolean {
+		if (href === '/') return page.url.pathname === '/';
+		return page.url.pathname.startsWith(href);
+	}
 
 	onMount(async () => {
 		if (isLoginPage) {
@@ -15,17 +31,28 @@
 		}
 
 		try {
-			const res = await fetch('/api/auth/status');
-			const data = await res.json();
+			const data = await authStatus();
+			showLogout = data.required;
 			if (data.required && !data.authenticated) {
 				goto('/login');
 				return;
 			}
 		} catch {
-			// If auth check fails, allow access (server may not require auth)
+			// Fail closed. A failed auth check used to fall through and render the
+			// app, which meant a network blip looked identical to being signed in.
+			goto('/login');
+			return;
 		}
 		authChecked = true;
 	});
+
+	async function handleLogout() {
+		try {
+			await logout();
+		} finally {
+			goto('/login');
+		}
+	}
 </script>
 
 {#if isLoginPage}
@@ -35,12 +62,13 @@
 		<nav>
 			<div class="nav-brand">Fangorn</div>
 			<div class="nav-links">
-				<a href="/">Dashboard</a>
-				<a href="/accounts">Accounts</a>
-				<a href="/transactions">Transactions</a>
-				<a href="/transfers">Transfers</a>
-				<a href="/import">Import</a>
+				{#each NAV as item}
+					<a href={item.href} class:active={isActive(item.href)}>{item.label}</a>
+				{/each}
 			</div>
+			{#if showLogout}
+				<button class="logout" onclick={handleLogout}>Sign out</button>
+			{/if}
 		</nav>
 		<main>
 			{@render children()}
@@ -55,11 +83,83 @@
 		box-sizing: border-box;
 	}
 
+	/* Design tokens. Every colour in the app resolves through these — before the
+	   pivot the same hex values were copy-pasted across a dozen components. */
+	:global(:root) {
+		--accent: #4ecca3;
+		--accent-hover: #3db88f;
+		--ink: #1a1a2e;
+		--bg: #f8f9fa;
+		--surface: #ffffff;
+		--muted: #666;
+		--muted-light: #999;
+		--border: #ddd;
+		--divider: #e5e7eb;
+		--pos: #22c55e;
+		--neg: #ef4444;
+		--info: #3b82f6;
+		--warn: #f59e0b;
+
+		--radius: 12px;
+		--radius-sm: 8px;
+		--shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	}
+
 	:global(body) {
 		font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-		background: #f8f9fa;
-		color: #1a1a2e;
+		background: var(--bg);
+		color: var(--ink);
 		line-height: 1.6;
+	}
+
+	/* Shared primitives, defined once so pages stop redeclaring them. */
+	:global(.card) {
+		background: var(--surface);
+		border-radius: var(--radius);
+		padding: 1.5rem;
+		box-shadow: var(--shadow);
+	}
+
+	:global(.page) {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
+	}
+
+	:global(.page-header) {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	:global(.page-header h1) {
+		font-size: 1.5rem;
+	}
+
+	:global(.muted) {
+		color: var(--muted);
+		font-size: 0.875rem;
+	}
+
+	:global(.empty) {
+		text-align: center;
+		padding: 3rem 1.5rem;
+		color: var(--muted);
+	}
+
+	:global(.error-text) {
+		color: var(--neg);
+		font-size: 0.875rem;
+	}
+
+	:global(.pos) {
+		color: var(--pos);
+	}
+
+	:global(.neg) {
+		color: var(--neg);
 	}
 
 	.app {
@@ -67,7 +167,7 @@
 	}
 
 	nav {
-		background: #1a1a2e;
+		background: var(--ink);
 		color: white;
 		padding: 0 2rem;
 		height: 60px;
@@ -82,12 +182,13 @@
 	.nav-brand {
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #4ecca3;
+		color: var(--accent);
 	}
 
 	.nav-links {
 		display: flex;
 		gap: 1.5rem;
+		flex-wrap: wrap;
 	}
 
 	.nav-links a {
@@ -99,6 +200,25 @@
 	}
 
 	.nav-links a:hover {
+		color: white;
+	}
+
+	.nav-links a.active {
+		color: var(--accent);
+	}
+
+	.logout {
+		margin-left: auto;
+		background: none;
+		border: none;
+		color: rgba(255, 255, 255, 0.6);
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+		padding: 0.25rem 0;
+	}
+
+	.logout:hover {
 		color: white;
 	}
 

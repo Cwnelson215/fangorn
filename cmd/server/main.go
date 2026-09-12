@@ -15,8 +15,9 @@ import (
 	"github.com/cwnelson/fangorn/internal/config"
 	"github.com/cwnelson/fangorn/internal/database"
 	"github.com/cwnelson/fangorn/internal/handlers"
+	"github.com/cwnelson/fangorn/internal/ledger"
 	"github.com/cwnelson/fangorn/internal/middleware"
-	"github.com/cwnelson/fangorn/internal/services"
+	"github.com/cwnelson/fangorn/internal/scheduler"
 )
 
 func main() {
@@ -32,98 +33,60 @@ func main() {
 		log.Fatalf("Database migration failed: %v", err)
 	}
 
+	svc := ledger.New(db)
+
+	// Auth is still a single shared password, so there is exactly one household
+	// and it is resolved once here. When real users arrive this becomes a
+	// per-request lookup off the session.
+	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 10*time.Second)
+	householdID, err := svc.DefaultHouseholdID(startupCtx)
+	cancelStartup()
+	if err != nil {
+		log.Fatalf("Could not resolve household: %v", err)
+	}
+
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
-	accountsH := handlers.NewAccountsHandler(db)
-	txnH := handlers.NewTransactionsHandler(db)
-	dashH := handlers.NewDashboardHandler(db)
-	transferSvc := services.NewTransferService(db, cfg.EncryptionKey)
-	transferH := handlers.NewTransferHandler(transferSvc)
+	ledgerH := handlers.NewLedgerHandler(svc, householdID)
 
 	mux := http.NewServeMux()
 
-	// Auth routes
+	mux.HandleFunc("GET /health", handlers.Health)
+	mux.HandleFunc("GET /ready", handlers.Ready(db))
 	mux.HandleFunc("POST /api/login", authH.Login)
+	mux.HandleFunc("POST /api/logout", authH.Logout)
 	mux.HandleFunc("GET /api/auth/status", authH.Status)
 
-	// Core API routes
-	mux.HandleFunc("GET /health", handlers.Health)
-	mux.HandleFunc("GET /api/accounts", accountsH.List)
-	mux.HandleFunc("GET /api/transactions", txnH.List)
-	mux.HandleFunc("GET /api/dashboard", dashH.Get)
+	ledgerH.Register(mux)
 
-	// CSV import routes
-	importSvc := services.NewCSVImportService(db)
-	if err := importSvc.LoadBankFormats(context.Background()); err != nil {
-		log.Printf("Warning: failed to load saved bank formats: %v", err)
-	}
-	importH := handlers.NewCSVImportHandler(importSvc)
-	mux.HandleFunc("POST /api/import/csv", importH.Upload)
-	mux.HandleFunc("GET /api/import/banks", importH.SupportedBanks)
-	mux.HandleFunc("POST /api/import/csv/detect", importH.DetectHeaders)
-	mux.HandleFunc("POST /api/import/csv/format", importH.SaveBankFormat)
+	// The scheduler posts recurring items and snapshots net worth. It runs a pass
+	// immediately on boot, which is what backfills anything missed while the
+	// process was down.
+	sched := scheduler.New(svc, cfg.SchedulerInterval, cfg.SchedulerHorizonDays)
+	schedCtx, stopScheduler := context.WithCancel(context.Background())
+	go sched.Start(schedCtx)
 
-	// Transfer routes
-	mux.HandleFunc("POST /api/transfers", transferH.Create)
-	mux.HandleFunc("GET /api/transfers", transferH.List)
-	mux.HandleFunc("POST /api/transfers/{id}/refresh", transferH.Refresh)
-	mux.HandleFunc("POST /api/transfers/{id}/cancel", transferH.Cancel)
-
-	// Teller routes (behind feature flag)
-	if cfg.TellerEnabled {
-		tellerSvc := services.NewTellerService(cfg)
-		syncSvc := services.NewSyncService(db, tellerSvc, cfg.EncryptionKey)
-		configH := handlers.NewConfigHandler(cfg.TellerAppID)
-		linkH := handlers.NewLinkHandler(syncSvc)
-		syncH := handlers.NewSyncHandler(syncSvc)
-
-		mux.HandleFunc("GET /api/config", configH.Get)
-		mux.HandleFunc("POST /api/link-account", linkH.LinkAccount)
-		mux.HandleFunc("POST /api/sync", syncH.Sync)
-		log.Println("Teller integration enabled")
-	}
-
-	// Gmail watchers (behind feature flag, one per account)
-	var gmailCancels []context.CancelFunc
-	if cfg.GmailEnabled {
-		for _, acct := range cfg.GmailAccounts {
-			gmailSvc, err := services.NewGmailService(db, acct, cfg.GmailPollInterval)
-			if err != nil {
-				log.Printf("Warning: Gmail service [%s] failed to start: %v", acct.Name, err)
-				continue
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			gmailCancels = append(gmailCancels, cancel)
-			go gmailSvc.Start(ctx)
-		}
-	}
-
-	// Serve embedded frontend with SPA fallback
+	// Serve the embedded frontend with an SPA fallback.
 	frontendFS, err := fs.Sub(fangorn.FrontendAssets, "frontend/build")
 	if err != nil {
 		log.Fatalf("Failed to create frontend sub-filesystem: %v", err)
 	}
 	fileServer := http.FileServer(http.FS(frontendFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Try to serve the exact file first
 		path := r.URL.Path
 		if path == "/" {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-
-		// Check if file exists in the embedded FS
 		cleanPath := strings.TrimPrefix(path, "/")
 		if _, err := fs.Stat(frontendFS, cleanPath); err == nil {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-
-		// SPA fallback: serve index.html for unmatched routes
+		// Unknown path: let the client-side router handle it.
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})
 
-	// Apply middleware
 	handler := middleware.Logging(middleware.Auth(cfg.AppPassword)(middleware.CORS(mux)))
 
 	srv := &http.Server{
@@ -146,10 +109,7 @@ func main() {
 	<-quit
 	log.Println("Shutting down server...")
 
-	// Stop Gmail watchers
-	for _, cancel := range gmailCancels {
-		cancel()
-	}
+	stopScheduler()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
