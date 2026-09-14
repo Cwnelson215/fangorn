@@ -8,7 +8,8 @@ A **family finance app kept on paper**. You enter each account's starting balanc
 the household logs transactions by hand from there — nothing connects to a bank. It tracks accounts
 and running balances, categorized income and spending, transfers between your own accounts,
 recurring subscriptions and scheduled transfers that post themselves, monthly category budgets,
-savings goals, and net worth over time. Go backend, SvelteKit frontend with D3 visualizations.
+savings goals, net worth over time, and investment accounts whose holdings (stocks, ETFs, mutual
+funds) are priced automatically. Go backend, SvelteKit frontend with D3 visualizations.
 
 It **used** to sync real accounts through the Teller API, import CSV statements, and scrape bank
 notification emails out of Gmail. That code is not deleted — it lives in `_deprecated/`, which the
@@ -48,7 +49,7 @@ Tests isolate by giving each one its own household (`internal/testdb`), not by t
 can share the database concurrently. Scheduler tests call `runHousehold` rather than `Tick`, which
 would sweep every test's household.
 
-## The Two Conventions That Matter
+## The Conventions That Matter
 
 **1. Amounts are signed relative to the account.** Positive = money in, negative = money out.
 Liability accounts (`credit_card`, `loan`) therefore carry **negative** balances. This makes both of
@@ -70,6 +71,19 @@ own money is neither earning nor spending it. Mutations go through `ledger.Creat
 `UpdateTransfer` / `DeleteTransfer`, which operate on the whole group in one transaction. Editing a
 single leg through `/api/transactions` is rejected; deleting one leg deletes both.
 
+**3. A trade is a `trades` row plus a cash leg.** In an `investment` account, a buy or sell also
+writes one `kind = 'trade'` transaction on the same account (`transactions.trade_id`, composite FK
+so it can't sit on another account). Cash therefore stays `starting_balance + SUM(amount)`, and
+income/expense totals list kinds explicitly (`kind IN ('income','expense')`) so trades stay out.
+`reinvest` and `opening` trades add shares with no leg. Share counts are never stored: every trade
+write locks the account row and replays the whole log through `portfolio.Replay`, rejecting any sell
+that exceeds shares held on its date. `trades.amount` is the real dollar figure (a "$500 of FZROX"
+order isn't exactly shares × price), and cost basis comes from it.
+
+An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
+shares × `securities.last_price`. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
+don't recompute a balance anywhere else.
+
 ## Architecture
 
 **App contract:** listen on `PORT` (default 3000), expose `GET /health` (dependency-free, 200) and
@@ -81,8 +95,11 @@ internal/config/          env -> Config
 internal/database/        Connect, RunMigrations, embedded migrations/
 internal/models/          domain types + the enum constants; ClassForType
 internal/recurring/       PURE date engine — no DB, no clock. The best-tested code here.
+internal/portfolio/       PURE trade-log math — replay, average cost, exact cent rounding
+internal/quotes/          price Provider interface + Yahoo client (network, no DB)
+internal/prices/          Refresher: decides when a price is stale, fetches, saves, backs off
 internal/ledger/          every read and write against the ledger
-internal/scheduler/       posts due recurring items, snapshots net worth
+internal/scheduler/       posts due recurring items, refreshes prices, snapshots net worth
 internal/handlers/        HTTP layer
 internal/middleware/      auth, CORS, logging
 internal/crypto/          AES-GCM (unused today; kept for future invite tokens)
@@ -95,7 +112,9 @@ _deprecated/              the bank-sync era, not compiled
 exists because balance math, transfer pairing, and recurring posting are needed by both the HTTP
 layer and the background scheduler, and duplicating them is how the two drift apart.
 
-**Tenancy:** every table carries `household_id` and every query filters on it. There is one
+**Tenancy:** every table carries `household_id` and every query filters on it — except
+`securities` and `security_prices`, which are shared public market data (who holds what lives in
+`trades`, which is scoped normally). There is one
 household today and `main.go` resolves it once at boot, but the scoping is written in so adding real
 users is additive rather than a rewrite.
 
@@ -124,12 +143,30 @@ correct. That last case is not hypothetical: the AWS deployment scales to zero o
 (`Pulumi.dev.yaml: enableScheduledScaling`), so anything due at 2 AM has to be picked up when the
 container next wakes. "Today" is computed in the **household's** timezone, not the server's.
 
+## Investment Prices
+
+Prices come from Yahoo Finance's unofficial chart/search endpoints (no key) behind
+`quotes.Provider`. `quotes.ErrNotFound` means "no such symbol" (a 400 when logging a trade);
+`quotes.ErrUnavailable` is everything else, and callers fall back to stored prices. A symbol is seeded
+from its first trade's price, so trades still work when Yahoo is down.
+
+`prices.Refresher` is called by the scheduler (per household, before the net worth snapshot) and by
+`GET /api/accounts/{id}/holdings`, which the account page polls every 60s. Staleness is judged from
+the DB, so they don't duplicate fetches: stocks/ETFs `QUOTES_MARKET_TTL` (1m) during US market hours,
+15m otherwise; mutual funds 15m always (one NAV a day); failed symbols back off 5m. HTTP-triggered
+refreshes get a 4–5s budget, well inside the 15s `WriteTimeout`.
+
+Yahoo quirks: the full Chrome User-Agent got 429s while `Mozilla/5.0` didn't; day change is derived
+from `regularMarketChangePercent` because a fund's latest NAV is often dated the next morning, and
+`chartPreviousClose` is the close before the *range*, not before today.
+
 ## Migrations
 
 `internal/database/migrations/NNN_snake_case.{up,down}.sql`, embedded and applied at every boot.
-`001`–`005` are the bank-sync era, kept as history. **`006_family_ledger` is the current schema** —
+`001`–`005` are the bank-sync era, kept as history. **`006_family_ledger` is the base schema** —
 it drops everything from before and creates households, accounts, categories, transactions,
 recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_worth_snapshots.
+`007_investments` adds securities, security_prices, trades, and the `trade` transaction kind.
 
 ## Conventions
 
@@ -145,7 +182,8 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
   rather than re-declaring `Intl.NumberFormat` or hex colours per page.
 - **Health check:** `GET /health` must return 200.
 - **Env vars:** `PORT`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`,
-  `APP_PASSWORD`, `SCHEDULER_INTERVAL`, `SCHEDULER_HORIZON_DAYS`
+  `APP_PASSWORD`, `SCHEDULER_INTERVAL`, `SCHEDULER_HORIZON_DAYS`, `QUOTES_PROVIDER` (`yahoo` default,
+  or `none`), `QUOTES_MARKET_TTL`
 
 ## Auth
 
@@ -157,6 +195,12 @@ Real accounts — email/password users, email invites, and passkey-or-PIN device
 but not built. The schema is already shaped for it.
 
 ## Gotchas
+
+- **The production image has no zoneinfo.** `cmd/server/main.go` imports `time/tzdata`; without it
+  `LoadLocation` fails in the alpine container and both the household's "today" and US market hours
+  silently fall back to UTC.
+- **Tests that touch `securities` must use their own symbols** (e.g. suffix the household id).
+  That table is global, and DB tests run concurrently against one database.
 
 - **`frontend/build` must exist before `go build`.** `frontend.go` embeds it with
   `//go:embed all:frontend/build`, so a stale or missing build silently ships the wrong UI.

@@ -1,0 +1,130 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "USD",
+     "symbol": "VOO",
+     "exchangeName": "PCX",
+     "fullExchangeName": "NYSEArca",
+     "instrumentType": "ETF",
+     "firstTradeDate": 1284039000,
+     "regularMarketTime": 1789416000,
+     "hasPrePostMarketData": true,
+     "gmtoffset": -14400,
+     "timezone": "EDT",
+     "exchangeTimezoneName": "America/New_York",
+     "regularMarketPrice": 699.3,
+     "regularMarketChangePercent": -0.464,
+     "fulldayPrice": 699.911,
+     "fulldayChange": -2.649,
+     "fulldayChangePercent": -0.377,
+     "fiftyTwoWeekHigh": 716.39,
+     "fiftyTwoWeekLow": 578.46,
+     "regularMarketDayHigh": 701.85,
+     "regularMarketDayLow": 696.73,
+     "regularMarketVolume": 6772630,
+     "longName": "Vanguard S&P 500 ETF",
+     "shortName": "Vanguard S&P 500 ETF",
+     "chartPreviousClose": 708.01,
+     "priceHint": 2,
+     "currentTradingPeriod": {
+      "pre": {
+       "timezone": "EDT",
+       "start": 1789372800,
+       "end": 1789392600,
+       "gmtoffset": -14400
+      },
+      "regular": {
+       "timezone": "EDT",
+       "start": 1789392600,
+       "end": 1789416000,
+       "gmtoffset": -14400
+      },
+      "post": {
+       "timezone": "EDT",
+       "start": 1789416000,
+       "end": 1789430400,
+       "gmtoffset": -14400
+      }
+     },
+     "dataGranularity": "1d",
+     "range": "",
+     "validRanges": [
+      "1d",
+      "5d",
+      "1mo",
+      "3mo",
+      "6mo",
+      "1y",
+      "2y",
+      "5y",
+      "10y",
+      "ytd",
+      "max"
+     ]
+    },
+    "timestamp": [
+     1788874200,
+     1788960600,
+     1789047000,
+     1789133400,
+     1789392600
+    ],
+    "indicators": {
+     "quote": [
+      {
+       "volume": [
+        7827600,
+        4293300,
+        18313400,
+        5792000,
+        6772630
+       ],
+       "close": [
+        704.0700073242188,
+        700.8699951171875,
+        696.6500244140625,
+        702.5599975585938,
+        699.2999877929688
+       ],
+       "high": [
+        707.510009765625,
+        702.7100219726562,
+        698.6400146484375,
+        704.5,
+        701.8499755859375
+       ],
+       "open": [
+        706.97998046875,
+        702.3499755859375,
+        696.780029296875,
+        703.0,
+        697.780029296875
+       ],
+       "low": [
+        703.3699951171875,
+        699.489990234375,
+        695.5399780273438,
+        701.9299926757812,
+        696.72998046875
+       ]
+      }
+     ],
+     "adjclose": [
+      {
+       "adjclose": [
+        704.0700073242188,
+        700.8699951171875,
+        696.6500244140625,
+        702.5599975585938,
+        699.2999877929688
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}

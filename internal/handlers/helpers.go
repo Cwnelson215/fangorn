@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/cwnelson/fangorn/internal/ledger"
+	"github.com/cwnelson/fangorn/internal/quotes"
 )
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -32,6 +33,8 @@ func fail(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "Not found")
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Msg)
+	case errors.Is(err, quotes.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "Price lookups aren't available right now")
 	default:
 		log.Printf("request failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "Something went wrong")

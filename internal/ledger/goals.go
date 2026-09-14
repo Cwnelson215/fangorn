@@ -14,7 +14,8 @@ import (
 // places depending on how the goal is set up:
 //
 //   - Linked to an account: progress is that account's current balance, so
-//     "$5,000 emergency fund" tracks itself with no extra bookkeeping.
+//     "$5,000 emergency fund" tracks itself with no extra bookkeeping. For an
+//     investment account that includes its holdings at market value.
 //   - Unlinked: progress is the sum of explicit contributions, for goals spread
 //     across accounts or held partly in cash.
 const goalSelect = `
@@ -22,15 +23,14 @@ const goalSelect = `
 	       g.notes, g.achieved_at IS NOT NULL,
 	       CASE
 	         WHEN g.account_id IS NOT NULL
-	           THEN a.starting_balance + COALESCE((
-	                  SELECT SUM(t.amount) FROM transactions t WHERE t.account_id = a.id
-	                ), 0)
+	           THEN b.cash_balance + b.holdings_value
 	         ELSE COALESCE((
 	                SELECT SUM(gc.amount) FROM goal_contributions gc WHERE gc.goal_id = g.id
 	              ), 0)
 	       END AS saved
 	FROM goals g
-	LEFT JOIN accounts a ON a.id = g.account_id`
+	LEFT JOIN accounts a ON a.id = g.account_id
+	LEFT JOIN (` + accountBalances + `) b ON b.account_id = g.account_id`
 
 func scanGoal(rows interface{ Scan(...any) error }) (models.Goal, error) {
 	var g models.Goal

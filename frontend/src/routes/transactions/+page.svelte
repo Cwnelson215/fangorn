@@ -94,9 +94,14 @@
 		modalOpen = true;
 	}
 
+	// Only plain income and expenses are edited here. A transfer is a linked pair,
+	// and a trade's cash side belongs to its trade — both have their own screens.
+	function isEditable(transaction: Transaction): boolean {
+		return transaction.kind === 'income' || transaction.kind === 'expense';
+	}
+
 	function openEdit(transaction: Transaction) {
-		// Transfers are a linked pair; editing one leg alone would break it.
-		if (transaction.kind === 'transfer') return;
+		if (transaction.kind !== 'income' && transaction.kind !== 'expense') return;
 
 		editing = transaction;
 		kind = transaction.kind;
@@ -206,6 +211,7 @@
 					<option value="expense">Money out</option>
 					<option value="income">Money in</option>
 					<option value="transfer">Transfers</option>
+					<option value="trade">Trades</option>
 				</select>
 			</Field>
 			<Field label="From" id="dateFrom">
@@ -235,7 +241,7 @@
 						{#each transactions as transaction (transaction.id)}
 							<TransactionRow
 								{transaction}
-								onedit={transaction.kind === 'transfer' ? undefined : openEdit}
+								onedit={isEditable(transaction) ? openEdit : undefined}
 							/>
 						{/each}
 					</div>

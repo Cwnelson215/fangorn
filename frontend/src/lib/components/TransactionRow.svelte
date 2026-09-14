@@ -15,8 +15,12 @@
 	} = $props();
 
 	let isTransfer = $derived(transaction.kind === 'transfer');
-	let isIncome = $derived(transaction.amount > 0 && !isTransfer);
-	let isExpense = $derived(transaction.amount < 0 && !isTransfer);
+	let isTrade = $derived(transaction.kind === 'trade');
+	// Transfers and trades move money without earning or spending it, so neither
+	// is coloured like income or an expense.
+	let isNeutral = $derived(isTransfer || isTrade);
+	let isIncome = $derived(transaction.amount > 0 && !isNeutral);
+	let isExpense = $derived(transaction.amount < 0 && !isNeutral);
 </script>
 
 {#snippet cells()}
@@ -37,6 +41,8 @@
 	<span class="tags">
 		{#if isTransfer}
 			<span class="tag transfer">Transfer</span>
+		{:else if isTrade}
+			<span class="tag trade">Trade</span>
 		{:else if transaction.category_name}
 			<span class="tag">{transaction.category_name}</span>
 		{/if}
@@ -145,6 +151,11 @@
 	.tag.transfer {
 		background: #e3f2fd;
 		color: #1565c0;
+	}
+
+	.tag.trade {
+		background: #f3e8ff;
+		color: #7e22ce;
 	}
 
 	.amount,

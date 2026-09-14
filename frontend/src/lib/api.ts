@@ -8,9 +8,14 @@ import type {
 	Dashboard,
 	Goal,
 	GoalInput,
+	Holdings,
 	Occurrence,
 	RecurringRule,
 	RuleInput,
+	Security,
+	SecurityMatch,
+	Trade,
+	TradeInput,
 	Transaction,
 	TransactionInput,
 	Transfer,
@@ -85,6 +90,24 @@ export const updateAccount = (id: number, input: AccountInput) =>
 export const deleteAccount = (id: number) => send<void>('DELETE', `/api/accounts/${id}`);
 export const archiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/archive`);
 export const unarchiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/unarchive`);
+
+// ---------------------------------------------------------------------------
+// investments
+// ---------------------------------------------------------------------------
+
+export const searchSecurities = (q: string, signal?: AbortSignal) =>
+	request<SecurityMatch[]>(`/api/securities/search${qs({ q })}`, { signal });
+export const getSecurity = (symbol: string) =>
+	request<Security>(`/api/securities/${encodeURIComponent(symbol)}`);
+
+export const getHoldings = (accountId: number) =>
+	request<Holdings>(`/api/accounts/${accountId}/holdings`);
+export const getTrades = (accountId: number) => request<Trade[]>(`/api/accounts/${accountId}/trades`);
+export const createTrade = (accountId: number, input: TradeInput) =>
+	send<Trade>('POST', `/api/accounts/${accountId}/trades`, input);
+export const updateTrade = (id: number, input: TradeInput) =>
+	send<Trade>('PATCH', `/api/trades/${id}`, input);
+export const deleteTrade = (id: number) => send<void>('DELETE', `/api/trades/${id}`);
 
 // ---------------------------------------------------------------------------
 // categories

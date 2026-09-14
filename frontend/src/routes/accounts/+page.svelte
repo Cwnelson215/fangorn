@@ -222,9 +222,17 @@
 
 		<div class="form-row">
 			<Field
-				label={isLiabilityType ? 'Amount currently owed' : 'Starting balance'}
+				label={isLiabilityType
+					? 'Amount currently owed'
+					: type === 'investment'
+						? 'Cash balance'
+						: 'Starting balance'}
 				id="balance"
-				hint={isLiabilityType ? 'Enter what you owe as a positive number' : undefined}
+				hint={isLiabilityType
+					? 'Enter what you owe as a positive number'
+					: type === 'investment'
+						? 'Uninvested cash only (including a money market core position). Add what you hold from the account page.'
+						: undefined}
 			>
 				<input
 					id="balance"

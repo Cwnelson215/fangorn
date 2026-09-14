@@ -15,7 +15,7 @@ import (
 const txnSelect = `
 	SELECT t.id, t.account_id, a.name, t.date, t.amount, t.kind, t.description,
 	       t.merchant, t.category_id, c.name, t.notes, t.transfer_group_id,
-	       t.recurring_rule_id, t.source, t.created_at
+	       t.recurring_rule_id, t.trade_id, t.source, t.created_at
 	FROM transactions t
 	JOIN accounts a ON a.id = t.account_id
 	LEFT JOIN categories c ON c.id = t.category_id`
@@ -23,12 +23,12 @@ const txnSelect = `
 func scanTxn(rows interface{ Scan(...any) error }) (models.Transaction, error) {
 	var t models.Transaction
 	var merchant, categoryName, notes, groupID sql.NullString
-	var categoryID, ruleID sql.NullInt64
+	var categoryID, ruleID, tradeID sql.NullInt64
 	var date, createdAt time.Time
 
 	err := rows.Scan(
 		&t.ID, &t.AccountID, &t.AccountName, &date, &t.Amount, &t.Kind, &t.Description,
-		&merchant, &categoryID, &categoryName, &notes, &groupID, &ruleID,
+		&merchant, &categoryID, &categoryName, &notes, &groupID, &ruleID, &tradeID,
 		&t.Source, &createdAt,
 	)
 	if err != nil {
@@ -42,6 +42,7 @@ func scanTxn(rows interface{ Scan(...any) error }) (models.Transaction, error) {
 	t.Notes = strPtr(notes)
 	t.TransferGroupID = strPtr(groupID)
 	t.RecurringRuleID = intPtr(ruleID)
+	t.TradeID = intPtr(tradeID)
 	return t, nil
 }
 
@@ -229,6 +230,9 @@ func (s *Service) UpdateTransaction(ctx context.Context, householdID, id int, in
 	if existing.Kind == models.KindTransfer {
 		return models.Transaction{}, invalid("this is one leg of a transfer; edit it from the transfers view")
 	}
+	if existing.Kind == models.KindTrade {
+		return models.Transaction{}, invalid("this is the cash side of a trade; edit the trade from its account page")
+	}
 
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE transactions SET
@@ -248,7 +252,9 @@ func (s *Service) UpdateTransaction(ctx context.Context, householdID, id int, in
 }
 
 // DeleteTransaction removes a single transaction. Deleting either leg of a
-// transfer removes both, so a half-transfer can never be left behind.
+// transfer removes both, so a half-transfer can never be left behind. Deleting
+// the cash side of a trade deletes the trade, which re-checks that no later sell
+// depended on its shares.
 func (s *Service) DeleteTransaction(ctx context.Context, householdID, id int) error {
 	existing, err := s.GetTransaction(ctx, householdID, id)
 	if err != nil {
@@ -256,6 +262,9 @@ func (s *Service) DeleteTransaction(ctx context.Context, householdID, id int) er
 	}
 	if existing.TransferGroupID != nil {
 		return s.DeleteTransfer(ctx, householdID, *existing.TransferGroupID)
+	}
+	if existing.TradeID != nil {
+		return s.DeleteTrade(ctx, householdID, *existing.TradeID)
 	}
 
 	res, err := s.db.ExecContext(ctx,

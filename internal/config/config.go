@@ -23,6 +23,13 @@ type Config struct {
 	// SchedulerHorizonDays is how far past today occurrences are materialized so the
 	// UI can show upcoming charges without posting them.
 	SchedulerHorizonDays int
+
+	// QuotesProvider picks where security prices come from: "yahoo" (default,
+	// no key needed) or "none" to turn price fetching off.
+	QuotesProvider string
+	// QuotesMarketTTL is how stale a stock or ETF price may get during market
+	// hours before it is fetched again.
+	QuotesMarketTTL time.Duration
 }
 
 func Load() *Config {
@@ -37,6 +44,8 @@ func Load() *Config {
 		AppPassword:          os.Getenv("APP_PASSWORD"),
 		SchedulerInterval:    getEnvDuration("SCHEDULER_INTERVAL", 5*time.Minute),
 		SchedulerHorizonDays: getEnvInt("SCHEDULER_HORIZON_DAYS", 60),
+		QuotesProvider:       getEnv("QUOTES_PROVIDER", "yahoo"),
+		QuotesMarketTTL:      getEnvDuration("QUOTES_MARKET_TTL", time.Minute),
 	}
 }
 

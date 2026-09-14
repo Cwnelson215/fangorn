@@ -48,9 +48,10 @@ type Dashboard struct {
 
 // Dashboard assembles everything the landing page needs in one round trip.
 //
-// Transfers are excluded from income and expenses throughout: moving $200 from
-// checking to savings is not earning $200 and not spending $200, and counting it
-// as either would make every summary wrong.
+// Transfers and trades are excluded from income and expenses throughout: moving
+// $200 from checking to savings is not earning $200 and not spending $200, and
+// neither is buying $200 of an index fund. Counting any of them would make every
+// summary wrong.
 func (s *Service) Dashboard(ctx context.Context, householdID int, from, to string) (Dashboard, error) {
 	if from == "" {
 		from = time.Now().AddDate(0, -1, 0).Format(models.DateOnly)
@@ -62,11 +63,15 @@ func (s *Service) Dashboard(ctx context.Context, householdID int, from, to strin
 
 	// Income and expenses. Amounts are signed, so income is simply the positive
 	// side and expenses the negative side, reported as a positive magnitude.
+	//
+	// The kinds are listed rather than excluded: transfers and trade cash legs
+	// both move money without earning or spending it, and a kind added later
+	// should have to opt in to these totals rather than leak into them.
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0),
 		        COALESCE(-SUM(amount) FILTER (WHERE amount < 0), 0)
 		 FROM transactions
-		 WHERE household_id = $1 AND kind <> 'transfer' AND date BETWEEN $2 AND $3`,
+		 WHERE household_id = $1 AND kind IN ('income','expense') AND date BETWEEN $2 AND $3`,
 		householdID, from, to,
 	).Scan(&d.Income, &d.Expenses)
 	if err != nil {

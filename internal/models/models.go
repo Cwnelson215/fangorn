@@ -30,6 +30,10 @@ const (
 	KindIncome   = "income"
 	KindExpense  = "expense"
 	KindTransfer = "transfer"
+	// KindTrade is the cash side of a buy or sell in an investment account. It is
+	// only ever written by the trade endpoints, and like a transfer it is neither
+	// income nor spending.
+	KindTrade = "trade"
 )
 
 // Recurrence frequencies.
@@ -92,9 +96,13 @@ type Account struct {
 	Notes               *string `json:"notes"`
 	Archived            bool    `json:"archived"`
 
-	// Balance is StartingBalance plus every posted transaction on the account.
-	// Populated by ledger reads, not stored.
-	Balance float64 `json:"balance"`
+	// CashBalance is StartingBalance plus every posted transaction on the account.
+	// HoldingsValue is the market value of an investment account's positions at
+	// the latest known prices (0 for every other type). Balance is their sum, and
+	// is the figure net worth adds up. All three are computed on read.
+	CashBalance   float64 `json:"cash_balance"`
+	HoldingsValue float64 `json:"holdings_value"`
+	Balance       float64 `json:"balance"`
 }
 
 type Category struct {
@@ -107,21 +115,22 @@ type Category struct {
 }
 
 type Transaction struct {
-	ID              int      `json:"id"`
-	AccountID       int      `json:"account_id"`
-	AccountName     string   `json:"account_name,omitempty"`
-	Date            string   `json:"date"`
-	Amount          float64  `json:"amount"`
-	Kind            string   `json:"kind"`
-	Description     string   `json:"description"`
-	Merchant        *string  `json:"merchant"`
-	CategoryID      *int     `json:"category_id"`
-	CategoryName    *string  `json:"category_name,omitempty"`
-	Notes           *string  `json:"notes"`
-	TransferGroupID *string  `json:"transfer_group_id"`
-	RecurringRuleID *int     `json:"recurring_rule_id"`
-	Source          string   `json:"source"`
-	CreatedAt       string   `json:"created_at"`
+	ID              int     `json:"id"`
+	AccountID       int     `json:"account_id"`
+	AccountName     string  `json:"account_name,omitempty"`
+	Date            string  `json:"date"`
+	Amount          float64 `json:"amount"`
+	Kind            string  `json:"kind"`
+	Description     string  `json:"description"`
+	Merchant        *string `json:"merchant"`
+	CategoryID      *int    `json:"category_id"`
+	CategoryName    *string `json:"category_name,omitempty"`
+	Notes           *string `json:"notes"`
+	TransferGroupID *string `json:"transfer_group_id"`
+	RecurringRuleID *int    `json:"recurring_rule_id"`
+	TradeID         *int    `json:"trade_id"`
+	Source          string  `json:"source"`
+	CreatedAt       string  `json:"created_at"`
 
 	// RunningBalance is only populated by the per-account register view.
 	RunningBalance *float64 `json:"running_balance,omitempty"`
@@ -141,31 +150,31 @@ type Transfer struct {
 }
 
 type RecurringRule struct {
-	ID                int     `json:"id"`
-	HouseholdID       int     `json:"household_id"`
-	Name              string  `json:"name"`
-	Vendor            *string `json:"vendor"`
-	Kind              string  `json:"kind"`
-	AccountID         int     `json:"account_id"`
-	AccountName       string  `json:"account_name,omitempty"`
-	ToAccountID       *int    `json:"to_account_id"`
-	ToAccountName     *string `json:"to_account_name,omitempty"`
-	CategoryID        *int    `json:"category_id"`
-	CategoryName      *string `json:"category_name,omitempty"`
-	Amount            float64 `json:"amount"`
-	Frequency         string  `json:"frequency"`
-	IntervalCount     int     `json:"interval_count"`
-	DayOfMonth        *int    `json:"day_of_month"`
-	SecondDayOfMonth  *int    `json:"second_day_of_month"`
-	DayOfWeek         *int    `json:"day_of_week"`
-	MonthOfYear       *int    `json:"month_of_year"`
-	StartDate         string  `json:"start_date"`
-	EndDate           *string `json:"end_date"`
-	NextDueDate       *string `json:"next_due_date"`
-	AutoPost          bool    `json:"auto_post"`
-	ReminderLeadDays  *int    `json:"reminder_lead_days"`
-	Paused            bool    `json:"paused"`
-	Notes             *string `json:"notes"`
+	ID               int     `json:"id"`
+	HouseholdID      int     `json:"household_id"`
+	Name             string  `json:"name"`
+	Vendor           *string `json:"vendor"`
+	Kind             string  `json:"kind"`
+	AccountID        int     `json:"account_id"`
+	AccountName      string  `json:"account_name,omitempty"`
+	ToAccountID      *int    `json:"to_account_id"`
+	ToAccountName    *string `json:"to_account_name,omitempty"`
+	CategoryID       *int    `json:"category_id"`
+	CategoryName     *string `json:"category_name,omitempty"`
+	Amount           float64 `json:"amount"`
+	Frequency        string  `json:"frequency"`
+	IntervalCount    int     `json:"interval_count"`
+	DayOfMonth       *int    `json:"day_of_month"`
+	SecondDayOfMonth *int    `json:"second_day_of_month"`
+	DayOfWeek        *int    `json:"day_of_week"`
+	MonthOfYear      *int    `json:"month_of_year"`
+	StartDate        string  `json:"start_date"`
+	EndDate          *string `json:"end_date"`
+	NextDueDate      *string `json:"next_due_date"`
+	AutoPost         bool    `json:"auto_post"`
+	ReminderLeadDays *int    `json:"reminder_lead_days"`
+	Paused           bool    `json:"paused"`
+	Notes            *string `json:"notes"`
 }
 
 type Occurrence struct {
@@ -204,6 +213,39 @@ type Goal struct {
 	Notes        *string `json:"notes"`
 	Achieved     bool    `json:"achieved"`
 	Saved        float64 `json:"saved"`
+}
+
+// Trade is one entry in an investment account's trade log. Side is one of the
+// portfolio.Side* constants. Amount is the dollar figure (see portfolio.CashAmount).
+type Trade struct {
+	ID           int     `json:"id"`
+	AccountID    int     `json:"account_id"`
+	Symbol       string  `json:"symbol"`
+	SecurityName *string `json:"security_name"`
+	Side         string  `json:"side"`
+	TradeDate    string  `json:"trade_date"`
+	Shares       float64 `json:"shares"`
+	Price        float64 `json:"price"`
+	Fees         float64 `json:"fees"`
+	Amount       float64 `json:"amount"`
+	Notes        *string `json:"notes"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+// Security is the latest known price for a symbol. It is market data shared by
+// every household, not something any one household owns.
+type Security struct {
+	Symbol        string   `json:"symbol"`
+	Name          *string  `json:"name"`
+	QuoteType     *string  `json:"quote_type"`
+	Currency      string   `json:"currency"`
+	Exchange      *string  `json:"exchange"`
+	Price         float64  `json:"price"`
+	PreviousClose *float64 `json:"previous_close"`
+	// PriceTime is nil when the price was seeded from a trade and no quote has
+	// ever been fetched for the symbol.
+	PriceTime  *string `json:"price_time"`
+	FetchError *string `json:"fetch_error"`
 }
 
 type NetWorthPoint struct {

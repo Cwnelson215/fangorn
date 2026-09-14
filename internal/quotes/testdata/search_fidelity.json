@@ -1,0 +1,52 @@
+{
+ "quotes": [
+  {
+   "exchange": "NAS",
+   "shortname": "Fidelity Total Market Index Fun",
+   "quoteType": "MUTUALFUND",
+   "symbol": "FZROX",
+   "index": "quotes",
+   "score": 20903.0,
+   "typeDisp": "Fund",
+   "longname": "Fidelity ZERO Total Market Index",
+   "exchDisp": "NASDAQ",
+   "isYahooFinance": true
+  },
+  {
+   "exchange": "NAS",
+   "shortname": "Fidelity International Index Fu",
+   "quoteType": "MUTUALFUND",
+   "symbol": "FZILX",
+   "index": "quotes",
+   "score": 20551.0,
+   "typeDisp": "Fund",
+   "longname": "Fidelity ZERO International Index",
+   "exchDisp": "NASDAQ",
+   "isYahooFinance": true
+  },
+  {
+   "exchange": "NAS",
+   "shortname": "Fidelity ZERO Large Cap Index F",
+   "quoteType": "MUTUALFUND",
+   "symbol": "FNILX",
+   "index": "quotes",
+   "score": 20434.0,
+   "typeDisp": "Fund",
+   "longname": "Fidelity ZERO Large Cap Index",
+   "exchDisp": "NASDAQ",
+   "isYahooFinance": true
+  },
+  {
+   "exchange": "NAS",
+   "shortname": "Fidelity ZERO Extended Market I",
+   "quoteType": "MUTUALFUND",
+   "symbol": "FZIPX",
+   "index": "quotes",
+   "score": 20141.0,
+   "typeDisp": "Fund",
+   "longname": "Fidelity ZERO Extended Market Index",
+   "exchDisp": "NASDAQ",
+   "isYahooFinance": true
+  }
+ ]
+}

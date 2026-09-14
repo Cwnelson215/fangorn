@@ -30,6 +30,58 @@ export function formatSigned(amount: number): string {
 	return sign + currency.format(Math.abs(amount));
 }
 
+/** A price, which unlike an amount can carry up to four decimals: $19.905. */
+const price = new Intl.NumberFormat('en-US', {
+	style: 'currency',
+	currency: 'USD',
+	minimumFractionDigits: 2,
+	maximumFractionDigits: 4
+});
+
+export function formatPrice(amount: number): string {
+	return price.format(amount);
+}
+
+const shares = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
+
+/** Share counts without trailing zeros: 12.5, 25.123, 100. */
+export function formatShares(n: number): string {
+	return shares.format(n);
+}
+
+const percent = new Intl.NumberFormat('en-US', {
+	style: 'percent',
+	minimumFractionDigits: 2,
+	maximumFractionDigits: 2
+});
+
+/** Formats a ratio (0.0123 → "1.23%"). Signed adds + or − like formatSigned. */
+export function formatPercent(ratio: number, signed = false): string {
+	if (!signed) return percent.format(ratio);
+	const sign = ratio < 0 ? '−' : '+';
+	return sign + percent.format(Math.abs(ratio));
+}
+
+/** "4:00 PM ET" today, or "Sep 11, 4:00 PM ET" for an older price. */
+export function formatMarketTime(iso: string): string {
+	const d = new Date(iso);
+	const sameDay =
+		d.toLocaleDateString('en-US', { timeZone: 'America/New_York' }) ===
+		new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+	const time = d.toLocaleTimeString('en-US', {
+		timeZone: 'America/New_York',
+		hour: 'numeric',
+		minute: '2-digit'
+	});
+	if (sameDay) return `${time} ET`;
+	const day = d.toLocaleDateString('en-US', {
+		timeZone: 'America/New_York',
+		month: 'short',
+		day: 'numeric'
+	});
+	return `${day}, ${time} ET`;
+}
+
 /**
  * Parses a YYYY-MM-DD date without timezone drift. `new Date('2026-01-15')`
  * parses as UTC midnight and renders as the 14th anywhere west of Greenwich, so

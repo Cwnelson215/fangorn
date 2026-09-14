@@ -11,18 +11,17 @@ import (
 )
 
 // accountSelect is the shared projection. Balance is always computed rather than
-// cached: starting_balance plus every transaction on the account. Because amounts
-// are signed relative to the account, this is correct for liabilities too — a
-// credit card's purchases are negative, so its balance goes further into the red.
+// cached, from accountBalances: cash (starting_balance plus every transaction)
+// plus the market value of any holdings. Because amounts are signed relative to
+// the account, this is correct for liabilities too — a credit card's purchases
+// are negative, so its balance goes further into the red.
 const accountSelect = `
 	SELECT a.id, a.household_id, a.name, a.institution_name, a.type, a.class, a.mask,
 	       a.starting_balance, a.starting_balance_date, a.currency, a.color, a.notes,
 	       a.archived_at IS NOT NULL AS archived,
-	       a.starting_balance + COALESCE(t.total, 0) AS balance
+	       b.cash_balance, b.holdings_value, b.cash_balance + b.holdings_value AS balance
 	FROM accounts a
-	LEFT JOIN (
-		SELECT account_id, SUM(amount) AS total FROM transactions GROUP BY account_id
-	) t ON t.account_id = a.id`
+	JOIN (` + accountBalances + `) b ON b.account_id = a.id`
 
 func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	var a models.Account
@@ -31,7 +30,7 @@ func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	err := rows.Scan(
 		&a.ID, &a.HouseholdID, &a.Name, &institution, &a.Type, &a.Class, &mask,
 		&a.StartingBalance, &startDate, &a.Currency, &color, &notes,
-		&a.Archived, &a.Balance,
+		&a.Archived, &a.CashBalance, &a.HoldingsValue, &a.Balance,
 	)
 	if err != nil {
 		return a, err
@@ -146,6 +145,21 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		return models.Account{}, err
 	}
 
+	// Trades only make sense on an investment account, so one that holds any
+	// cannot be turned into something else out from under them.
+	if in.Type != models.AccountInvestment {
+		var hasTrades bool
+		err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM trades WHERE household_id = $1 AND account_id = $2)`,
+			householdID, id).Scan(&hasTrades)
+		if err != nil {
+			return models.Account{}, fmt.Errorf("checking for trades: %w", err)
+		}
+		if hasTrades {
+			return models.Account{}, invalid("this account has trades logged, so it has to stay an investment account")
+		}
+	}
+
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE accounts SET
 		   name = $1, institution_name = $2, type = $3, class = $4, mask = $5,
@@ -199,7 +213,9 @@ func (s *Service) DeleteAccount(ctx context.Context, householdID, id int) error 
 }
 
 // Register returns an account's transactions newest-first, each carrying the
-// running balance as of that transaction. The window function sums oldest-first
+// running balance as of that transaction. For an investment account that running
+// balance is cash only — holdings are valued at today's prices, which says
+// nothing about what they were worth on the date of an old transaction. The window function sums oldest-first
 // so the running total reads as a bank statement would; the outer query then
 // flips the order for display.
 func (s *Service) Register(ctx context.Context, householdID, accountID, limit int) ([]models.Transaction, error) {
@@ -213,11 +229,11 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, account_id, date, amount, kind, description, merchant,
 		        category_id, category_name, notes, transfer_group_id,
-		        recurring_rule_id, source, created_at, running_balance
+		        recurring_rule_id, trade_id, source, created_at, running_balance
 		 FROM (
 		   SELECT t.id, t.account_id, t.date, t.amount, t.kind, t.description, t.merchant,
 		          t.category_id, c.name AS category_name, t.notes, t.transfer_group_id,
-		          t.recurring_rule_id, t.source, t.created_at,
+		          t.recurring_rule_id, t.trade_id, t.source, t.created_at,
 		          a.starting_balance + SUM(t.amount) OVER (
 		              ORDER BY t.date, t.id ROWS UNBOUNDED PRECEDING
 		          ) AS running_balance
@@ -239,12 +255,12 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 	for rows.Next() {
 		var t models.Transaction
 		var merchant, categoryName, notes, groupID sql.NullString
-		var categoryID, ruleID sql.NullInt64
+		var categoryID, ruleID, tradeID sql.NullInt64
 		var running sql.NullFloat64
 		var date, createdAt time.Time
 		if err := rows.Scan(
 			&t.ID, &t.AccountID, &date, &t.Amount, &t.Kind, &t.Description, &merchant,
-			&categoryID, &categoryName, &notes, &groupID, &ruleID, &t.Source,
+			&categoryID, &categoryName, &notes, &groupID, &ruleID, &tradeID, &t.Source,
 			&createdAt, &running,
 		); err != nil {
 			return nil, fmt.Errorf("scanning register row: %w", err)
@@ -257,6 +273,7 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 		t.Notes = strPtr(notes)
 		t.TransferGroupID = strPtr(groupID)
 		t.RecurringRuleID = intPtr(ruleID)
+		t.TradeID = intPtr(tradeID)
 		t.RunningBalance = floatPtr(running)
 		out = append(out, t)
 	}

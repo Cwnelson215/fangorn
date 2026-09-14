@@ -2,11 +2,15 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/cwnelson/fangorn/internal/ledger"
 	"github.com/cwnelson/fangorn/internal/models"
+	"github.com/cwnelson/fangorn/internal/portfolio"
+	"github.com/cwnelson/fangorn/internal/prices"
+	"github.com/cwnelson/fangorn/internal/quotes"
 	"github.com/cwnelson/fangorn/internal/testdb"
 )
 
@@ -38,7 +42,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	return &fixture{
-		t: t, ctx: context.Background(), svc: svc, sched: New(svc, time.Minute, 60),
+		t: t, ctx: context.Background(), svc: svc, sched: New(svc, nil, time.Minute, 60),
 		household: household, checking: checking,
 	}
 }
@@ -235,5 +239,48 @@ func TestNetWorthSnapshotIsOneRowPerDay(t *testing.T) {
 	}
 	if history[0].NetWorth != 750 {
 		t.Errorf("snapshot net worth = %.2f, want the latest figure 750.00", history[0].NetWorth)
+	}
+}
+
+// staticProvider quotes every symbol at one price.
+type staticProvider struct{ price float64 }
+
+func (p *staticProvider) Quote(_ context.Context, symbol string) (quotes.Quote, error) {
+	return quotes.Quote{Symbol: symbol, QuoteType: "MUTUALFUND", Currency: "USD", Price: p.price, PriceTime: time.Now()}, nil
+}
+func (p *staticProvider) History(context.Context, string, time.Time) ([]quotes.Close, error) {
+	return nil, nil
+}
+func (p *staticProvider) Search(context.Context, string) ([]quotes.Match, error) { return nil, nil }
+
+// The snapshot has to value holdings at freshly fetched prices, not whatever was
+// stored when the trade was logged.
+func TestSnapshotUsesRefreshedPrices(t *testing.T) {
+	f := newFixture(t)
+	f.sched.prices = prices.New(f.svc, &staticProvider{price: 25}, time.Minute)
+
+	brokerage, err := f.svc.CreateAccount(f.ctx, f.household.ID, ledger.AccountInput{
+		Name: "Brokerage", Type: models.AccountInvestment, StartingBalance: 1000, StartingBalanceDate: "2025-01-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbol := fmt.Sprintf("SNAP%d", f.household.ID)
+	_, err = f.svc.CreateTrade(f.ctx, f.household.ID, brokerage.ID, ledger.TradeInput{
+		Symbol: symbol, Side: portfolio.SideBuy, TradeDate: "2025-02-01", Shares: 10, Price: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.run()
+
+	history, err := f.svc.NetWorthHistory(f.ctx, f.household.ID, 1)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("history = %v, %v", history, err)
+	}
+	// checking 1000 + brokerage cash 800 + 10 shares at the fetched 25
+	if got, want := history[0].NetWorth, 1000.0+800+250; got != want {
+		t.Errorf("net worth = %.2f, want %.2f", got, want)
 	}
 }

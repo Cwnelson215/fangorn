@@ -12,6 +12,8 @@ export type AccountType =
 
 export type AccountClass = 'asset' | 'liability';
 export type Kind = 'income' | 'expense' | 'transfer';
+/** A transaction can also be the cash side of a trade; rules and occurrences can't. */
+export type TransactionKind = Kind | 'trade';
 export type CategoryKind = 'income' | 'expense';
 
 export type Frequency =
@@ -56,6 +58,11 @@ export interface Account {
 	color: string | null;
 	notes: string | null;
 	archived: boolean;
+	/** starting_balance plus every transaction. */
+	cash_balance: number;
+	/** Market value of an investment account's holdings; 0 for other types. */
+	holdings_value: number;
+	/** cash_balance + holdings_value — the figure net worth adds up. */
 	balance: number;
 }
 
@@ -74,7 +81,7 @@ export interface Transaction {
 	account_name?: string;
 	date: string;
 	amount: number;
-	kind: Kind;
+	kind: TransactionKind;
 	description: string;
 	merchant: string | null;
 	category_id: number | null;
@@ -82,6 +89,7 @@ export interface Transaction {
 	notes: string | null;
 	transfer_group_id: string | null;
 	recurring_rule_id: number | null;
+	trade_id: number | null;
 	source: 'manual' | 'recurring';
 	created_at: string;
 	/** Only present in the per-account register view. */
@@ -201,6 +209,92 @@ export interface Dashboard {
 	upcoming: Occurrence[];
 }
 
+// ---------------------------------------------------------------------------
+// investments
+// ---------------------------------------------------------------------------
+
+/** buy and sell move the account's cash; reinvest and opening only add shares. */
+export type TradeSide = 'buy' | 'sell' | 'reinvest' | 'opening';
+
+export const TRADE_SIDE_LABELS: Record<TradeSide, string> = {
+	buy: 'Buy',
+	sell: 'Sell',
+	reinvest: 'Reinvested dividend',
+	opening: 'Already owned'
+};
+
+export interface Trade {
+	id: number;
+	account_id: number;
+	symbol: string;
+	security_name: string | null;
+	side: TradeSide;
+	trade_date: string;
+	shares: number;
+	price: number;
+	fees: number;
+	/** Dollars paid (buy, incl. fees), received (sell, after fees), or cost basis. */
+	amount: number;
+	notes: string | null;
+	created_at: string;
+}
+
+export interface SecurityMatch {
+	symbol: string;
+	name: string;
+	quote_type: string;
+	exchange: string;
+}
+
+export interface Security {
+	symbol: string;
+	name: string | null;
+	quote_type: string | null;
+	currency: string;
+	exchange: string | null;
+	price: number;
+	previous_close: number | null;
+	/** Null when the price was taken from a trade and never actually quoted. */
+	price_time: string | null;
+	fetch_error: string | null;
+}
+
+export interface HoldingPosition {
+	symbol: string;
+	name: string | null;
+	quote_type: string | null;
+	shares: number;
+	avg_cost: number;
+	cost_basis: number;
+	price: number;
+	previous_close: number | null;
+	market_value: number;
+	day_change: number | null;
+	/** Ratios, not percentages: 0.012 is 1.2%. */
+	day_change_pct: number | null;
+	unrealized_gain: number;
+	unrealized_gain_pct: number | null;
+	realized_gain: number;
+	weight: number;
+	price_time: string | null;
+	fetch_error: string | null;
+}
+
+export interface Holdings {
+	account_id: number;
+	cash: number;
+	holdings_value: number;
+	total_value: number;
+	cost_basis: number;
+	unrealized_gain: number;
+	realized_gain: number;
+	day_change: number;
+	day_change_pct: number | null;
+	as_of: string | null;
+	seeded: boolean;
+	positions: HoldingPosition[];
+}
+
 export interface AccountDetail {
 	account: Account;
 	transactions: Transaction[];
@@ -231,6 +325,18 @@ export interface TransactionInput {
 	description: string;
 	merchant: string | null;
 	category_id: number | null;
+	notes: string | null;
+}
+
+/** Omit amount to have the server use shares × price ± fees. */
+export interface TradeInput {
+	symbol: string;
+	side: TradeSide;
+	trade_date: string;
+	shares: number;
+	price: number;
+	fees: number;
+	amount: number | null;
 	notes: string | null;
 }
 

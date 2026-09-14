@@ -1,0 +1,125 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "USD",
+     "symbol": "FZROX",
+     "exchangeName": "NAS",
+     "fullExchangeName": "Nasdaq",
+     "instrumentType": "MUTUALFUND",
+     "firstTradeDate": 1533303000,
+     "regularMarketTime": 1789387814,
+     "hasPrePostMarketData": false,
+     "gmtoffset": -14400,
+     "timezone": "EDT",
+     "exchangeTimezoneName": "America/New_York",
+     "regularMarketPrice": 26.71,
+     "regularMarketChangePercent": 0.831,
+     "fulldayPrice": 26.71,
+     "fulldayChange": 0.22,
+     "fulldayChangePercent": 0.831,
+     "fiftyTwoWeekHigh": 27.27,
+     "fiftyTwoWeekLow": 22.04,
+     "longName": "Fidelity ZERO Total Market Index",
+     "shortName": "Fidelity Total Market Index Fun",
+     "chartPreviousClose": 26.96,
+     "priceHint": 2,
+     "currentTradingPeriod": {
+      "pre": {
+       "timezone": "EDT",
+       "start": 1789372800,
+       "end": 1789392600,
+       "gmtoffset": -14400
+      },
+      "regular": {
+       "timezone": "EDT",
+       "start": 1789392600,
+       "end": 1789416000,
+       "gmtoffset": -14400
+      },
+      "post": {
+       "timezone": "EDT",
+       "start": 1789416000,
+       "end": 1789430400,
+       "gmtoffset": -14400
+      }
+     },
+     "dataGranularity": "1d",
+     "range": "5d",
+     "validRanges": [
+      "1mo",
+      "3mo",
+      "6mo",
+      "ytd",
+      "1y",
+      "2y",
+      "5y",
+      "10y",
+      "max"
+     ]
+    },
+    "timestamp": [
+     1788874200,
+     1788960600,
+     1789047000,
+     1789133400,
+     1789392600
+    ],
+    "indicators": {
+     "quote": [
+      {
+       "close": [
+        26.799999237060547,
+        26.649999618530273,
+        26.489999771118164,
+        26.709999084472656,
+        null
+       ],
+       "low": [
+        26.799999237060547,
+        26.649999618530273,
+        26.489999771118164,
+        26.709999084472656,
+        null
+       ],
+       "volume": [
+        0,
+        0,
+        0,
+        0,
+        null
+       ],
+       "open": [
+        26.799999237060547,
+        26.649999618530273,
+        26.489999771118164,
+        26.709999084472656,
+        null
+       ],
+       "high": [
+        26.799999237060547,
+        26.649999618530273,
+        26.489999771118164,
+        26.709999084472656,
+        null
+       ]
+      }
+     ],
+     "adjclose": [
+      {
+       "adjclose": [
+        26.799999237060547,
+        26.649999618530273,
+        26.489999771118164,
+        26.709999084472656,
+        null
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}

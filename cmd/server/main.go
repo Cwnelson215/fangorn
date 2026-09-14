@@ -10,6 +10,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	// The production image is a bare alpine with no zoneinfo. Without the
+	// embedded database, LoadLocation fails and both the household's "today" and
+	// US market hours silently fall back to UTC.
+	_ "time/tzdata"
 
 	fangorn "github.com/cwnelson/fangorn"
 	"github.com/cwnelson/fangorn/internal/config"
@@ -17,6 +21,8 @@ import (
 	"github.com/cwnelson/fangorn/internal/handlers"
 	"github.com/cwnelson/fangorn/internal/ledger"
 	"github.com/cwnelson/fangorn/internal/middleware"
+	"github.com/cwnelson/fangorn/internal/prices"
+	"github.com/cwnelson/fangorn/internal/quotes"
 	"github.com/cwnelson/fangorn/internal/scheduler"
 )
 
@@ -45,8 +51,22 @@ func main() {
 		log.Fatalf("Could not resolve household: %v", err)
 	}
 
+	// Security prices. The provider is optional: with QUOTES_PROVIDER=none, trades
+	// still work and holdings are valued at the prices they were logged at.
+	var provider quotes.Provider
+	switch cfg.QuotesProvider {
+	case "yahoo":
+		provider = quotes.NewYahoo()
+	case "none":
+		log.Println("Price fetching disabled (QUOTES_PROVIDER=none)")
+	default:
+		log.Fatalf("Unknown QUOTES_PROVIDER %q (want yahoo or none)", cfg.QuotesProvider)
+	}
+	refresher := prices.New(svc, provider, cfg.QuotesMarketTTL)
+
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
 	ledgerH := handlers.NewLedgerHandler(svc, householdID)
+	investmentH := handlers.NewInvestmentHandler(svc, refresher, householdID)
 
 	mux := http.NewServeMux()
 
@@ -57,11 +77,12 @@ func main() {
 	mux.HandleFunc("GET /api/auth/status", authH.Status)
 
 	ledgerH.Register(mux)
+	investmentH.Register(mux)
 
-	// The scheduler posts recurring items and snapshots net worth. It runs a pass
-	// immediately on boot, which is what backfills anything missed while the
-	// process was down.
-	sched := scheduler.New(svc, cfg.SchedulerInterval, cfg.SchedulerHorizonDays)
+	// The scheduler posts recurring items, refreshes prices and snapshots net
+	// worth. It runs a pass immediately on boot, which is what backfills anything
+	// missed while the process was down.
+	sched := scheduler.New(svc, refresher, cfg.SchedulerInterval, cfg.SchedulerHorizonDays)
 	schedCtx, stopScheduler := context.WithCancel(context.Background())
 	go sched.Start(schedCtx)
 

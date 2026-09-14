@@ -1,5 +1,5 @@
-// Package scheduler posts recurring transactions when they come due and keeps
-// the net worth history current.
+// Package scheduler posts recurring transactions when they come due, keeps
+// investment prices fresh, and keeps the net worth history current.
 //
 // The design goal is that the scheduler is never the reason a number is wrong.
 // It achieves that by being fully idempotent rather than by running reliably:
@@ -26,6 +26,7 @@ import (
 
 	"github.com/cwnelson/fangorn/internal/ledger"
 	"github.com/cwnelson/fangorn/internal/models"
+	"github.com/cwnelson/fangorn/internal/prices"
 )
 
 // advisoryLockKey is an arbitrary constant identifying this app's scheduler lock.
@@ -36,18 +37,25 @@ const advisoryLockKey int64 = 0x66616e676f726e1 // "fangorn" + 1
 
 type Scheduler struct {
 	svc         *ledger.Service
+	prices      *prices.Refresher
 	interval    time.Duration
 	horizonDays int
 }
 
-func New(svc *ledger.Service, interval time.Duration, horizonDays int) *Scheduler {
+// priceRefreshBudget caps how long one household's price refresh may hold up its
+// net worth snapshot. A slow provider costs freshness, never the snapshot.
+const priceRefreshBudget = 30 * time.Second
+
+// New builds a scheduler. refresher may be nil, in which case holdings are
+// snapshotted at whatever prices are already stored.
+func New(svc *ledger.Service, refresher *prices.Refresher, interval time.Duration, horizonDays int) *Scheduler {
 	if interval <= 0 {
 		interval = 5 * time.Minute
 	}
 	if horizonDays <= 0 {
 		horizonDays = 60
 	}
-	return &Scheduler{svc: svc, interval: interval, horizonDays: horizonDays}
+	return &Scheduler{svc: svc, prices: refresher, interval: interval, horizonDays: horizonDays}
 }
 
 // Start runs a tick immediately, then on every interval until ctx is cancelled.
@@ -142,8 +150,32 @@ func (s *Scheduler) runHousehold(ctx context.Context, household ledger.Household
 		log.Printf("Scheduler: posted %d recurring transaction(s) for household %d", posted, household.ID)
 	}
 
+	// Prices before the snapshot, so the day's net worth values holdings at the
+	// latest figures rather than whatever was last fetched.
+	s.refreshPrices(ctx, household)
+
 	if err := s.svc.SnapshotNetWorth(ctx, household.ID, today); err != nil {
 		log.Printf("Scheduler: net worth snapshot for household %d: %v", household.ID, err)
+	}
+}
+
+// refreshPrices fetches stale prices for everything the household holds. It is
+// per household rather than once per tick so it can be tested through
+// runHousehold like everything else here; a symbol two households share is only
+// fetched once, because the second sees it already fresh.
+func (s *Scheduler) refreshPrices(ctx context.Context, household ledger.Household) {
+	if s.prices == nil {
+		return
+	}
+	symbols, err := s.svc.HouseholdSymbols(ctx, household.ID)
+	if err != nil {
+		log.Printf("Scheduler: cannot list held symbols for household %d: %v", household.ID, err)
+		return
+	}
+	rctx, cancel := context.WithTimeout(ctx, priceRefreshBudget)
+	defer cancel()
+	if err := s.prices.RefreshStale(rctx, symbols); err != nil {
+		log.Printf("Scheduler: price refresh for household %d: %v", household.ID, err)
 	}
 }
 

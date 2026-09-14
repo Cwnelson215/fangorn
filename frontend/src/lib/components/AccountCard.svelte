@@ -28,10 +28,16 @@
 		<span class="balance-value" class:debt={isLiability && account.balance !== 0}>
 			{formatCurrency(displayBalance)}
 		</span>
-		<span class="since">
-			from {formatCurrency(Math.abs(account.starting_balance))} on
-			{formatDate(account.starting_balance_date)}
-		</span>
+		{#if account.type === 'investment'}
+			<span class="since">
+				Cash {formatCurrency(account.cash_balance)} · Invested {formatCurrency(account.holdings_value)}
+			</span>
+		{:else}
+			<span class="since">
+				from {formatCurrency(Math.abs(account.starting_balance))} on
+				{formatDate(account.starting_balance_date)}
+			</span>
+		{/if}
 	</div>
 
 	{#if account.archived}

@@ -18,17 +18,18 @@ import (
 // The date is passed in rather than using CURRENT_DATE so it comes from the
 // household's timezone, matching how the scheduler decides what is due.
 //
+// Balances come from accountBalances, so an investment account counts at its
+// latest known prices — which is why the scheduler refreshes prices first.
+//
 // Note the sign handling: liability balances are stored negative, so the debt
 // total is negated to report as a positive number, and net worth is just the sum
 // of every balance.
 func (s *Service) SnapshotNetWorth(ctx context.Context, householdID int, day time.Time) error {
 	_, err := s.db.ExecContext(ctx,
 		`WITH balances AS (
-		   SELECT a.class,
-		          a.starting_balance + COALESCE((
-		            SELECT SUM(t.amount) FROM transactions t WHERE t.account_id = a.id
-		          ), 0) AS balance
+		   SELECT a.class, b.cash_balance + b.holdings_value AS balance
 		   FROM accounts a
+		   JOIN (`+accountBalances+`) b ON b.account_id = a.id
 		   WHERE a.household_id = $1 AND a.archived_at IS NULL
 		 ), totals AS (
 		   SELECT COALESCE(SUM(balance) FILTER (WHERE class = 'asset'), 0)      AS assets,
