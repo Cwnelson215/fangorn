@@ -136,3 +136,27 @@ func (s *Service) DeleteCategory(ctx context.Context, householdID, id int) error
 	}
 	return nil
 }
+
+// UnarchiveCategory undoes the archive that DeleteCategory falls back to. Without
+// it an archived name is unusable for good: it is hidden from the pickers, yet
+// the unique index still rejects creating a new category with that name.
+func (s *Service) UnarchiveCategory(ctx context.Context, householdID, id int) (models.Category, error) {
+	var c models.Category
+	var color sql.NullString
+	var parent sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`UPDATE categories SET archived_at = NULL
+		 WHERE household_id = $1 AND id = $2
+		 RETURNING id, name, kind, color, parent_id, false`,
+		householdID, id,
+	).Scan(&c.ID, &c.Name, &c.Kind, &color, &parent, &c.Archived)
+	if err == sql.ErrNoRows {
+		return c, ErrNotFound
+	}
+	if err != nil {
+		return c, fmt.Errorf("restoring category: %w", err)
+	}
+	c.Color = strPtr(color)
+	c.ParentID = intPtr(parent)
+	return c, nil
+}

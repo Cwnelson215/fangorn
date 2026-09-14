@@ -16,7 +16,8 @@
 		{ href: '/transactions', label: 'Transactions' },
 		{ href: '/transfers', label: 'Transfers' },
 		{ href: '/recurring', label: 'Recurring' },
-		{ href: '/budgets', label: 'Budgets' }
+		{ href: '/budgets', label: 'Budgets' },
+		{ href: '/categories', label: 'Categories' }
 	];
 
 	function isActive(href: string): boolean {

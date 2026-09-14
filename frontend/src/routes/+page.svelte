@@ -5,6 +5,7 @@
 	import { formatCurrency, formatDate, relativeDays } from '$lib/format';
 	import SpendingChart from '$lib/components/SpendingChart.svelte';
 	import NetWorthChart from '$lib/components/NetWorthChart.svelte';
+	import TrendChart from '$lib/components/TrendChart.svelte';
 
 	let data = $state<Dashboard | null>(null);
 	let loading = $state(true);
@@ -149,6 +150,15 @@
 						<p class="muted small">No spending logged in this period yet.</p>
 					{/if}
 				</div>
+			</div>
+
+			<div class="card">
+				<h2>Weekly Spending</h2>
+				{#if data.weekly_spending.some((w) => w.amount > 0)}
+					<TrendChart data={data.weekly_spending} />
+				{:else}
+					<p class="muted small">No spending logged in the last 12 weeks.</p>
+				{/if}
 			</div>
 
 			{#if data.budgets.length > 0}

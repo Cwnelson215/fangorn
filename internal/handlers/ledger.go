@@ -38,6 +38,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/categories", h.CreateCategory)
 	mux.HandleFunc("PATCH /api/categories/{id}", h.UpdateCategory)
 	mux.HandleFunc("DELETE /api/categories/{id}", h.DeleteCategory)
+	mux.HandleFunc("POST /api/categories/{id}/unarchive", h.UnarchiveCategory)
 
 	mux.HandleFunc("GET /api/transactions", h.ListTransactions)
 	mux.HandleFunc("POST /api/transactions", h.CreateTransaction)
@@ -242,6 +243,19 @@ func (h *LedgerHandler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *LedgerHandler) UnarchiveCategory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	category, err := h.svc.UnarchiveCategory(r.Context(), h.householdID, id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, category)
 }
 
 // ---------------------------------------------------------------------------

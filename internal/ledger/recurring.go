@@ -250,12 +250,9 @@ func (s *Service) UpdateRule(ctx context.Context, householdID, id int, in RuleIn
 
 	// The schedule may have moved, so recompute next_due_date from the last date
 	// actually posted rather than trusting the stored value.
-	var lastPosted sql.NullTime
-	err = s.db.QueryRowContext(ctx,
-		`SELECT MAX(due_date) FROM recurring_occurrences
-		 WHERE rule_id = $1 AND status <> 'scheduled'`, id).Scan(&lastPosted)
+	lastPosted, err := s.LastHandledOccurrence(ctx, id)
 	if err != nil {
-		return models.RecurringRule{}, fmt.Errorf("reading rule history: %w", err)
+		return models.RecurringRule{}, err
 	}
 
 	var nextDue any
@@ -294,6 +291,25 @@ func (s *Service) UpdateRule(ctx context.Context, householdID, id int, in RuleIn
 	}
 
 	return s.GetRule(ctx, householdID, id)
+}
+
+// LastHandledOccurrence returns the due date of a rule's latest posted or
+// skipped occurrence — the point before which its schedule is settled history.
+// Invalid means nothing has been handled yet.
+//
+// Both the scheduler and UpdateRule start from here rather than from start_date.
+// Once a rule's dates have changed, the new schedule's past dates are not in
+// recurring_occurrences, so the unique key cannot stop them from being posted;
+// this boundary is what does.
+func (s *Service) LastHandledOccurrence(ctx context.Context, ruleID int) (sql.NullTime, error) {
+	var last sql.NullTime
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MAX(due_date) FROM recurring_occurrences
+		 WHERE rule_id = $1 AND status <> 'scheduled'`, ruleID).Scan(&last)
+	if err != nil {
+		return last, fmt.Errorf("reading rule history: %w", err)
+	}
+	return last, nil
 }
 
 func nextAfterPosted(spec recurring.Rule, lastPosted sql.NullTime) (time.Time, bool) {

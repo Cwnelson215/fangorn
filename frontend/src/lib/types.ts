@@ -171,6 +171,11 @@ export interface CategorySpend {
 	amount: number;
 }
 
+export interface WeekSpend {
+	week: string; // the Monday the week starts on
+	amount: number;
+}
+
 export interface NetWorthPoint {
 	date: string;
 	total_assets: number;
@@ -189,6 +194,7 @@ export interface Dashboard {
 	net_worth: number;
 	accounts: Account[];
 	categories: CategorySpend[];
+	weekly_spending: WeekSpend[];
 	net_worth_history: NetWorthPoint[];
 	budgets: Budget[];
 	goals: Goal[];

@@ -28,11 +28,25 @@ Go toolchain ignores because the directory name starts with `_`. See `_deprecate
 ```bash
 docker compose up -d          # Postgres for local dev
 source .env && go run ./cmd/server   # backend on :3000
-go test ./...
+go test ./...                 # DB-backed ledger/scheduler tests skip unless FANGORN_TEST_DSN is set
 cd frontend && npm run dev    # Vite on :5173, proxies /api and /health to :3000
 cd frontend && npm run check  # svelte-check — keep this clean
 cd frontend && npm run build  # required before `go build`; the binary embeds frontend/build
 ```
+
+`internal/ledger` and `internal/scheduler` tests run against real Postgres. Use a **disposable**
+instance, never the dev volume — migration `006` drops tables:
+
+```bash
+docker run -d --rm --name fangorn-test-pg -p 55432:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=fangorn_test postgres:16-alpine
+export FANGORN_TEST_DSN="host=localhost port=55432 user=postgres password=postgres dbname=fangorn_test sslmode=disable"
+go test ./...
+```
+
+Tests isolate by giving each one its own household (`internal/testdb`), not by truncating, so they
+can share the database concurrently. Scheduler tests call `runHousehold` rather than `Tick`, which
+would sweep every test's household.
 
 ## The Two Conventions That Matter
 
@@ -72,6 +86,7 @@ internal/scheduler/       posts due recurring items, snapshots net worth
 internal/handlers/        HTTP layer
 internal/middleware/      auth, CORS, logging
 internal/crypto/          AES-GCM (unused today; kept for future invite tokens)
+internal/testdb/          test-only: migrated Postgres + a fresh household per test
 frontend/                 SvelteKit SPA
 _deprecated/              the bank-sync era, not compiled
 ```
@@ -99,6 +114,10 @@ boot, under a `pg_try_advisory_lock`. It is **idempotent rather than reliable**:
 - posting flips `scheduled` → `posted` in the same transaction that writes the ledger rows, guarded
   by the current status, so a lost race rolls back instead of double-posting
 - net worth snapshots upsert on `(household_id, snapshot_date)`
+- occurrences are only materialized **after the rule's last posted/skipped date**
+  (`ledger.LastHandledOccurrence`). The unique key alone is not enough: editing a rule changes its
+  dates, and the new schedule's past dates are not in the table yet. Without this boundary, moving a
+  monthly charge from the 1st to the 15th back-posted every 15th since `start_date`.
 
 So a tick can run twice, overlap another process, or not run for a week, and the ledger still lands
 correct. That last case is not hypothetical: the AWS deployment scales to zero overnight

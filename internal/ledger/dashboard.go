@@ -16,6 +16,15 @@ type CategorySpend struct {
 	Amount       float64 `json:"amount"`
 }
 
+// WeekSpend is one week of expenses. Week is the Monday it starts on.
+type WeekSpend struct {
+	Week   string  `json:"week"`
+	Amount float64 `json:"amount"`
+}
+
+// trendWeeks is how far back the dashboard's spending trend reaches.
+const trendWeeks = 12
+
 type Dashboard struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -30,6 +39,7 @@ type Dashboard struct {
 
 	Accounts        []models.Account       `json:"accounts"`
 	Categories      []CategorySpend        `json:"categories"`
+	WeeklySpending  []WeekSpend            `json:"weekly_spending"`
 	NetWorthHistory []models.NetWorthPoint `json:"net_worth_history"`
 	Budgets         []models.Budget        `json:"budgets"`
 	Goals           []models.Goal          `json:"goals"`
@@ -82,6 +92,9 @@ func (s *Service) Dashboard(ctx context.Context, householdID int, from, to strin
 	if d.Categories, err = s.categorySpend(ctx, householdID, from, to); err != nil {
 		return d, err
 	}
+	if d.WeeklySpending, err = s.weeklySpending(ctx, householdID, to); err != nil {
+		return d, err
+	}
 	if d.NetWorthHistory, err = s.NetWorthHistory(ctx, householdID, 365); err != nil {
 		return d, err
 	}
@@ -95,6 +108,45 @@ func (s *Service) Dashboard(ctx context.Context, householdID int, from, to strin
 		return d, err
 	}
 	return d, nil
+}
+
+// weeklySpending totals expenses per week for the trendWeeks weeks ending with
+// the one containing `to`. The weeks come from generate_series rather than from
+// the transactions, so a week with no spending is a zero instead of a gap the
+// chart would draw straight across.
+func (s *Service) weeklySpending(ctx context.Context, householdID int, to string) ([]WeekSpend, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT w.week::date, COALESCE(-SUM(t.amount), 0)
+		 FROM generate_series(
+		        date_trunc('week', $2::date - ($3 * INTERVAL '1 week')),
+		        date_trunc('week', $2::date),
+		        INTERVAL '1 week'
+		      ) AS w(week)
+		 LEFT JOIN transactions t
+		   ON t.household_id = $1
+		  AND t.kind = 'expense'
+		  AND t.date >= w.week
+		  AND t.date < w.week + INTERVAL '1 week'
+		  AND t.date <= $2::date
+		 GROUP BY w.week
+		 ORDER BY w.week`,
+		householdID, to, trendWeeks-1)
+	if err != nil {
+		return nil, fmt.Errorf("computing weekly spending: %w", err)
+	}
+	defer rows.Close()
+
+	out := []WeekSpend{}
+	for rows.Next() {
+		var ws WeekSpend
+		var week time.Time
+		if err := rows.Scan(&week, &ws.Amount); err != nil {
+			return nil, fmt.Errorf("scanning weekly spending: %w", err)
+		}
+		ws.Week = dateStr(week)
+		out = append(out, ws)
+	}
+	return out, rows.Err()
 }
 
 func (s *Service) categorySpend(ctx context.Context, householdID int, from, to string) ([]CategorySpend, error) {

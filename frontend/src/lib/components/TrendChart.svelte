@@ -1,32 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
-	import type { Transaction } from '$lib/types';
+	import type { WeekSpend } from '$lib/types';
 	import { parseDate } from '$lib/format';
 
-	let { transactions }: { transactions: Transaction[] } = $props();
+	// Weekly totals arrive already bucketed from the dashboard endpoint, with
+	// empty weeks as zeros. Summing raw transactions here instead would silently
+	// undercount once a period held more rows than the transactions API returns.
+	let { data: weeks }: { data: WeekSpend[] } = $props();
 	let container: HTMLDivElement;
 
 	function render() {
 		if (!container) return;
 		d3.select(container).selectAll('*').remove();
-		if (transactions.length === 0) return;
 
-		// Weekly spend. Expenses are negative under the ledger's sign convention,
-		// so they are filtered on `kind` and negated into positive magnitudes for
-		// the chart. Transfers are excluded — moving money is not spending it.
-		const byWeek = new Map<string, number>();
-		for (const txn of transactions) {
-			if (txn.kind !== 'expense') continue;
-			const week = d3.timeWeek.floor(parseDate(txn.date));
-			const key = week.toISOString().slice(0, 10);
-			byWeek.set(key, (byWeek.get(key) || 0) + -txn.amount);
-		}
-
-		const data = Array.from(byWeek.entries())
-			.map(([date, amount]) => ({ date: new Date(date), amount }))
-			.sort((a, b) => a.date.getTime() - b.date.getTime());
-
+		const data = weeks.map((w) => ({ date: parseDate(w.week), amount: w.amount }));
 		if (data.length < 2) return;
 
 		const margin = { top: 20, right: 20, bottom: 40, left: 60 };
@@ -87,7 +75,7 @@
 	}
 
 	onMount(render);
-	$effect(() => { transactions; render(); });
+	$effect(() => { weeks; render(); });
 </script>
 
 <div bind:this={container} class="chart"></div>

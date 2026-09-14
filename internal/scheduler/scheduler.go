@@ -157,14 +157,24 @@ func (s *Scheduler) processRule(ctx context.Context, rule models.RecurringRule, 
 
 	horizon := today.AddDate(0, 0, s.horizonDays)
 
-	start, err := models.ParseDate(rule.StartDate)
+	// Generate from the rule's own start rather than from "today minus something",
+	// so a rule created with a back-dated start backfills its whole history — but
+	// only up to what has already been posted or skipped. Past that point the
+	// schedule is history; if the rule was edited, its new dates before then were
+	// never due and must not be posted now.
+	from, err := models.ParseDate(rule.StartDate)
 	if err != nil {
 		return 0, err
 	}
+	lastHandled, err := s.svc.LastHandledOccurrence(ctx, rule.ID)
+	if err != nil {
+		return 0, err
+	}
+	if lastHandled.Valid && !lastHandled.Time.Before(from) {
+		from = lastHandled.Time.AddDate(0, 0, 1)
+	}
 
-	// Generate from the rule's own start rather than from "today minus something",
-	// so a rule created with a back-dated start backfills its whole history.
-	dates := spec.Occurrences(start, horizon, 0)
+	dates := spec.Occurrences(from, horizon, 0)
 	if err := s.materialize(ctx, rule.ID, dates); err != nil {
 		return 0, err
 	}

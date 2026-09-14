@@ -98,6 +98,8 @@ export const createCategory = (input: CategoryInput) =>
 export const updateCategory = (id: number, input: CategoryInput) =>
 	send<Category>('PATCH', `/api/categories/${id}`, input);
 export const deleteCategory = (id: number) => send<void>('DELETE', `/api/categories/${id}`);
+export const unarchiveCategory = (id: number) =>
+	send<Category>('POST', `/api/categories/${id}/unarchive`);
 
 // ---------------------------------------------------------------------------
 // transactions
