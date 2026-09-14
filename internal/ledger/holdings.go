@@ -3,8 +3,10 @@ package ledger
 import (
 	"context"
 	"math"
+	"sort"
 	"time"
 
+	"github.com/cwnelson/fangorn/internal/models"
 	"github.com/cwnelson/fangorn/internal/portfolio"
 )
 
@@ -39,7 +41,8 @@ type HoldingPosition struct {
 
 // Holdings is an investment account's positions plus its cash.
 type Holdings struct {
-	AccountID     int     `json:"account_id"`
+	// AccountID is 0 (and omitted) for the household-wide summary.
+	AccountID     int     `json:"account_id,omitempty"`
 	Cash          float64 `json:"cash"`
 	HoldingsValue float64 `json:"holdings_value"`
 	TotalValue    float64 `json:"total_value"`
@@ -69,9 +72,13 @@ func (s *Service) Holdings(ctx context.Context, householdID, accountID int) (Hol
 	if err != nil {
 		return Holdings{}, err
 	}
-	h := Holdings{AccountID: accountID, Cash: account.CashBalance, Positions: []HoldingPosition{}}
+	return s.holdingsFor(ctx, account)
+}
 
-	trades, err := loadTrades(ctx, s.db, accountID)
+func (s *Service) holdingsFor(ctx context.Context, account models.Account) (Holdings, error) {
+	h := Holdings{AccountID: account.ID, Cash: account.CashBalance, Positions: []HoldingPosition{}}
+
+	trades, err := loadTrades(ctx, s.db, account.ID)
 	if err != nil {
 		return h, err
 	}
@@ -158,3 +165,148 @@ func (s *Service) Holdings(ctx context.Context, householdID, accountID int) (Hol
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 func ptr[T any](v T) *T { return &v }
+
+// InvestmentAccountValue is one account's line in the household summary.
+type InvestmentAccountValue struct {
+	ID              int      `json:"id"`
+	Name            string   `json:"name"`
+	InstitutionName *string  `json:"institution_name"`
+	Cash            float64  `json:"cash"`
+	HoldingsValue   float64  `json:"holdings_value"`
+	TotalValue      float64  `json:"total_value"`
+	DayChange       float64  `json:"day_change"`
+	DayChangePct    *float64 `json:"day_change_pct"`
+}
+
+// InvestmentsSummary is every non-archived investment account's holdings
+// combined, with a symbol held in two accounts merged into one position.
+type InvestmentsSummary struct {
+	Holdings
+	Accounts []InvestmentAccountValue `json:"accounts"`
+}
+
+// InvestmentsSummary values each investment account exactly as its own page
+// does, then adds the results up. Merging the valued positions — rather than
+// merging share counts and valuing once — keeps the totals equal to the sum of
+// the account pages to the cent, since each position is rounded per account.
+func (s *Service) InvestmentsSummary(ctx context.Context, householdID int) (InvestmentsSummary, error) {
+	out := InvestmentsSummary{
+		Holdings: Holdings{Positions: []HoldingPosition{}},
+		Accounts: []InvestmentAccountValue{},
+	}
+	accounts, err := s.ListAccounts(ctx, householdID, false)
+	if err != nil {
+		return out, err
+	}
+
+	var views []Holdings
+	for _, a := range accounts {
+		if a.Type != models.AccountInvestment {
+			continue
+		}
+		h, err := s.holdingsFor(ctx, a)
+		if err != nil {
+			return out, err
+		}
+		views = append(views, h)
+		out.Accounts = append(out.Accounts, InvestmentAccountValue{
+			ID: a.ID, Name: a.Name, InstitutionName: a.InstitutionName,
+			Cash: h.Cash, HoldingsValue: h.HoldingsValue, TotalValue: h.TotalValue,
+			DayChange: h.DayChange, DayChangePct: h.DayChangePct,
+		})
+	}
+	out.Holdings = mergeHoldings(views)
+	return out, nil
+}
+
+// mergeHoldings adds several accounts' holdings views into one.
+func mergeHoldings(views []Holdings) Holdings {
+	merged := Holdings{Positions: []HoldingPosition{}}
+	bySymbol := map[string]*HoldingPosition{}
+	var order []string
+	var oldest *time.Time
+
+	for _, v := range views {
+		merged.Cash += v.Cash
+		merged.HoldingsValue += v.HoldingsValue
+		merged.CostBasis += v.CostBasis
+		merged.RealizedGain += v.RealizedGain
+		merged.DayChange += v.DayChange
+		merged.Seeded = merged.Seeded || v.Seeded
+		if v.AsOf != nil {
+			if t, err := time.Parse(time.RFC3339, *v.AsOf); err == nil && (oldest == nil || t.Before(*oldest)) {
+				oldest = &t
+			}
+		}
+
+		for _, p := range v.Positions {
+			m, ok := bySymbol[p.Symbol]
+			if !ok {
+				cp := p
+				cp.DayChange = nil
+				cp.Shares, cp.CostBasis, cp.MarketValue = 0, 0, 0
+				cp.UnrealizedGain, cp.RealizedGain = 0, 0
+				m = &cp
+				bySymbol[p.Symbol] = m
+				order = append(order, p.Symbol)
+			}
+			m.Shares += p.Shares
+			m.CostBasis += p.CostBasis
+			m.MarketValue += p.MarketValue
+			m.RealizedGain += p.RealizedGain
+			if p.DayChange != nil {
+				m.DayChange = ptr(derefOr(m.DayChange) + *p.DayChange)
+			}
+		}
+	}
+
+	merged.Cash = round2(merged.Cash)
+	merged.HoldingsValue = round2(merged.HoldingsValue)
+	merged.CostBasis = round2(merged.CostBasis)
+	merged.UnrealizedGain = round2(merged.HoldingsValue - merged.CostBasis)
+	merged.RealizedGain = round2(merged.RealizedGain)
+	merged.DayChange = round2(merged.DayChange)
+	merged.TotalValue = round2(merged.Cash + merged.HoldingsValue)
+	// Positions without a previous close count as unchanged (see Holdings), so
+	// what the holdings were worth yesterday is simply today's value less the change.
+	if previous := merged.HoldingsValue - merged.DayChange; previous > 0 {
+		merged.DayChangePct = ptr(merged.DayChange / previous)
+	}
+	if oldest != nil {
+		s := oldest.UTC().Format(time.RFC3339)
+		merged.AsOf = &s
+	}
+
+	sort.Strings(order)
+	for _, sym := range order {
+		p := bySymbol[sym]
+		p.Shares = portfolio.RoundShares(p.Shares)
+		p.CostBasis = round2(p.CostBasis)
+		p.MarketValue = round2(p.MarketValue)
+		p.RealizedGain = round2(p.RealizedGain)
+		p.UnrealizedGain = round2(p.MarketValue - p.CostBasis)
+		p.AvgCost = 0
+		p.UnrealizedGainPct = nil
+		if p.Shares > 0 {
+			p.AvgCost = p.CostBasis / p.Shares
+		}
+		if p.CostBasis > 0 {
+			p.UnrealizedGainPct = ptr(p.UnrealizedGain / p.CostBasis)
+		}
+		if p.DayChange != nil {
+			p.DayChange = ptr(round2(*p.DayChange))
+		}
+		if merged.HoldingsValue > 0 {
+			p.Weight = p.MarketValue / merged.HoldingsValue
+		}
+		merged.Positions = append(merged.Positions, *p)
+	}
+	return merged
+}
+
+func derefOr(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}

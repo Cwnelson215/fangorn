@@ -1,22 +1,23 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
-	import type { NetWorthPoint } from '$lib/types';
 	import { formatCurrencyWhole, parseDate } from '$lib/format';
 
+	// A dated line of dollar values: net worth snapshots, an account's value.
+	//
 	// The gradient id must be unique per instance: two charts on one page would
 	// otherwise both reference the same <linearGradient> and the second would
 	// silently restyle the first.
-	let { data, id = 'nw' }: { data: NetWorthPoint[]; id?: string } = $props();
+	let { points, id }: { points: { date: string; value: number }[]; id: string } = $props();
 	let container: HTMLDivElement;
 	let gradientId = $derived(`${id}-gradient`);
 
 	function render() {
 		if (!container) return;
 		d3.select(container).selectAll('*').remove();
-		if (data.length < 2) return;
+		if (points.length < 2) return;
 
-		const parsed = data.map((d) => ({ date: parseDate(d.date), value: d.net_worth }));
+		const parsed = points.map((d) => ({ date: parseDate(d.date), value: d.value }));
 
 		const margin = { top: 20, right: 20, bottom: 40, left: 70 };
 		const width = container.clientWidth - margin.left - margin.right;
@@ -28,6 +29,11 @@
 			.attr('height', height + margin.top + margin.bottom)
 			.append('g')
 			.attr('transform', `translate(${margin.left},${margin.top})`);
+
+		// Past a few months, day-of-month labels stop meaning much and a year
+		// boundary becomes ambiguous.
+		const spanDays = (parsed[parsed.length - 1].date.getTime() - parsed[0].date.getTime()) / 86_400_000;
+		const tickFormat = spanDays > 120 ? "%b '%y" : '%b %d';
 
 		const x = d3.scaleTime()
 			.domain(d3.extent(parsed, d => d.date) as [Date, Date])
@@ -41,13 +47,21 @@
 
 		svg.append('g')
 			.attr('transform', `translate(0,${height})`)
-			.call(d3.axisBottom(x).ticks(6).tickFormat(d3.timeFormat('%b %d') as any))
+			.call(d3.axisBottom(x).ticks(6).tickFormat(d3.timeFormat(tickFormat) as any))
 			.selectAll('text')
 			.attr('fill', '#999')
 			.attr('font-size', '0.7rem');
 
+		// SI-abbreviated labels ("$4.4k") collapse into duplicates when the range
+		// is narrow — an investment account moving a few hundred dollars — so
+		// show whole dollars there.
+		const [lo, hi] = y.domain();
+		const yFormat = hi - lo < 5000
+			? (d: d3.NumberValue) => formatCurrencyWhole(d as number)
+			: (d: d3.NumberValue) => `$${d3.format('.3s')(d as number)}`;
+
 		svg.append('g')
-			.call(d3.axisLeft(y).ticks(5).tickFormat(d => `$${d3.format('.2s')(d as number)}`))
+			.call(d3.axisLeft(y).ticks(5).tickFormat(yFormat))
 			.selectAll('text')
 			.attr('fill', '#999')
 			.attr('font-size', '0.7rem');
@@ -112,7 +126,7 @@
 	}
 
 	onMount(render);
-	$effect(() => { data; render(); });
+	$effect(() => { points; render(); });
 </script>
 
 <div bind:this={container} class="chart"></div>

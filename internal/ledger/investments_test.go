@@ -1,7 +1,9 @@
 package ledger_test
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -444,5 +446,218 @@ func TestHeldSymbols(t *testing.T) {
 	inB, err := f.svc.AccountSymbols(f.ctx, f.hh, b.ID)
 	if err != nil || len(inB) != 0 {
 		t.Errorf("account symbols = %v, %v; want none", inB, err)
+	}
+}
+
+func (f *fixture) valueHistory(accountIDs []int, days int) []portfolio.Point {
+	f.t.Helper()
+	pts, err := f.svc.ValueHistory(f.ctx, f.hh, accountIDs, days)
+	if err != nil {
+		f.t.Fatalf("ValueHistory: %v", err)
+	}
+	return pts
+}
+
+func (f *fixture) closes(symbol string, closes map[string]float64) {
+	f.t.Helper()
+	var cs []quotes.Close
+	for date, price := range closes {
+		d, _ := models.ParseDate(date)
+		cs = append(cs, quotes.Close{Date: d, Price: price})
+	}
+	if err := f.svc.SaveHistory(f.ctx, symbol, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), cs); err != nil {
+		f.t.Fatalf("SaveHistory: %v", err)
+	}
+}
+
+// The chart's last point and the holdings view are two computations of the
+// same figure, and must agree.
+func TestValueHistoryEndsAtHoldingsValue(t *testing.T) {
+	f := newFixture(t)
+	brokerage := f.account("Brokerage", models.AccountInvestment, 2000)
+	fund, etf := f.sym("FZROX"), f.sym("VOO")
+
+	f.trade(brokerage.ID, portfolio.SideOpening, fund, "2026-01-01", 40.123, 18.5)
+	f.trade(brokerage.ID, portfolio.SideBuy, etf, "2026-03-02", 1.5, 480)
+	f.closes(fund, map[string]float64{"2026-03-02": 19.25, "2026-06-01": 21})
+	f.price(fund, 22.117, 22)
+	f.price(etf, 512.33, 510)
+
+	pts := f.valueHistory([]int{brokerage.ID}, 0)
+	if len(pts) == 0 || pts[0].Date != "2026-01-01" {
+		t.Fatalf("series should start at the account's first activity, got first=%+v", pts[:min(1, len(pts))])
+	}
+	byDate := map[string]portfolio.Point{}
+	for _, p := range pts {
+		byDate[p.Date] = p
+	}
+	// Before the buy: cash, plus the fund at its opening price (no close yet).
+	money(t, "jan", byDate["2026-01-15"].Value, 2000+portfolio.MarketValue(40.123, 18.5))
+	// After: the buy's cash leg left cash; the ETF is at its trade price, the
+	// fund at the March close.
+	money(t, "march cash", byDate["2026-03-03"].Cash, 2000-720)
+	money(t, "march", byDate["2026-03-03"].Value,
+		2000-720+portfolio.MarketValue(40.123, 19.25)+portfolio.MarketValue(1.5, 480))
+
+	h, err := f.svc.Holdings(f.ctx, f.hh, brokerage.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := pts[len(pts)-1]
+	money(t, "last point vs holdings total", last.Value, h.TotalValue)
+	money(t, "last point cash", last.Cash, h.Cash)
+
+	short := f.valueHistory([]int{brokerage.ID}, 30)
+	if len(short) != 31 {
+		t.Errorf("30 days back should be 31 points including today, got %d", len(short))
+	}
+}
+
+func TestValueHistorySumsAccounts(t *testing.T) {
+	f := newFixture(t)
+	a := f.account("Brokerage", models.AccountInvestment, 100)
+	b := f.account("Roth IRA", models.AccountInvestment, 0)
+	f.account("Checking", models.AccountChecking, 5000) // not counted
+	fund := f.sym("FZROX")
+	f.trade(a.ID, portfolio.SideOpening, fund, "2026-02-01", 10, 20)
+	f.trade(b.ID, portfolio.SideOpening, fund, "2026-04-01", 5, 21)
+	f.price(fund, 23, 22)
+
+	all := f.valueHistory(nil, 0)
+	onlyA := f.valueHistory([]int{a.ID}, 0)
+	onlyB := f.valueHistory([]int{b.ID}, 0)
+	both := f.valueHistory([]int{a.ID, b.ID}, 0)
+
+	if len(all) != len(both) || len(all) != len(onlyA) {
+		t.Fatalf("lengths: all=%d both=%d a=%d", len(all), len(both), len(onlyA))
+	}
+	// Account creation sets starting_balance_date 2026-01-01 on both, so both
+	// start there.
+	if len(onlyB) != len(onlyA) {
+		t.Fatalf("b length %d, a length %d", len(onlyB), len(onlyA))
+	}
+	for i := range all {
+		money(t, "all "+all[i].Date, all[i].Value, onlyA[i].Value+onlyB[i].Value)
+	}
+	money(t, "today", all[len(all)-1].Value, 100+230+115)
+}
+
+func TestValueHistoryScoping(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 100)
+	_, err := f.svc.ValueHistory(f.ctx, f.hh, []int{checking.ID}, 0)
+	wantInvalid(t, err)
+
+	other := newFixture(t)
+	theirs := other.account("Brokerage", models.AccountInvestment, 100)
+	if _, err := f.svc.ValueHistory(f.ctx, f.hh, []int{theirs.ID}, 0); !errors.Is(err, ledger.ErrNotFound) {
+		t.Errorf("another household's account: want ErrNotFound, got %v", err)
+	}
+
+	if pts := f.valueHistory(nil, 0); len(pts) != 0 {
+		t.Errorf("no investment accounts should give no points, got %d", len(pts))
+	}
+}
+
+func TestInvestmentsSummaryMergesAccounts(t *testing.T) {
+	f := newFixture(t)
+	a := f.account("Brokerage", models.AccountInvestment, 1000)
+	b := f.account("Roth IRA", models.AccountInvestment, 500)
+	archived := f.account("Old 401k", models.AccountInvestment, 0)
+	fund, etf := f.sym("FZROX"), f.sym("VOO")
+
+	f.trade(a.ID, portfolio.SideBuy, fund, "2026-02-01", 10.5, 20)
+	f.trade(b.ID, portfolio.SideOpening, fund, "2026-01-05", 3.25, 18)
+	f.trade(b.ID, portfolio.SideBuy, etf, "2026-02-01", 1, 400)
+	f.trade(archived.ID, portfolio.SideOpening, etf, "2026-01-05", 100, 400)
+	if err := f.svc.SetAccountArchived(f.ctx, f.hh, archived.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	f.price(fund, 21.37, 21)
+	f.price(etf, 450.01, 440)
+
+	s, err := f.svc.InvestmentsSummary(f.ctx, f.hh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ha, _ := f.svc.Holdings(f.ctx, f.hh, a.ID)
+	hb, _ := f.svc.Holdings(f.ctx, f.hh, b.ID)
+
+	if len(s.Accounts) != 2 {
+		t.Fatalf("archived account should be left out, got %+v", s.Accounts)
+	}
+	money(t, "total", s.TotalValue, ha.TotalValue+hb.TotalValue)
+	money(t, "cash", s.Cash, ha.Cash+hb.Cash)
+	money(t, "day change", s.DayChange, ha.DayChange+hb.DayChange)
+	money(t, "cost basis", s.CostBasis, ha.CostBasis+hb.CostBasis)
+
+	if len(s.Positions) != 2 || s.Positions[0].Symbol != fund {
+		t.Fatalf("positions = %+v", s.Positions)
+	}
+	p := s.Positions[0]
+	if p.Shares != 13.75 {
+		t.Errorf("merged shares = %v, want 13.75", p.Shares)
+	}
+	money(t, "merged basis", p.CostBasis, 210+58.5)
+	money(t, "merged value", p.MarketValue, ha.Positions[0].MarketValue+hb.Positions[0].MarketValue)
+	var weights float64
+	for _, p := range s.Positions {
+		weights += p.Weight
+	}
+	if math.Abs(weights-1) > 1e-9 {
+		t.Errorf("weights sum to %v", weights)
+	}
+
+	d := f.dashboard("", "")
+	if d.Investments == nil {
+		t.Fatal("dashboard should show investments")
+	}
+	money(t, "dashboard investments", d.Investments.TotalValue, s.TotalValue)
+}
+
+func TestDashboardWithoutInvestments(t *testing.T) {
+	f := newFixture(t)
+	f.account("Checking", models.AccountChecking, 100)
+	if d := f.dashboard("", ""); d.Investments != nil {
+		t.Errorf("no investment accounts: want nil, got %+v", d.Investments)
+	}
+}
+
+func TestHistoryGaps(t *testing.T) {
+	f := newFixture(t)
+	brokerage := f.account("Brokerage", models.AccountInvestment, 1000)
+	held, sold := f.sym("FZROX"), f.sym("GONE")
+	f.trade(brokerage.ID, portfolio.SideOpening, held, "2026-03-01", 5, 20)
+	f.trade(brokerage.ID, portfolio.SideOpening, sold, "2026-02-01", 5, 20)
+	f.trade(brokerage.ID, portfolio.SideSell, sold, "2026-02-10", 5, 21)
+
+	gaps, err := f.svc.HistoryGaps(f.ctx, f.hh, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{held: "2026-03-01", sold: "2026-02-01"}
+	if len(gaps) != 2 {
+		t.Fatalf("gaps = %+v", gaps)
+	}
+	for _, g := range gaps {
+		if got := g.Need.Format(models.DateOnly); got != want[g.Symbol] {
+			t.Errorf("%s needs %s, want %s", g.Symbol, got, want[g.Symbol])
+		}
+	}
+
+	d, _ := models.ParseDate("2026-03-01")
+	if err := f.svc.SaveHistory(f.ctx, held, d, nil); err != nil {
+		t.Fatal(err)
+	}
+	gaps, _ = f.svc.HistoryGaps(f.ctx, f.hh, []int{brokerage.ID})
+	if len(gaps) != 1 || gaps[0].Symbol != sold {
+		t.Fatalf("after backfilling %s: gaps = %+v", held, gaps)
+	}
+
+	// Back-dating a trade before history_from opens the gap again.
+	f.trade(brokerage.ID, portfolio.SideOpening, held, "2026-01-15", 1, 19)
+	gaps, _ = f.svc.HistoryGaps(f.ctx, f.hh, nil)
+	if len(gaps) != 2 {
+		t.Errorf("a back-dated trade should reopen the gap: %+v", gaps)
 	}
 }

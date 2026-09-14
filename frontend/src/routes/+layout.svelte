@@ -12,6 +12,7 @@
 	const NAV = [
 		{ href: '/', label: 'Dashboard' },
 		{ href: '/accounts', label: 'Accounts' },
+		{ href: '/investments', label: 'Investments' },
 		{ href: '/transactions', label: 'Transactions' },
 		{ href: '/transfers', label: 'Transfers' },
 		{ href: '/recurring', label: 'Recurring' },

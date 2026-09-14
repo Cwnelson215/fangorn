@@ -34,6 +34,9 @@ type Refresher struct {
 	// parallel. It is a channel rather than a mutex so a request whose deadline
 	// passes while waiting can give up and serve cached prices.
 	sem chan struct{}
+	// historySem does the same for history backfills, separately, so a long
+	// backfill never holds up a holdings poll waiting on current prices.
+	historySem chan struct{}
 }
 
 // New builds a refresher. A nil provider disables fetching: trades still work,
@@ -44,7 +47,7 @@ func New(svc *ledger.Service, provider quotes.Provider, marketTTL time.Duration)
 	}
 	return &Refresher{
 		svc: svc, provider: provider, marketTTL: marketTTL,
-		now: time.Now, sem: make(chan struct{}, 1),
+		now: time.Now, sem: make(chan struct{}, 1), historySem: make(chan struct{}, 1),
 	}
 }
 
@@ -98,6 +101,70 @@ func (r *Refresher) RefreshStale(ctx context.Context, symbols []string) error {
 			if err := r.fetch(ctx, sym); err != nil {
 				mu.Lock()
 				errs = append(errs, err)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// historyLead is how far before a symbol's first trade its history is fetched,
+// so the first days of a value chart have a close to carry forward even when
+// the first trade fell on a weekend.
+const historyLead = 7 * 24 * time.Hour
+
+// BackfillHistory fetches daily closes back to the first trade of every symbol
+// the household (or just accountIDs, when non-nil) has traded, for those whose
+// stored history doesn't reach that far. It is what makes a value chart reach
+// back before the app started fetching quotes — each quote only brings the last
+// few days.
+//
+// Once a symbol's history is saved, securities.history_from records the date
+// that was asked for, even if the provider had nothing that old (a fund younger
+// than a mistyped trade date), so it is not fetched again until a trade is
+// back-dated earlier still. Failures are logged and retried on the next pass;
+// they deliberately don't touch the quote backoff.
+func (r *Refresher) BackfillHistory(ctx context.Context, householdID int, accountIDs []int) error {
+	if !r.Enabled() {
+		return nil
+	}
+	select {
+	case r.historySem <- struct{}{}:
+		defer func() { <-r.historySem }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	gaps, err := r.svc.HistoryGaps(ctx, householdID, accountIDs)
+	if err != nil || len(gaps) == 0 {
+		return err
+	}
+
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+		gate = make(chan struct{}, maxConcurrentFetches)
+	)
+	for _, gap := range gaps {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			gate <- struct{}{}
+			defer func() { <-gate }()
+			closes, err := r.provider.History(ctx, gap.Symbol, gap.Need.Add(-historyLead))
+			if err != nil && !errors.Is(err, quotes.ErrNotFound) {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("%s history: %w", gap.Symbol, err))
+				mu.Unlock()
+				return
+			}
+			// Not found: record the attempt anyway, so an unknown symbol isn't
+			// asked about on every tick.
+			if err := r.svc.SaveHistory(ctx, gap.Symbol, gap.Need, closes); err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("%s history: %w", gap.Symbol, err))
 				mu.Unlock()
 			}
 		}()

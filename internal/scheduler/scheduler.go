@@ -177,6 +177,11 @@ func (s *Scheduler) refreshPrices(ctx context.Context, household ledger.Househol
 	if err := s.prices.RefreshStale(rctx, symbols); err != nil {
 		log.Printf("Scheduler: price refresh for household %d: %v", household.ID, err)
 	}
+	// History is only needed for value charts, not the snapshot, but a backfill
+	// here means the charts are usually complete before anyone opens them.
+	if err := s.prices.BackfillHistory(rctx, household.ID, nil); err != nil {
+		log.Printf("Scheduler: price history backfill for household %d: %v", household.ID, err)
+	}
 }
 
 // processRule materializes a rule's occurrences out to the horizon, then posts

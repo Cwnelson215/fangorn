@@ -95,7 +95,7 @@ internal/config/          env -> Config
 internal/database/        Connect, RunMigrations, embedded migrations/
 internal/models/          domain types + the enum constants; ClassForType
 internal/recurring/       PURE date engine — no DB, no clock. The best-tested code here.
-internal/portfolio/       PURE trade-log math — replay, average cost, exact cent rounding
+internal/portfolio/       PURE trade-log math — replay, average cost, cent rounding, daily value series
 internal/quotes/          price Provider interface + Yahoo client (network, no DB)
 internal/prices/          Refresher: decides when a price is stale, fetches, saves, backs off
 internal/ledger/          every read and write against the ledger
@@ -155,6 +155,18 @@ from its first trade's price, so trades still work when Yahoo is down.
 the DB, so they don't duplicate fetches: stocks/ETFs `QUOTES_MARKET_TTL` (1m) during US market hours,
 15m otherwise; mutual funds 15m always (one NAV a day); failed symbols back off 5m. HTTP-triggered
 refreshes get a 4–5s budget, well inside the 15s `WriteTimeout`.
+
+**Value history is rebuilt, not snapshotted.** `ledger.ValueHistory` replays cash and trades day by
+day (`portfolio.ValueSeries`) against `security_prices`, carrying the last close over weekends and
+using `securities.last_price` for today, so its last point equals the holdings view. It needs closes
+back to each symbol's first trade, but a quote only brings ~5 days: `prices.Refresher.BackfillHistory`
+fills the rest from `Provider.History`, called by the scheduler and by the value-history endpoints
+(within budget). `securities.history_from` is the date it was *asked* to cover, so a symbol isn't
+re-fetched until a trade is back-dated earlier than that. Sold-out symbols still count toward past values.
+
+`GET /api/investments` combines every non-archived investment account by valuing each one like its own
+page and summing the results (not merging shares first), so the totals match the account pages to the
+cent. The dashboard's `investments` line uses stored prices only and never calls the provider.
 
 Yahoo quirks: the full Chrome User-Agent got 429s while `Mozilla/5.0` didn't; day change is derived
 from `regularMarketChangePercent` because a fund's latest NAV is often dated the next morning, and

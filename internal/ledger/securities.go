@@ -173,3 +173,45 @@ func (s *Service) MarkQuoteFailed(ctx context.Context, symbol string, at time.Ti
 	}
 	return nil
 }
+
+// HistoryGap is a traded symbol whose stored daily closes don't reach back to
+// its first trade.
+type HistoryGap struct {
+	Symbol string
+	// Need is the earliest trade date the closes have to cover.
+	Need time.Time
+}
+
+// HistoryGaps returns the symbols a household has ever traded — including ones
+// since sold, which still count toward past values — whose history_from is
+// unset or later than their first trade. accountIDs narrows it to those
+// accounts; nil means every account.
+func (s *Service) HistoryGaps(ctx context.Context, householdID int, accountIDs []int) ([]HistoryGap, error) {
+	q := `SELECT t.symbol, MIN(t.trade_date)
+	      FROM trades t
+	      JOIN securities s ON s.symbol = t.symbol
+	      WHERE t.household_id = $1`
+	args := []any{householdID}
+	if accountIDs != nil {
+		q += ` AND t.account_id = ANY($2)`
+		args = append(args, pq.Array(accountIDs))
+	}
+	q += ` GROUP BY t.symbol, s.history_from
+	       HAVING s.history_from IS NULL OR s.history_from > MIN(t.trade_date)
+	       ORDER BY t.symbol`
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding history gaps: %w", err)
+	}
+	defer rows.Close()
+	var out []HistoryGap
+	for rows.Next() {
+		var g HistoryGap
+		if err := rows.Scan(&g.Symbol, &g.Need); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}

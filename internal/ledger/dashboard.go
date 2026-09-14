@@ -25,6 +25,14 @@ type WeekSpend struct {
 // trendWeeks is how far back the dashboard's spending trend reaches.
 const trendWeeks = 12
 
+// InvestmentsGlance is the one line the dashboard shows about investments.
+type InvestmentsGlance struct {
+	TotalValue   float64  `json:"total_value"`
+	DayChange    float64  `json:"day_change"`
+	DayChangePct *float64 `json:"day_change_pct"`
+	AsOf         *string  `json:"as_of"`
+}
+
 type Dashboard struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -42,8 +50,10 @@ type Dashboard struct {
 	WeeklySpending  []WeekSpend            `json:"weekly_spending"`
 	NetWorthHistory []models.NetWorthPoint `json:"net_worth_history"`
 	Budgets         []models.Budget        `json:"budgets"`
-	Goals           []models.Goal          `json:"goals"`
-	Upcoming        []models.Occurrence    `json:"upcoming"`
+	// Investments is nil when the household has no investment accounts.
+	Investments *InvestmentsGlance  `json:"investments"`
+	Goals       []models.Goal       `json:"goals"`
+	Upcoming    []models.Occurrence `json:"upcoming"`
 }
 
 // Dashboard assembles everything the landing page needs in one round trip.
@@ -93,6 +103,23 @@ func (s *Service) Dashboard(ctx context.Context, householdID int, from, to strin
 		}
 	}
 	d.NetWorth = d.TotalAssets - d.TotalLiabilities
+
+	// Stored prices only: the dashboard is one round trip and must not wait on
+	// the quote provider. The scheduler keeps them within a tick of current.
+	for _, a := range accounts {
+		if a.Type != models.AccountInvestment {
+			continue
+		}
+		summary, err := s.InvestmentsSummary(ctx, householdID)
+		if err != nil {
+			return d, err
+		}
+		d.Investments = &InvestmentsGlance{
+			TotalValue: summary.TotalValue, DayChange: summary.DayChange,
+			DayChangePct: summary.DayChangePct, AsOf: summary.AsOf,
+		}
+		break
+	}
 
 	if d.Categories, err = s.categorySpend(ctx, householdID, from, to); err != nil {
 		return d, err

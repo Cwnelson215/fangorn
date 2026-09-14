@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { getAccount, getHoldings, getTrades } from '$lib/api';
+	import { getAccount, getAccountValueHistory, getHoldings, getTrades } from '$lib/api';
 	import type { AccountDetail, Holdings, Trade } from '$lib/types';
 	import { ACCOUNT_TYPE_LABELS, TRADE_SIDE_LABELS } from '$lib/types';
 	import {
@@ -18,6 +18,7 @@
 	import TransactionRow from '$lib/components/TransactionRow.svelte';
 	import HoldingsTable from '$lib/components/HoldingsTable.svelte';
 	import TradeModal from '$lib/components/TradeModal.svelte';
+	import ValueHistoryCard from '$lib/components/ValueHistoryCard.svelte';
 	import Button from '$lib/components/Button.svelte';
 
 	// Prices are refreshed server-side at most once a minute during market hours,
@@ -172,6 +173,9 @@
 			</div>
 
 			{#if trades.length > 0}
+				<!-- load() unmounts the page while it reloads, so this re-fetches after a trade. -->
+				<ValueHistoryCard id="account-value" load={(days) => getAccountValueHistory(accountId, days)} />
+
 				<div class="card">
 					<h2>Trades</h2>
 					<div class="table-scroll">

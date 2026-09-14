@@ -42,6 +42,62 @@ func (h *InvestmentHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/accounts/{id}/trades", h.CreateTrade)
 	mux.HandleFunc("PATCH /api/trades/{id}", h.UpdateTrade)
 	mux.HandleFunc("DELETE /api/trades/{id}", h.DeleteTrade)
+
+	mux.HandleFunc("GET /api/investments", h.Summary)
+	mux.HandleFunc("GET /api/investments/value-history", h.SummaryValueHistory)
+	mux.HandleFunc("GET /api/accounts/{id}/value-history", h.AccountValueHistory)
+}
+
+// Summary is every investment account combined. Like Holdings, it refreshes
+// stale prices first and is polled while the page is open.
+func (h *InvestmentHandler) Summary(w http.ResponseWriter, r *http.Request) {
+	symbols, err := h.svc.HouseholdSymbols(r.Context(), h.householdID)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), refreshBudget)
+	if err := h.prices.RefreshStale(ctx, symbols); err != nil {
+		log.Printf("investments summary: price refresh: %v", err)
+	}
+	cancel()
+
+	summary, err := h.svc.InvestmentsSummary(r.Context(), h.householdID)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
+}
+
+func (h *InvestmentHandler) SummaryValueHistory(w http.ResponseWriter, r *http.Request) {
+	h.valueHistory(w, r, nil)
+}
+
+func (h *InvestmentHandler) AccountValueHistory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	h.valueHistory(w, r, []int{id})
+}
+
+// valueHistory fills in any missing daily closes (within budget) and then
+// rebuilds the value series. If the backfill runs out of time the chart is
+// drawn from what is stored, and the scheduler finishes the job.
+func (h *InvestmentHandler) valueHistory(w http.ResponseWriter, r *http.Request, accountIDs []int) {
+	ctx, cancel := context.WithTimeout(r.Context(), lookupBudget)
+	if err := h.prices.BackfillHistory(ctx, h.householdID, accountIDs); err != nil {
+		log.Printf("value history: backfill: %v", err)
+	}
+	cancel()
+
+	points, err := h.svc.ValueHistory(r.Context(), h.householdID, accountIDs, queryInt(r, "days"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, points)
 }
 
 func (h *InvestmentHandler) Search(w http.ResponseWriter, r *http.Request) {

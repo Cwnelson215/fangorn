@@ -2,9 +2,9 @@
 	import { onMount } from 'svelte';
 	import { getDashboard } from '$lib/api';
 	import type { Dashboard } from '$lib/types';
-	import { formatCurrency, formatDate, relativeDays } from '$lib/format';
-	import SpendingChart from '$lib/components/SpendingChart.svelte';
-	import NetWorthChart from '$lib/components/NetWorthChart.svelte';
+	import { formatCurrency, formatDate, formatPercent, formatSigned, relativeDays } from '$lib/format';
+	import DonutChart from '$lib/components/DonutChart.svelte';
+	import ValueChart from '$lib/components/ValueChart.svelte';
 	import TrendChart from '$lib/components/TrendChart.svelte';
 
 	let data = $state<Dashboard | null>(null);
@@ -64,6 +64,17 @@
 					<span class="muted">
 						{formatCurrency(data.total_assets)} assets · {formatCurrency(data.total_liabilities)} owed
 					</span>
+					{#if data.investments}
+						{@const inv = data.investments}
+						<a class="investments-line" href="/investments">
+							Investments {formatCurrency(inv.total_value)} ·
+							<span class:pos={inv.day_change > 0.004} class:neg={inv.day_change < -0.004}>
+								{formatSigned(inv.day_change)}
+								{#if inv.day_change_pct != null}({formatPercent(inv.day_change_pct, true)}){/if}
+							</span>
+							today
+						</a>
+					{/if}
 				</div>
 				<div class="card stat">
 					<span class="stat-label">Money In</span>
@@ -134,7 +145,10 @@
 				<div class="card">
 					<h2>Net Worth</h2>
 					{#if data.net_worth_history.length >= 2}
-						<NetWorthChart data={data.net_worth_history} id="dashboard-nw" />
+						<ValueChart
+							points={data.net_worth_history.map((p) => ({ date: p.date, value: p.net_worth }))}
+							id="dashboard-nw"
+						/>
 					{:else}
 						<p class="muted small">
 							History builds up one snapshot a day — check back tomorrow for a trend line.
@@ -145,7 +159,9 @@
 				<div class="card">
 					<h2>Spending by Category</h2>
 					{#if data.categories.length > 0}
-						<SpendingChart data={data.categories} />
+						<DonutChart
+							slices={data.categories.map((c) => ({ label: c.category_name, value: c.amount, color: c.color }))}
+						/>
 					{:else}
 						<p class="muted small">No spending logged in this period yet.</p>
 					{/if}
@@ -270,6 +286,16 @@
 		font-size: 1.75rem;
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
+	}
+
+	.investments-line {
+		font-size: 0.8125rem;
+		color: var(--muted);
+		text-decoration: none;
+	}
+
+	.investments-line:hover {
+		color: var(--ink);
 	}
 
 	.grid-2 {

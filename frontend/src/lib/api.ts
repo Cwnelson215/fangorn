@@ -9,6 +9,7 @@ import type {
 	Goal,
 	GoalInput,
 	Holdings,
+	InvestmentsSummary,
 	Occurrence,
 	RecurringRule,
 	RuleInput,
@@ -19,7 +20,8 @@ import type {
 	Transaction,
 	TransactionInput,
 	Transfer,
-	TransferInput
+	TransferInput,
+	ValuePoint
 } from './types';
 
 // Same-origin: in dev, Vite proxies /api to :3000; in production the Go binary
@@ -108,6 +110,12 @@ export const createTrade = (accountId: number, input: TradeInput) =>
 export const updateTrade = (id: number, input: TradeInput) =>
 	send<Trade>('PATCH', `/api/trades/${id}`, input);
 export const deleteTrade = (id: number) => send<void>('DELETE', `/api/trades/${id}`);
+export const getInvestments = () => request<InvestmentsSummary>('/api/investments');
+/** days <= 0 means all history. */
+export const getInvestmentsHistory = (days: number) =>
+	request<ValuePoint[]>(`/api/investments/value-history${qs({ days })}`);
+export const getAccountValueHistory = (accountId: number, days: number) =>
+	request<ValuePoint[]>(`/api/accounts/${accountId}/value-history${qs({ days })}`);
 
 // ---------------------------------------------------------------------------
 // categories

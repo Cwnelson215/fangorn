@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -128,6 +129,19 @@ func (s *Service) Households(ctx context.Context) ([]Household, error) {
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+// household loads one household, for reads that need its "today".
+func (s *Service) household(ctx context.Context, id int) (Household, error) {
+	h := Household{ID: id}
+	err := s.db.QueryRowContext(ctx, `SELECT timezone FROM households WHERE id = $1`, id).Scan(&h.Timezone)
+	if err == sql.ErrNoRows {
+		return h, ErrNotFound
+	}
+	if err != nil {
+		return h, fmt.Errorf("loading household: %w", err)
+	}
+	return h, nil
 }
 
 // DefaultHouseholdID returns the household every request is scoped to while auth

@@ -1,10 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
-	import type { CategorySpend } from '$lib/types';
+	import type { Slice } from '$lib/types';
 	import { formatCurrencyWhole } from '$lib/format';
 
-	let { data }: { data: CategorySpend[] } = $props();
+	// A share-of-total donut with a legend: spending by category, portfolio
+	// allocation. Slices of zero or less are left out — a pie can't draw them.
+	let {
+		slices,
+		centerLabel = 'Total',
+		legendValue = (s) => formatCurrencyWhole(s.value)
+	}: {
+		slices: Slice[];
+		centerLabel?: string;
+		legendValue?: (slice: Slice, total: number) => string;
+	} = $props();
 	let container: HTMLDivElement;
 
 	// Fallback palette for categories with no colour of their own.
@@ -21,11 +31,12 @@
 		'#55a3f0'
 	];
 
-	const colorFor = (d: CategorySpend, i: number) => d.color || COLORS[i % COLORS.length];
+	const colorFor = (d: Slice, i: number) => d.color || COLORS[i % COLORS.length];
 
 	function render() {
 		if (!container) return;
 		d3.select(container).selectAll('*').remove();
+		const data = slices.filter((s) => s.value > 0);
 		if (data.length === 0) return;
 
 		const width = container.clientWidth;
@@ -37,12 +48,12 @@
 		const g = svg.append('g').attr('transform', `translate(${width * 0.35}, ${height / 2})`);
 
 		const pie = d3
-			.pie<CategorySpend>()
-			.value((d) => d.amount)
+			.pie<Slice>()
+			.value((d) => d.value)
 			.sort(null);
 
 		const arc = d3
-			.arc<d3.PieArcDatum<CategorySpend>>()
+			.arc<d3.PieArcDatum<Slice>>()
 			.innerRadius(radius * 0.55)
 			.outerRadius(radius);
 
@@ -56,13 +67,13 @@
 			.attr('stroke', 'white')
 			.attr('stroke-width', 2);
 
-		const total = data.reduce((sum, d) => sum + d.amount, 0);
+		const total = data.reduce((sum, d) => sum + d.value, 0);
 		g.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '-0.2em')
 			.attr('font-size', '0.8rem')
 			.attr('fill', '#999')
-			.text('Total');
+			.text(centerLabel);
 		g.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '1em')
@@ -94,15 +105,14 @@
 			.attr('font-size', '0.75rem')
 			.attr('fill', '#666')
 			.text((d) => {
-				const label =
-					d.category_name.length > 14 ? d.category_name.slice(0, 14) + '…' : d.category_name;
-				return `${label} ${formatCurrencyWhole(d.amount)}`;
+				const label = d.label.length > 14 ? d.label.slice(0, 14) + '…' : d.label;
+				return `${label} ${legendValue(d, total)}`;
 			});
 	}
 
 	onMount(render);
 	$effect(() => {
-		data;
+		slices;
 		render();
 	});
 </script>

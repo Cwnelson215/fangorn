@@ -207,6 +207,22 @@ export interface Dashboard {
 	budgets: Budget[];
 	goals: Goal[];
 	upcoming: Occurrence[];
+	/** Null when the household has no investment accounts. Stored prices only. */
+	investments: InvestmentsGlance | null;
+}
+
+export interface InvestmentsGlance {
+	total_value: number;
+	day_change: number;
+	day_change_pct: number | null;
+	as_of: string | null;
+}
+
+/** One wedge of a DonutChart. */
+export interface Slice {
+	label: string;
+	value: number;
+	color?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +309,30 @@ export interface Holdings {
 	as_of: string | null;
 	seeded: boolean;
 	positions: HoldingPosition[];
+}
+
+export interface InvestmentAccountValue {
+	id: number;
+	name: string;
+	institution_name: string | null;
+	cash: number;
+	holdings_value: number;
+	total_value: number;
+	day_change: number;
+	day_change_pct: number | null;
+}
+
+/** Every investment account combined; account_id is absent. */
+export interface InvestmentsSummary extends Omit<Holdings, 'account_id'> {
+	accounts: InvestmentAccountValue[];
+}
+
+/** An investment account's (or all of them combined) worth at the end of a day. */
+export interface ValuePoint {
+	date: string;
+	cash: number;
+	holdings: number;
+	value: number;
 }
 
 export interface AccountDetail {

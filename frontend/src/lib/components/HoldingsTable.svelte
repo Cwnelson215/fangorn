@@ -2,7 +2,8 @@
 	import type { Holdings } from '$lib/types';
 	import { formatCurrency, formatPercent, formatPrice, formatShares, formatSigned } from '$lib/format';
 
-	let { holdings }: { holdings: Holdings } = $props();
+	// Also renders the household-wide summary, which has no account_id.
+	let { holdings }: { holdings: Omit<Holdings, 'account_id'> } = $props();
 
 	function tone(n: number | null | undefined): string {
 		if (n == null || Math.abs(n) < 0.005) return '';

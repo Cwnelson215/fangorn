@@ -21,6 +21,8 @@ type fakeProvider struct {
 	prices map[string]float64
 	fail   map[string]error
 	calls  int
+	// historyFrom records each History call as "SYMBOL YYYY-MM-DD".
+	historyFrom []string
 }
 
 func (p *fakeProvider) Quote(ctx context.Context, symbol string) (quotes.Quote, error) {
@@ -41,8 +43,14 @@ func (p *fakeProvider) Quote(ctx context.Context, symbol string) (quotes.Quote, 
 	}, nil
 }
 
-func (p *fakeProvider) History(context.Context, string, time.Time) ([]quotes.Close, error) {
-	return nil, nil
+func (p *fakeProvider) History(_ context.Context, symbol string, from time.Time) ([]quotes.Close, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.historyFrom = append(p.historyFrom, symbol+" "+from.Format(models.DateOnly))
+	if err := p.fail[symbol]; err != nil {
+		return nil, err
+	}
+	return []quotes.Close{{Date: from, Price: p.prices[symbol]}}, nil
 }
 
 func (p *fakeProvider) Search(context.Context, string) ([]quotes.Match, error) { return nil, nil }
@@ -231,4 +239,55 @@ func TestNilProviderIsANoOp(t *testing.T) {
 	if _, err := r.Search(context.Background(), "voo"); !errors.Is(err, quotes.ErrUnavailable) {
 		t.Fatalf("search without a provider: %v", err)
 	}
+}
+
+func TestBackfillHistoryOncePerGap(t *testing.T) {
+	f := newFixture(t)
+	voo, broken := f.sym("VOO"), f.sym("BROKE")
+	a := f.holding(voo, 500) // bought 2026-02-01
+	f.provider.prices[voo] = 500
+	f.provider.fail[broken] = quotes.ErrUnavailable
+	_, err := f.svc.CreateTrade(f.ctx, f.hh, a.ID, ledger.TradeInput{
+		Symbol: broken, Side: portfolio.SideOpening, TradeDate: "2026-03-01", Shares: 1, Price: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.r.BackfillHistory(f.ctx, f.hh, nil); err == nil {
+		t.Fatal("want the failing symbol reported")
+	}
+	// A week of lead before the first trade.
+	if !contains(f.provider.historyFrom, voo+" 2026-01-25") {
+		t.Fatalf("history calls = %v", f.provider.historyFrom)
+	}
+
+	delete(f.provider.fail, broken)
+	calls := len(f.provider.historyFrom)
+	if err := f.r.BackfillHistory(f.ctx, f.hh, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.provider.historyFrom[calls:]; len(got) != 1 || got[0] != broken+" 2026-02-22" {
+		t.Errorf("second pass should retry only the failed symbol, got %v", got)
+	}
+	if err := f.r.BackfillHistory(f.ctx, f.hh, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.provider.historyFrom); n != calls+1 {
+		t.Errorf("a filled history should not be fetched again (%d calls)", n)
+	}
+
+	gaps, err := f.svc.HistoryGaps(f.ctx, f.hh, nil)
+	if err != nil || len(gaps) != 0 {
+		t.Errorf("gaps after backfill = %+v, %v", gaps, err)
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
