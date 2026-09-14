@@ -2,7 +2,6 @@
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
 	import { authStatus, logout } from '$lib/api';
 
 	let { children }: { children: Snippet } = $props();
@@ -25,26 +24,33 @@
 		return page.url.pathname.startsWith(href);
 	}
 
-	onMount(async () => {
+	// The layout stays mounted across client-side navigation, so onMount only ever
+	// saw the first page. Checking per route means arriving from /login re-verifies
+	// instead of rendering nothing.
+	$effect(() => {
 		if (isLoginPage) {
-			authChecked = true;
+			// Leaving /login (after signing in or out) must re-check.
+			authChecked = false;
 			return;
 		}
+		if (authChecked) return;
 
-		try {
-			const data = await authStatus();
-			showLogout = data.required;
-			if (data.required && !data.authenticated) {
+		const path = page.url.pathname;
+		authStatus()
+			.then((data) => {
+				if (page.url.pathname !== path) return; // stale: navigated away meanwhile
+				showLogout = data.required;
+				if (data.required && !data.authenticated) {
+					goto('/login');
+					return;
+				}
+				authChecked = true;
+			})
+			.catch(() => {
+				// Fail closed. A failed auth check used to fall through and render the
+				// app, which meant a network blip looked identical to being signed in.
 				goto('/login');
-				return;
-			}
-		} catch {
-			// Fail closed. A failed auth check used to fall through and render the
-			// app, which meant a network blip looked identical to being signed in.
-			goto('/login');
-			return;
-		}
-		authChecked = true;
+			});
 	});
 
 	async function handleLogout() {
