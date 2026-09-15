@@ -4,7 +4,6 @@
 		achieveGoal,
 		contributeToGoal,
 		createGoal,
-		deleteBudget,
 		deleteGoal,
 		getAccounts,
 		getBudgets,
@@ -12,15 +11,26 @@
 		getGoals,
 		reopenGoal,
 		setBudget,
+		stopBudget,
 		updateGoal
 	} from '$lib/api';
 	import type { Account, Budget, Category, Goal, GoalInput } from '$lib/types';
-	import { formatCurrency, formatDate, formatMonth, monthStart, today } from '$lib/format';
+	import {
+		formatCurrency,
+		formatDate,
+		formatMonth,
+		monthStart,
+		shiftMonth,
+		today
+	} from '$lib/format';
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
 
+	let month = $state(monthStart());
 	let budgets: Budget[] = $state([]);
+	let unbudgeted = $state(0);
+	let budgetsLoading = $state(false);
 	let goals: Goal[] = $state([]);
 	let categories: Category[] = $state([]);
 	let accounts: Account[] = $state([]);
@@ -60,8 +70,8 @@
 		loading = true;
 		loadError = null;
 		try {
-			[budgets, goals, categories, accounts] = await Promise.all([
-				getBudgets(),
+			[, goals, categories, accounts] = await Promise.all([
+				loadBudgets(),
 				getGoals(),
 				getCategories(),
 				getAccounts()
@@ -73,14 +83,42 @@
 		}
 	}
 
-	let expenseCategories = $derived(categories.filter((c) => c.kind === 'expense'));
+	// Budgets reload on their own when the month changes, without refetching the
+	// goals, categories, and accounts that don't depend on it.
+	async function loadBudgets() {
+		const requested = month;
+		budgetsLoading = true;
+		try {
+			const data = await getBudgets(requested);
+			if (requested !== month) return; // a later month change won
+			budgets = data.budgets;
+			unbudgeted = data.unbudgeted_spent;
+		} finally {
+			if (requested === month) budgetsLoading = false;
+		}
+	}
+
+	async function goToMonth(next: string) {
+		month = next;
+		loadError = null;
+		try {
+			await loadBudgets();
+		} catch (e) {
+			loadError = e instanceof Error ? e.message : 'Could not load budgets';
+		}
+	}
+
+	let isCurrentMonth = $derived(month === monthStart());
+	let expenseCategories = $derived(
+		categories.filter((c) => c.kind === 'expense' && !c.archived)
+	);
 	let budgetedIds = $derived(new Set(budgets.map((b) => b.category_id)));
-	let unbudgeted = $derived(expenseCategories.filter((c) => !budgetedIds.has(c.id)));
+	let unbudgetedCategories = $derived(expenseCategories.filter((c) => !budgetedIds.has(c.id)));
 	let totalBudget = $derived(budgets.reduce((sum, b) => sum + b.amount, 0));
 	let totalSpent = $derived(budgets.reduce((sum, b) => sum + b.spent, 0));
 
 	function openBudget() {
-		budgetCategoryId = unbudgeted[0]?.id ?? expenseCategories[0]?.id ?? 0;
+		budgetCategoryId = unbudgetedCategories[0]?.id ?? expenseCategories[0]?.id ?? 0;
 		budgetAmount = '';
 		budgetError = null;
 		budgetModalOpen = true;
@@ -100,9 +138,9 @@
 		budgetSaving = true;
 		budgetError = null;
 		try {
-			await setBudget(budgetCategoryId, Math.abs(parseFloat(budgetAmount) || 0), monthStart());
+			await setBudget(budgetCategoryId, Math.abs(parseFloat(budgetAmount) || 0), month);
 			budgetModalOpen = false;
-			await load();
+			await loadBudgets();
 		} catch (e) {
 			budgetError = e instanceof Error ? e.message : 'Could not save the budget';
 		} finally {
@@ -110,12 +148,12 @@
 		}
 	}
 
-	async function removeBudget(budget: Budget) {
+	async function endBudget(budget: Budget) {
 		try {
-			await deleteBudget(budget.id);
-			await load();
+			await stopBudget(budget.id, month);
+			await loadBudgets();
 		} catch (e) {
-			loadError = e instanceof Error ? e.message : 'Could not remove the budget';
+			loadError = e instanceof Error ? e.message : 'Could not stop the budget';
 		}
 	}
 
@@ -232,7 +270,6 @@
 	<div class="page-header">
 		<div>
 			<h1>Budgets &amp; Goals</h1>
-			<p class="muted">{formatMonth(monthStart())}</p>
 		</div>
 	</div>
 
@@ -251,15 +288,40 @@
 				</Button>
 			</div>
 
+			<div class="month-nav">
+				<Button variant="ghost" size="sm" onclick={() => goToMonth(shiftMonth(month, -1))}>
+					‹ {formatMonth(shiftMonth(month, -1))}
+				</Button>
+				<strong class="month-label" class:loading={budgetsLoading}>{formatMonth(month)}</strong>
+				<Button variant="ghost" size="sm" onclick={() => goToMonth(shiftMonth(month, 1))}>
+					{formatMonth(shiftMonth(month, 1))} ›
+				</Button>
+				{#if !isCurrentMonth}
+					<Button variant="secondary" size="sm" onclick={() => goToMonth(monthStart())}>
+						This month
+					</Button>
+				{/if}
+			</div>
+
 			{#if budgets.length === 0}
 				<p class="muted small">
-					No budgets set. Pick a category and a monthly limit to track spending against it.
+					{#if isCurrentMonth}
+						No budgets set. Pick a category and a monthly limit to track spending against it.
+					{:else}
+						No budgets in {formatMonth(month)}.
+					{/if}
+					{#if unbudgeted > 0}
+						{formatCurrency(unbudgeted)} spent in {formatMonth(month)}.
+					{/if}
 				</p>
 			{:else}
 				<div class="summary">
 					<span>
 						<strong class:neg={totalSpent > totalBudget}>{formatCurrency(totalSpent)}</strong>
 						spent of {formatCurrency(totalBudget)} budgeted
+						{#if unbudgeted > 0}
+							· {formatCurrency(unbudgeted)} unbudgeted
+						{/if}
 					</span>
 				</div>
 
@@ -272,8 +334,8 @@
 								<span class="item-name">{budget.category_name}</span>
 								<span class="item-actions">
 									<Button variant="ghost" size="sm" onclick={() => editBudget(budget)}>Edit</Button>
-									<Button variant="ghost" size="sm" onclick={() => removeBudget(budget)}>
-										Remove
+									<Button variant="ghost" size="sm" onclick={() => endBudget(budget)}>
+										Stop
 									</Button>
 								</span>
 							</div>
@@ -296,6 +358,9 @@
 						</div>
 					{/each}
 				</div>
+				<p class="muted hint">
+					Stopping a budget ends it from {formatMonth(month)} on. Earlier months keep it.
+				</p>
 			{/if}
 		</section>
 
@@ -350,7 +415,7 @@
 	{/if}
 </div>
 
-<Modal bind:open={budgetModalOpen} title="Set a Budget">
+<Modal bind:open={budgetModalOpen} title="Set a Budget for {formatMonth(month)}">
 	<form onsubmit={saveBudget}>
 		<Field label="Category" id="budgetCategory">
 			<select id="budgetCategory" bind:value={budgetCategoryId} disabled={budgetSaving}>
@@ -360,7 +425,11 @@
 			</select>
 		</Field>
 
-		<Field label="Monthly limit" id="budgetAmount" hint="Applies from this month onward">
+		<Field
+			label="Monthly limit"
+			id="budgetAmount"
+			hint="Applies from {formatMonth(month)} until the next change"
+		>
 			<input
 				id="budgetAmount"
 				type="number"
@@ -502,6 +571,24 @@
 		gap: 1rem;
 	}
 
+	.month-nav {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.month-label {
+		min-width: 9rem;
+		text-align: center;
+		font-size: 0.9375rem;
+	}
+
+	.month-label.loading {
+		opacity: 0.5;
+	}
+
 	.summary {
 		font-size: 0.875rem;
 		color: var(--muted);
@@ -578,6 +665,11 @@
 		height: 100%;
 		border-radius: 999px;
 		transition: width 0.3s;
+	}
+
+	.hint {
+		font-size: 0.75rem;
+		margin-top: 0.5rem;
 	}
 
 	.small {

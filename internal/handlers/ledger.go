@@ -62,7 +62,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/budgets", h.ListBudgets)
 	mux.HandleFunc("POST /api/budgets", h.SetBudget)
-	mux.HandleFunc("DELETE /api/budgets/{id}", h.DeleteBudget)
+	mux.HandleFunc("DELETE /api/budgets/{id}", h.StopBudget)
 
 	mux.HandleFunc("GET /api/goals", h.ListGoals)
 	mux.HandleFunc("POST /api/goals", h.CreateGoal)
@@ -499,12 +499,12 @@ func (h *LedgerHandler) PostRuleNow(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *LedgerHandler) ListBudgets(w http.ResponseWriter, r *http.Request) {
-	budgets, err := h.svc.ListBudgets(r.Context(), h.householdID, r.URL.Query().Get("month"))
+	month, err := h.svc.BudgetMonth(r.Context(), h.householdID, r.URL.Query().Get("month"))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, budgets)
+	writeJSON(w, http.StatusOK, month)
 }
 
 func (h *LedgerHandler) SetBudget(w http.ResponseWriter, r *http.Request) {
@@ -520,12 +520,14 @@ func (h *LedgerHandler) SetBudget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, budget)
 }
 
-func (h *LedgerHandler) DeleteBudget(w http.ResponseWriter, r *http.Request) {
+// StopBudget ends a budget from ?month= onward (default: this month). Earlier
+// months keep it — see ledger.StopBudget.
+func (h *LedgerHandler) StopBudget(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r, "id")
 	if !ok {
 		return
 	}
-	if err := h.svc.DeleteBudget(r.Context(), h.householdID, id); err != nil {
+	if err := h.svc.StopBudget(r.Context(), h.householdID, id, r.URL.Query().Get("month")); err != nil {
 		fail(w, err)
 		return
 	}

@@ -160,6 +160,14 @@ export interface Budget {
 	spent: number;
 }
 
+export interface BudgetMonth {
+	/** First of the month, YYYY-MM-DD. */
+	month: string;
+	budgets: Budget[];
+	/** Expense spend in categories with no budget, uncategorized included. */
+	unbudgeted_spent: number;
+}
+
 export interface Goal {
 	id: number;
 	name: string;

@@ -203,6 +203,16 @@ type Budget struct {
 	Spent float64 `json:"spent"`
 }
 
+// BudgetMonth is one month of budgets as the budgets page shows it.
+type BudgetMonth struct {
+	Month   string   `json:"month"` // first of the month, YYYY-MM-DD
+	Budgets []Budget `json:"budgets"`
+
+	// UnbudgetedSpent is the month's expense spend in categories with no budget,
+	// including uncategorized transactions, as a positive number.
+	UnbudgetedSpent float64 `json:"unbudgeted_spent"`
+}
+
 type Goal struct {
 	ID           int     `json:"id"`
 	Name         string  `json:"name"`

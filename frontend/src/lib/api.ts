@@ -3,6 +3,7 @@ import type {
 	AccountDetail,
 	AccountInput,
 	Budget,
+	BudgetMonth,
 	Category,
 	CategoryInput,
 	Dashboard,
@@ -189,14 +190,17 @@ export const postRuleNow = (id: number) => send<Occurrence>('POST', `/api/recurr
 // budgets and goals
 // ---------------------------------------------------------------------------
 
-export const getBudgets = (month?: string) => request<Budget[]>(`/api/budgets${qs({ month })}`);
+export const getBudgets = (month?: string) =>
+	request<BudgetMonth>(`/api/budgets${qs({ month })}`);
 export const setBudget = (categoryId: number, amount: number, effectiveFrom: string) =>
 	send<Budget>('POST', '/api/budgets', {
 		category_id: categoryId,
 		amount,
 		effective_from: effectiveFrom
 	});
-export const deleteBudget = (id: number) => send<void>('DELETE', `/api/budgets/${id}`);
+/** Stops a budget from `month` onward; earlier months keep it. */
+export const stopBudget = (id: number, month: string) =>
+	send<void>('DELETE', `/api/budgets/${id}${qs({ month })}`);
 
 export const getGoals = () => request<Goal[]>('/api/goals');
 export const createGoal = (input: GoalInput) => send<Goal>('POST', '/api/goals', input);

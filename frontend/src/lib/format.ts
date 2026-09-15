@@ -119,6 +119,13 @@ export function monthStart(): string {
 	return today().slice(0, 7) + '-01';
 }
 
+/** Moves a YYYY-MM-DD month start by `delta` months. */
+export function shiftMonth(month: string, delta: number): string {
+	const [y, m] = month.split('-').map(Number);
+	const d = new Date(y, m - 1 + delta, 1);
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
 /** Describes how far away a date is, e.g. "in 3 days" or "2 days ago". */
 export function relativeDays(date: string): string {
 	const target = parseDate(date);

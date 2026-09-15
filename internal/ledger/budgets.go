@@ -10,24 +10,68 @@ import (
 )
 
 // ListBudgets returns the budget in force for the month containing `month`,
-// along with that month's spend against each category.
-//
-// "In force" means the newest row whose effective_from is on or before the month
-// — DISTINCT ON is Postgres's direct way to express that, and it keeps old budget
-// rows around as history instead of overwriting them when an amount changes.
+// along with that month's spend against each category. An empty month means the
+// current month in the household's timezone.
 func (s *Service) ListBudgets(ctx context.Context, householdID int, month string) ([]models.Budget, error) {
-	monthStart, err := monthStartOf(month)
+	monthStart, err := s.budgetMonthStart(ctx, householdID, month)
 	if err != nil {
 		return nil, err
 	}
+	return s.listBudgets(ctx, householdID, monthStart)
+}
 
+// BudgetMonth is ListBudgets plus what the budgets page needs around it: the
+// month that was actually resolved, and the spend that no budget covers.
+func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string) (models.BudgetMonth, error) {
+	monthStart, err := s.budgetMonthStart(ctx, householdID, month)
+	if err != nil {
+		return models.BudgetMonth{}, err
+	}
+	budgets, err := s.listBudgets(ctx, householdID, monthStart)
+	if err != nil {
+		return models.BudgetMonth{}, err
+	}
+
+	var total float64
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(-SUM(amount), 0) FROM transactions
+		 WHERE household_id = $1
+		   AND kind = 'expense'
+		   AND date >= $2::date
+		   AND date < ($2::date + INTERVAL '1 month')`,
+		householdID, monthStart).Scan(&total)
+	if err != nil {
+		return models.BudgetMonth{}, fmt.Errorf("totalling month spend: %w", err)
+	}
+
+	// Each budget's spent is exactly its category's expenses for the month, so
+	// whatever is left over — other categories and uncategorized — is unbudgeted.
+	unbudgeted := total
+	for _, b := range budgets {
+		unbudgeted -= b.Spent
+	}
+	return models.BudgetMonth{
+		Month:           monthStart,
+		Budgets:         budgets,
+		UnbudgetedSpent: round2(unbudgeted),
+	}, nil
+}
+
+// listBudgets finds, per category, the newest row whose effective_from is on or
+// before the month — DISTINCT ON is Postgres's direct way to express that, and it
+// keeps old budget rows around as history instead of overwriting them when an
+// amount changes.
+//
+// archived_at is filtered *after* picking the newest row, not before: an archived
+// row is a tombstone left by StopBudget, and it has to win over the older rows
+// beneath it so the budget stays stopped from that month on.
+func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart string) ([]models.Budget, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`WITH active AS (
 		   SELECT DISTINCT ON (b.category_id)
-		          b.id, b.category_id, b.period, b.amount, b.effective_from
+		          b.id, b.category_id, b.period, b.amount, b.effective_from, b.archived_at
 		   FROM budgets b
 		   WHERE b.household_id = $1
-		     AND b.archived_at IS NULL
 		     AND b.effective_from <= $2::date
 		   ORDER BY b.category_id, b.effective_from DESC
 		 )
@@ -42,7 +86,8 @@ func (s *Service) ListBudgets(ctx context.Context, householdID int, month string
 		            AND t.date < ($2::date + INTERVAL '1 month')
 		        ), 0) AS spent
 		 FROM active
-		 JOIN categories c ON c.id = active.category_id
+		 JOIN categories c ON c.id = active.category_id AND c.archived_at IS NULL
+		 WHERE active.archived_at IS NULL
 		 ORDER BY c.name`,
 		householdID, monthStart)
 	if err != nil {
@@ -79,17 +124,18 @@ func (s *Service) SetBudget(ctx context.Context, householdID int, in BudgetInput
 	if in.Amount <= 0 {
 		return models.Budget{}, invalid("amount must be greater than zero")
 	}
-	if err := s.assertCategory(ctx, householdID, &in.CategoryID); err != nil {
+	if err := s.assertBudgetCategory(ctx, householdID, in.CategoryID); err != nil {
 		return models.Budget{}, err
 	}
 
-	effective, err := monthStartOf(in.EffectiveFrom)
+	effective, err := s.budgetMonthStart(ctx, householdID, in.EffectiveFrom)
 	if err != nil {
 		return models.Budget{}, err
 	}
 
 	// Re-setting a budget for a month it already covers replaces that row rather
-	// than stacking another one on the same date.
+	// than stacking another one on the same date. Clearing archived_at restarts a
+	// budget that was stopped in that same month.
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO budgets (household_id, category_id, period, amount, effective_from)
 		 VALUES ($1, $2, 'monthly', $3, $4)
@@ -100,7 +146,7 @@ func (s *Service) SetBudget(ctx context.Context, householdID int, in BudgetInput
 		return models.Budget{}, fmt.Errorf("saving budget: %w", err)
 	}
 
-	budgets, err := s.ListBudgets(ctx, householdID, effective)
+	budgets, err := s.listBudgets(ctx, householdID, effective)
 	if err != nil {
 		return models.Budget{}, err
 	}
@@ -112,24 +158,93 @@ func (s *Service) SetBudget(ctx context.Context, householdID int, in BudgetInput
 	return models.Budget{}, ErrNotFound
 }
 
-func (s *Service) DeleteBudget(ctx context.Context, householdID, id int) error {
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM budgets WHERE household_id = $1 AND id = $2`, householdID, id)
+// StopBudget ends a budget from `month` onward while leaving earlier months
+// budgeted as they were.
+//
+// Deleting the row would be wrong twice over: the row in force is usually dated
+// some earlier month, so deleting it rewrites that history, and any older row
+// beneath it would silently come back into force. Instead it drops changes dated
+// after the month and writes an archived tombstone at the month, which
+// listBudgets treats as "no budget from here on".
+func (s *Service) StopBudget(ctx context.Context, householdID, id int, month string) error {
+	monthStart, err := s.budgetMonthStart(ctx, householdID, month)
 	if err != nil {
-		return fmt.Errorf("deleting budget: %w", err)
+		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+
+	return s.inTx(func(tx *sql.Tx) error {
+		var categoryID int
+		var amount float64
+		err := tx.QueryRowContext(ctx,
+			`SELECT category_id, amount FROM budgets WHERE household_id = $1 AND id = $2`,
+			householdID, id).Scan(&categoryID, &amount)
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("loading budget: %w", err)
+		}
+
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM budgets
+			 WHERE household_id = $1 AND category_id = $2 AND effective_from > $3::date`,
+			householdID, categoryID, monthStart); err != nil {
+			return fmt.Errorf("clearing later budget changes: %w", err)
+		}
+
+		// amount is carried over only because the column requires a positive one;
+		// a tombstone's amount is never read.
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO budgets (household_id, category_id, period, amount, effective_from, archived_at)
+			 VALUES ($1, $2, 'monthly', $3, $4, NOW())
+			 ON CONFLICT (household_id, category_id, effective_from)
+			 DO UPDATE SET archived_at = NOW(), updated_at = NOW()`,
+			householdID, categoryID, amount, monthStart); err != nil {
+			return fmt.Errorf("stopping budget: %w", err)
+		}
+		return nil
+	})
+}
+
+// assertBudgetCategory is assertCategory plus the two things a budget needs on
+// top: it only makes sense against spending, and not on a retired category.
+func (s *Service) assertBudgetCategory(ctx context.Context, householdID, categoryID int) error {
+	var kind string
+	var archived bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT kind, archived_at IS NOT NULL FROM categories WHERE id = $1 AND household_id = $2`,
+		categoryID, householdID).Scan(&kind, &archived)
+	if err == sql.ErrNoRows {
+		return invalid("category %d does not exist", categoryID)
+	}
+	if err != nil {
+		return fmt.Errorf("checking category: %w", err)
+	}
+	if kind != models.KindExpense {
+		return invalid("budgets can only be set on expense categories")
+	}
+	if archived {
+		return invalid("category is archived")
 	}
 	return nil
 }
 
+// budgetMonthStart resolves a requested month against the household's own
+// calendar, so "this month" flips at midnight where the family lives rather than
+// at midnight UTC.
+func (s *Service) budgetMonthStart(ctx context.Context, householdID int, month string) (string, error) {
+	household, err := s.household(ctx, householdID)
+	if err != nil {
+		return "", err
+	}
+	return monthStartOf(month, household.Today())
+}
+
 // monthStartOf normalizes a date or "YYYY-MM" to the first of that month.
-// An empty string means the current month.
-func monthStartOf(s string) (string, error) {
+// An empty string means the month containing today.
+func monthStartOf(s string, today time.Time) (string, error) {
 	if s == "" {
-		now := time.Now()
-		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Format(models.DateOnly), nil
+		return time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).Format(models.DateOnly), nil
 	}
 	if len(s) == 7 {
 		s += "-01"

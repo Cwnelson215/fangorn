@@ -401,6 +401,134 @@ func TestBudgetSpendIsThatMonthsExpensesOnly(t *testing.T) {
 	money(t, "February spend", budgets[0].Spent, 150.50)
 }
 
+// budgetAmounts maps category name to budgeted amount for one month.
+func (f *fixture) budgetAmounts(month string) map[string]float64 {
+	f.t.Helper()
+	budgets, err := f.svc.ListBudgets(f.ctx, f.hh, month)
+	if err != nil {
+		f.t.Fatalf("ListBudgets(%s): %v", month, err)
+	}
+	out := map[string]float64{}
+	for _, b := range budgets {
+		out[b.CategoryName] = b.Amount
+	}
+	return out
+}
+
+func (f *fixture) setBudget(categoryID int, amount float64, month string) models.Budget {
+	f.t.Helper()
+	b, err := f.svc.SetBudget(f.ctx, f.hh, ledger.BudgetInput{
+		CategoryID: categoryID, Amount: amount, EffectiveFrom: month,
+	})
+	if err != nil {
+		f.t.Fatalf("SetBudget(%s): %v", month, err)
+	}
+	return b
+}
+
+func TestStopBudgetKeepsEarlierMonths(t *testing.T) {
+	f := newFixture(t)
+	food := f.category("Food", models.KindExpense)
+
+	f.setBudget(food.ID, 400, "2026-01")
+	march := f.setBudget(food.ID, 500, "2026-03")
+	f.setBudget(food.ID, 600, "2026-07")
+
+	if err := f.svc.StopBudget(f.ctx, f.hh, march.ID, "2026-03"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stopping in March must not resurrect January's $400, and must not erase it
+	// from the months it already covered. July's later change goes too.
+	money(t, "January", f.budgetAmounts("2026-01")["Food"], 400)
+	money(t, "February", f.budgetAmounts("2026-02")["Food"], 400)
+	for _, month := range []string{"2026-03", "2026-04", "2026-07", "2026-12"} {
+		if got := f.budgetAmounts(month); len(got) != 0 {
+			t.Errorf("%s budgets after stop = %v, want none", month, got)
+		}
+	}
+
+	f.setBudget(food.ID, 450, "2026-05")
+	if got := f.budgetAmounts("2026-04"); len(got) != 0 {
+		t.Errorf("April after restarting in May = %v, want none", got)
+	}
+	money(t, "May after restart", f.budgetAmounts("2026-05")["Food"], 450)
+
+	// Re-setting the exact month a budget was stopped in restarts it too.
+	f.setBudget(food.ID, 520, "2026-03")
+	money(t, "March after restart", f.budgetAmounts("2026-03")["Food"], 520)
+
+	if err := f.svc.StopBudget(f.ctx, f.hh, 999999, "2026-03"); !errors.Is(err, ledger.ErrNotFound) {
+		t.Errorf("stopping a missing budget = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetBudgetRejectsNonExpenseCategories(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	salary := f.category("Salary", models.KindIncome)
+	old := f.category("Old", models.KindExpense)
+
+	_, err := f.svc.SetBudget(f.ctx, f.hh, ledger.BudgetInput{CategoryID: salary.ID, Amount: 100})
+	wantInvalid(t, err)
+
+	f.txn(checking.ID, models.KindExpense, "2026-02-03", 10, &old.ID) // in use, so delete archives
+	if err := f.svc.DeleteCategory(f.ctx, f.hh, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.svc.SetBudget(f.ctx, f.hh, ledger.BudgetInput{CategoryID: old.ID, Amount: 100})
+	wantInvalid(t, err)
+}
+
+func TestBudgetsHideArchivedCategories(t *testing.T) {
+	f := newFixture(t)
+	food := f.category("Food", models.KindExpense)
+	f.setBudget(food.ID, 400, "2026-01")
+
+	// The budget itself keeps the category in use, so this archives it.
+	if err := f.svc.DeleteCategory(f.ctx, f.hh, food.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.budgetAmounts("2026-02"); len(got) != 0 {
+		t.Errorf("budgets with an archived category = %v, want none", got)
+	}
+
+	if _, err := f.svc.UnarchiveCategory(f.ctx, f.hh, food.ID); err != nil {
+		t.Fatal(err)
+	}
+	money(t, "budget after unarchive", f.budgetAmounts("2026-02")["Food"], 400)
+}
+
+func TestBudgetMonthUnbudgetedSpend(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	savings := f.account("Savings", models.AccountSavings, 0)
+	food := f.category("Food", models.KindExpense)
+	fun := f.category("Fun", models.KindExpense)
+	salary := f.category("Salary", models.KindIncome)
+
+	f.setBudget(food.ID, 400, "2026-01")
+	f.txn(checking.ID, models.KindExpense, "2026-02-03", 120, &food.ID)
+	f.txn(checking.ID, models.KindExpense, "2026-02-04", 40, &fun.ID)
+	f.txn(checking.ID, models.KindExpense, "2026-02-05", 9.99, nil)
+	f.txn(checking.ID, models.KindExpense, "2026-03-01", 500, &fun.ID) // next month
+	f.txn(checking.ID, models.KindIncome, "2026-02-15", 2000, &salary.ID)
+	f.transfer(checking.ID, savings.ID, 300, "2026-02-10")
+
+	bm, err := f.svc.BudgetMonth(f.ctx, f.hh, "2026-02-17")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bm.Month != "2026-02-01" {
+		t.Errorf("month = %q, want 2026-02-01", bm.Month)
+	}
+	if len(bm.Budgets) != 1 {
+		t.Fatalf("got %d budgets, want 1", len(bm.Budgets))
+	}
+	money(t, "food spent", bm.Budgets[0].Spent, 120)
+	money(t, "unbudgeted", bm.UnbudgetedSpent, 49.99)
+}
+
 func TestPostOccurrenceOnlyPostsOnce(t *testing.T) {
 	f := newFixture(t)
 	checking := f.account("Checking", models.AccountChecking, 100)
