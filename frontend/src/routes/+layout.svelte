@@ -170,6 +170,11 @@
 		color: var(--neg);
 	}
 
+	/* --warn itself is too light to read as text on white. */
+	:global(.warn-text) {
+		color: #b45309;
+	}
+
 	.app {
 		min-height: 100vh;
 	}

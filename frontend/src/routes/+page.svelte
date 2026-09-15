@@ -2,7 +2,16 @@
 	import { onMount } from 'svelte';
 	import { getDashboard } from '$lib/api';
 	import type { Dashboard } from '$lib/types';
-	import { formatCurrency, formatDate, formatPercent, formatSigned, relativeDays } from '$lib/format';
+	import {
+		formatCurrency,
+		formatDate,
+		formatPercent,
+		formatSigned,
+		monthStart,
+		relativeDays
+	} from '$lib/format';
+	import { budgetPace } from '$lib/budget';
+	import BudgetBar from '$lib/components/BudgetBar.svelte';
 	import DonutChart from '$lib/components/DonutChart.svelte';
 	import ValueChart from '$lib/components/ValueChart.svelte';
 	import TrendChart from '$lib/components/TrendChart.svelte';
@@ -28,10 +37,6 @@
 	let hasAccounts = $derived((data?.accounts.length ?? 0) > 0);
 	let activeGoals = $derived(data?.goals.filter((g) => !g.achieved) ?? []);
 
-	function budgetPct(spent: number, amount: number): number {
-		if (amount <= 0) return 0;
-		return Math.min(100, (spent / amount) * 100);
-	}
 </script>
 
 <div class="page">
@@ -185,24 +190,24 @@
 					</div>
 					<div class="budget-list">
 						{#each data.budgets as budget (budget.id)}
-							{@const pct = budgetPct(budget.spent, budget.amount)}
-							{@const over = budget.spent > budget.amount}
+							{@const pace = budgetPace(budget.spent, budget.amount, monthStart())}
 							<div class="budget">
 								<div class="budget-head">
 									<span>{budget.category_name}</span>
-									<span class="muted" class:neg={over}>
+									<span
+										class="muted"
+										class:neg={pace.status === 'over'}
+										class:warn-text={pace.status === 'ahead'}
+									>
 										{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)}
 									</span>
 								</div>
-								<div class="bar">
-									<div
-										class="bar-fill"
-										class:over
-										style="width: {pct}%; background: {over
-											? 'var(--neg)'
-											: (budget.category_color ?? 'var(--accent)')}"
-									></div>
-								</div>
+								<BudgetBar
+									spent={budget.spent}
+									amount={budget.amount}
+									color={budget.category_color}
+									{pace}
+								/>
 							</div>
 						{/each}
 					</div>

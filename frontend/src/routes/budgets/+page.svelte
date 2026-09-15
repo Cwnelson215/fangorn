@@ -26,6 +26,8 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import BudgetBar from '$lib/components/BudgetBar.svelte';
+	import { budgetPace } from '$lib/budget';
 
 	let month = $state(monthStart());
 	let budgets: Budget[] = $state([]);
@@ -327,7 +329,7 @@
 
 				<div class="list">
 					{#each budgets as budget (budget.id)}
-						{@const over = budget.spent > budget.amount}
+						{@const pace = budgetPace(budget.spent, budget.amount, month)}
 						{@const remaining = budget.amount - budget.spent}
 						<div class="item">
 							<div class="item-head">
@@ -339,20 +341,24 @@
 									</Button>
 								</span>
 							</div>
-							<div class="bar">
-								<div
-									class="bar-fill"
-									style="width: {pct(budget.spent, budget.amount)}%; background: {over
-										? 'var(--neg)'
-										: (budget.category_color ?? 'var(--accent)')}"
-								></div>
-							</div>
+							<BudgetBar
+								spent={budget.spent}
+								amount={budget.amount}
+								color={budget.category_color}
+								{pace}
+							/>
 							<div class="item-foot muted">
 								{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)}
-								{#if over}
+								{#if pace.status === 'over'}
 									· <span class="neg">{formatCurrency(-remaining)} over</span>
 								{:else}
 									· {formatCurrency(remaining)} left
+								{/if}
+								{#if pace.status === 'ahead' && pace.projected !== null}
+									·
+									<span class="warn-text">
+										ahead of pace, on track for {formatCurrency(pace.projected)}
+									</span>
 								{/if}
 							</div>
 						</div>
