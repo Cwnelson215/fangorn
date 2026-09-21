@@ -32,11 +32,13 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 		return models.BudgetMonth{}, err
 	}
 
+	// Refunds are summed alongside expenses and are positive, so a returned
+	// purchase subtracts itself here rather than needing its own term.
 	var total float64
 	err = s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(-SUM(amount), 0) FROM transactions
 		 WHERE household_id = $1
-		   AND kind = 'expense'
+		   AND kind IN ('expense','refund')
 		   AND date >= $2::date
 		   AND date < ($2::date + INTERVAL '1 month')`,
 		householdID, monthStart).Scan(&total)
@@ -81,7 +83,7 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 		          SELECT -SUM(t.amount) FROM transactions t
 		          WHERE t.household_id = $1
 		            AND t.category_id = active.category_id
-		            AND t.kind = 'expense'
+		            AND t.kind IN ('expense','refund')
 		            AND t.date >= $2::date
 		            AND t.date < ($2::date + INTERVAL '1 month')
 		        ), 0) AS spent

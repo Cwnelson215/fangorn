@@ -190,7 +190,7 @@ func (s *Service) CreateRule(ctx context.Context, householdID int, in RuleInput)
 			return models.RecurringRule{}, err
 		}
 	}
-	if err := s.assertCategory(ctx, householdID, in.CategoryID); err != nil {
+	if err := s.assertCategory(ctx, householdID, in.CategoryID, in.Kind); err != nil {
 		return models.RecurringRule{}, err
 	}
 
@@ -239,7 +239,7 @@ func (s *Service) UpdateRule(ctx context.Context, householdID, id int, in RuleIn
 			return models.RecurringRule{}, err
 		}
 	}
-	if err := s.assertCategory(ctx, householdID, in.CategoryID); err != nil {
+	if err := s.assertCategory(ctx, householdID, in.CategoryID, in.Kind); err != nil {
 		return models.RecurringRule{}, err
 	}
 

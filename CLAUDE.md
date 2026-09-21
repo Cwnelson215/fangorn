@@ -32,6 +32,7 @@ source .env && go run ./cmd/server   # backend on :3000
 go test ./...                 # DB-backed ledger/scheduler tests skip unless FANGORN_TEST_DSN is set
 cd frontend && npm run dev    # Vite on :5173, proxies /api and /health to :3000
 cd frontend && npm run check  # svelte-check — keep this clean
+cd frontend && npm test       # vitest — pure logic in src/lib (budget pace math)
 cd frontend && npm run build  # required before `go build`; the binary embeds frontend/build
 ```
 
@@ -74,11 +75,25 @@ single leg through `/api/transactions` is rejected; deleting one leg deletes bot
 **3. A trade is a `trades` row plus a cash leg.** In an `investment` account, a buy or sell also
 writes one `kind = 'trade'` transaction on the same account (`transactions.trade_id`, composite FK
 so it can't sit on another account). Cash therefore stays `starting_balance + SUM(amount)`, and
-income/expense totals list kinds explicitly (`kind IN ('income','expense')`) so trades stay out.
+income/expense totals list kinds explicitly (today `kind IN ('income','expense','refund')`) so trades
+stay out — a kind added later has to opt in rather than leak in.
 `reinvest` and `opening` trades add shares with no leg. Share counts are never stored: every trade
 write locks the account row and replays the whole log through `portfolio.Replay`, rejecting any sell
 that exceeds shares held on its date. `trades.amount` is the real dollar figure (a "$500 of FZROX"
 order isn't exactly shares × price), and cost basis comes from it.
+
+**4. A refund is its own kind, not income.** Money coming back from something already spent on — a
+return, a reimbursement, a reversed charge — is `kind = 'refund'`: positive like income, carrying the
+**expense** category it came back from (enforced by `transactions_refund_has_category`). Every query
+that sums spending lists it alongside expenses (`kind IN ('expense','refund')`), so `spent` nets out
+with no second term, while the dashboard splits income from spending **by kind rather than by sign**
+so a return isn't counted as earnings. Booking one as income instead would claim both that the full
+amount was spent and that the money was earned.
+
+A transaction's category must match its kind — `models.CategoryKindFor` maps `income`→income and
+`expense`/`refund`→expense, and `assertCategory` rejects the rest. Without that check an expense
+filed under an income category is accepted, moves the balance, and then appears in no budget, no
+breakdown and no chart: the money gone with nothing saying where.
 
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
@@ -179,6 +194,7 @@ from `regularMarketChangePercent` because a fund's latest NAV is often dated the
 it drops everything from before and creates households, accounts, categories, transactions,
 recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_worth_snapshots.
 `007_investments` adds securities, security_prices, trades, and the `trade` transaction kind.
+`008_refunds` adds the `refund` kind (positive, expense category required).
 
 ## Conventions
 

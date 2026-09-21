@@ -658,3 +658,98 @@ func TestPostOccurrenceOnlyPostsOnce(t *testing.T) {
 	money(t, "checking", f.balance(checking.ID), 80)
 	money(t, "savings", f.balance(savings.ID), 10)
 }
+
+// A refund is the case the ledger used to have no answer for: money coming back
+// from something already spent on. Filed as income it would leave the budget
+// claiming the full spend and the dashboard claiming earnings that never were.
+func TestRefundNetsAgainstSpending(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	food := f.category("Food", models.KindExpense)
+	salary := f.category("Salary", models.KindIncome)
+
+	f.setBudget(food.ID, 400, "2026-03")
+	f.txn(checking.ID, models.KindExpense, "2026-03-04", 200, &food.ID)
+	f.txn(checking.ID, models.KindIncome, "2026-03-05", 3000, &salary.ID)
+	// Half the groceries went back to the store.
+	f.txn(checking.ID, models.KindRefund, "2026-03-06", 80, &food.ID)
+
+	budgets, err := f.svc.ListBudgets(f.ctx, f.hh, "2026-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(budgets) != 1 {
+		t.Fatalf("got %d budgets, want 1", len(budgets))
+	}
+	money(t, "budget spend net of the refund", budgets[0].Spent, 120)
+
+	bm, err := f.svc.BudgetMonth(f.ctx, f.hh, "2026-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	money(t, "unbudgeted (the refund is Food's, not anyone else's)", bm.UnbudgetedSpent, 0)
+
+	// The money really did arrive, so the balance carries it either way — what the
+	// refund kind changes is which side of the dashboard it lands on.
+	money(t, "balance", f.balance(checking.ID), 1000-200+3000+80)
+	d := f.dashboard("2026-03-01", "2026-03-31")
+	money(t, "income excludes the refund", d.Income, 3000)
+	money(t, "expenses net of the refund", d.Expenses, 120)
+	money(t, "net", d.Net, 2880)
+}
+
+func TestRefundNeedsAnExpenseCategory(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	salary := f.category("Salary", models.KindIncome)
+
+	// Nothing to cancel: this would be a positive number outside every total.
+	_, err := f.svc.CreateTransaction(f.ctx, f.hh, ledger.TransactionInput{
+		AccountID: checking.ID, Kind: models.KindRefund, Date: "2026-03-06",
+		Amount: 80, Description: "mystery money",
+	})
+	wantInvalid(t, err)
+
+	_, err = f.svc.CreateTransaction(f.ctx, f.hh, ledger.TransactionInput{
+		AccountID: checking.ID, Kind: models.KindRefund, Date: "2026-03-06",
+		Amount: 80, Description: "refund of a paycheck?", CategoryID: &salary.ID,
+	})
+	wantInvalid(t, err)
+}
+
+// A transaction whose category is on the wrong side of the ledger used to be
+// accepted, move the balance, and then show up in no budget and no chart — the
+// money gone with nothing saying where.
+func TestTransactionCategoryKindMustMatch(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	food := f.category("Food", models.KindExpense)
+	salary := f.category("Salary", models.KindIncome)
+
+	_, err := f.svc.CreateTransaction(f.ctx, f.hh, ledger.TransactionInput{
+		AccountID: checking.ID, Kind: models.KindExpense, Date: "2026-03-04",
+		Amount: 50, Description: "groceries", CategoryID: &salary.ID,
+	})
+	wantInvalid(t, err)
+
+	_, err = f.svc.CreateTransaction(f.ctx, f.hh, ledger.TransactionInput{
+		AccountID: checking.ID, Kind: models.KindIncome, Date: "2026-03-04",
+		Amount: 50, Description: "paycheck", CategoryID: &food.ID,
+	})
+	wantInvalid(t, err)
+
+	// The edit path guards the same way, so a good row can't be spoiled later.
+	good := f.txn(checking.ID, models.KindExpense, "2026-03-04", 50, &food.ID)
+	_, err = f.svc.UpdateTransaction(f.ctx, f.hh, good.ID, ledger.TransactionInput{
+		AccountID: checking.ID, Kind: models.KindExpense, Date: "2026-03-04",
+		Amount: 50, Description: "groceries", CategoryID: &salary.ID,
+	})
+	wantInvalid(t, err)
+
+	// And so do recurring rules, which write transactions of their own.
+	_, err = f.svc.CreateRule(f.ctx, f.hh, ledger.RuleInput{
+		Name: "rent", AccountID: checking.ID, Kind: models.KindExpense,
+		CategoryID: &salary.ID, Amount: 1200, Frequency: "monthly", StartDate: "2026-03-01",
+	})
+	wantInvalid(t, err)
+}

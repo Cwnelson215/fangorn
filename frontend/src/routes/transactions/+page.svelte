@@ -37,7 +37,7 @@
 	let deleting = $state(false);
 	let formError = $state<string | null>(null);
 
-	let kind = $state<'income' | 'expense'>('expense');
+	let kind = $state<'income' | 'expense' | 'refund'>('expense');
 	let accountId = $state(0);
 	let date = $state(today());
 	let amount = $state('');
@@ -77,8 +77,10 @@
 	}
 
 	// Only categories matching the selected direction are offered, so an expense
-	// can't be filed under "Paycheck".
-	let availableCategories = $derived(categories.filter((c) => c.kind === kind));
+	// can't be filed under "Paycheck". A refund points back at what was spent, so
+	// it picks from the same list an expense does.
+	let categorySide = $derived(kind === 'refund' ? 'expense' : kind);
+	let availableCategories = $derived(categories.filter((c) => c.kind === categorySide));
 
 	function openCreate() {
 		editing = null;
@@ -94,17 +96,21 @@
 		modalOpen = true;
 	}
 
-	// Only plain income and expenses are edited here. A transfer is a linked pair,
+	// Income, expenses and refunds are edited here. A transfer is a linked pair,
 	// and a trade's cash side belongs to its trade — both have their own screens.
 	function isEditable(transaction: Transaction): boolean {
-		return transaction.kind === 'income' || transaction.kind === 'expense';
+		return (
+			transaction.kind === 'income' ||
+			transaction.kind === 'expense' ||
+			transaction.kind === 'refund'
+		);
 	}
 
 	function openEdit(transaction: Transaction) {
-		if (transaction.kind !== 'income' && transaction.kind !== 'expense') return;
+		if (!isEditable(transaction)) return;
 
 		editing = transaction;
-		kind = transaction.kind;
+		kind = transaction.kind as 'income' | 'expense' | 'refund';
 		accountId = transaction.account_id;
 		date = transaction.date;
 		amount = String(Math.abs(transaction.amount));
@@ -133,6 +139,12 @@
 	async function handleSubmit(event: Event) {
 		event.preventDefault();
 		if (!accountId || !amount || !description.trim()) return;
+		// The server rejects this too; catching it here names the missing piece
+		// instead of bouncing the whole form back.
+		if (kind === 'refund' && !categoryId) {
+			formError = 'Pick the category the money is coming back from.';
+			return;
+		}
 
 		saving = true;
 		formError = null;
@@ -210,6 +222,7 @@
 					<option value="">All</option>
 					<option value="expense">Money out</option>
 					<option value="income">Money in</option>
+					<option value="refund">Refunds</option>
 					<option value="transfer">Transfers</option>
 					<option value="trade">Trades</option>
 				</select>
@@ -274,7 +287,24 @@
 			>
 				Money in
 			</button>
+			<button
+				type="button"
+				class:active={kind === 'refund'}
+				onclick={() => {
+					kind = 'refund';
+					onKindChange();
+				}}
+			>
+				Refund
+			</button>
 		</div>
+
+		{#if kind === 'refund'}
+			<p class="hint muted">
+				Money coming back from something you already logged. It lands in the account like income,
+				but comes off that category's spending instead of counting as earnings.
+			</p>
+		{/if}
 
 		<div class="form-row">
 			<Field label="Amount" id="amount">
@@ -298,7 +328,7 @@
 			<input
 				id="description"
 				bind:value={description}
-				placeholder={kind === 'expense' ? 'Groceries' : 'Paycheck'}
+				placeholder={kind === 'expense' ? 'Groceries' : kind === 'refund' ? 'Returned groceries' : 'Paycheck'}
 				disabled={saving}
 				required
 			/>
@@ -312,9 +342,9 @@
 					{/each}
 				</select>
 			</Field>
-			<Field label="Category" id="category">
-				<select id="category" bind:value={categoryId} disabled={saving}>
-					<option value={0}>Uncategorized</option>
+			<Field label={kind === 'refund' ? 'Refund of' : 'Category'} id="category">
+				<select id="category" bind:value={categoryId} disabled={saving} required={kind === 'refund'}>
+					<option value={0}>{kind === 'refund' ? 'Pick a category' : 'Uncategorized'}</option>
 					{#each availableCategories as category (category.id)}
 						<option value={category.id}>{category.name}</option>
 					{/each}
@@ -411,6 +441,12 @@
 
 	.spacer {
 		flex: 1;
+	}
+
+	.hint {
+		margin: 0.75rem 0 0;
+		font-size: 0.8rem;
+		line-height: 1.4;
 	}
 
 	.toggle {

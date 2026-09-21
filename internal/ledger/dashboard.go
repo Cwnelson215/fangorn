@@ -71,17 +71,21 @@ func (s *Service) Dashboard(ctx context.Context, householdID int, from, to strin
 	}
 	d := Dashboard{From: from, To: to}
 
-	// Income and expenses. Amounts are signed, so income is simply the positive
-	// side and expenses the negative side, reported as a positive magnitude.
+	// Income and expenses.
 	//
 	// The kinds are listed rather than excluded: transfers and trade cash legs
 	// both move money without earning or spending it, and a kind added later
 	// should have to opt in to these totals rather than leak into them.
+	//
+	// The split is by kind rather than by sign, which matters for refunds: they
+	// are positive like income but belong on the spending side, where they cancel
+	// the expense they came back from. Splitting on sign would file every return
+	// as earnings and overstate both halves.
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0),
-		        COALESCE(-SUM(amount) FILTER (WHERE amount < 0), 0)
+		`SELECT COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0),
+		        COALESCE(-SUM(amount) FILTER (WHERE kind IN ('expense','refund')), 0)
 		 FROM transactions
-		 WHERE household_id = $1 AND kind IN ('income','expense') AND date BETWEEN $2 AND $3`,
+		 WHERE household_id = $1 AND kind IN ('income','expense','refund') AND date BETWEEN $2 AND $3`,
 		householdID, from, to,
 	).Scan(&d.Income, &d.Expenses)
 	if err != nil {
@@ -156,7 +160,7 @@ func (s *Service) weeklySpending(ctx context.Context, householdID int, to string
 		      ) AS w(week)
 		 LEFT JOIN transactions t
 		   ON t.household_id = $1
-		  AND t.kind = 'expense'
+		  AND t.kind IN ('expense','refund')
 		  AND t.date >= w.week
 		  AND t.date < w.week + INTERVAL '1 week'
 		  AND t.date <= $2::date
@@ -183,11 +187,15 @@ func (s *Service) weeklySpending(ctx context.Context, householdID int, to string
 
 func (s *Service) categorySpend(ctx context.Context, householdID int, from, to string) ([]CategorySpend, error) {
 	rows, err := s.db.QueryContext(ctx,
+		// HAVING drops categories a refund has cancelled out: a month where the only
+		// activity was returning something nets to zero or below, which is not a
+		// slice the breakdown can draw and not spending worth listing.
 		`SELECT t.category_id, COALESCE(c.name, 'Uncategorized'), c.color, -SUM(t.amount)
 		 FROM transactions t
 		 LEFT JOIN categories c ON c.id = t.category_id
-		 WHERE t.household_id = $1 AND t.kind = 'expense' AND t.date BETWEEN $2 AND $3
+		 WHERE t.household_id = $1 AND t.kind IN ('expense','refund') AND t.date BETWEEN $2 AND $3
 		 GROUP BY t.category_id, c.name, c.color
+		 HAVING -SUM(t.amount) > 0
 		 ORDER BY -SUM(t.amount) DESC`,
 		householdID, from, to)
 	if err != nil {

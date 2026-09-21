@@ -32,8 +32,11 @@
 			.domain(d3.extent(data, d => d.date) as [Date, Date])
 			.range([0, width]);
 
+		// The floor is 0 rather than the minimum, so an ordinary week is measured
+		// against zero — but a week whose refunds outweigh its spending is negative
+		// and has to fit, or it would be drawn below the axis and clipped.
 		const y = d3.scaleLinear()
-			.domain([0, d3.max(data, d => d.amount) || 0])
+			.domain([Math.min(0, d3.min(data, d => d.amount) ?? 0), d3.max(data, d => d.amount) || 0])
 			.nice()
 			.range([height, 0]);
 

@@ -12,8 +12,13 @@ export type AccountType =
 
 export type AccountClass = 'asset' | 'liability';
 export type Kind = 'income' | 'expense' | 'transfer';
-/** A transaction can also be the cash side of a trade; rules and occurrences can't. */
-export type TransactionKind = Kind | 'trade';
+/**
+ * A transaction can also be the cash side of a trade, or a refund; rules and
+ * occurrences can be neither. A refund is money coming back from a category
+ * already spent in — positive like income, but it reduces that category's
+ * spending rather than adding to what the household earned.
+ */
+export type TransactionKind = Kind | 'trade' | 'refund';
 export type CategoryKind = 'income' | 'expense';
 
 export type Frequency =
@@ -371,7 +376,8 @@ export interface TransactionInput {
 	account_id: number;
 	date: string;
 	amount: number;
-	kind: 'income' | 'expense';
+	/** A refund must carry the expense category the money is coming back from. */
+	kind: 'income' | 'expense' | 'refund';
 	description: string;
 	merchant: string | null;
 	category_id: number | null;

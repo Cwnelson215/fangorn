@@ -152,6 +152,10 @@ type TransactionInput struct {
 }
 
 // signedAmount converts the submitted magnitude into the stored signed value.
+//
+// A refund is money arriving, so it keeps the positive sign income has. What
+// makes it reduce spending rather than raise earnings is its kind, which the
+// spending queries read — not its sign.
 func (in *TransactionInput) signedAmount() float64 {
 	amt := math.Abs(in.Amount)
 	if in.Kind == models.KindExpense {
@@ -168,9 +172,17 @@ func (in *TransactionInput) normalize() error {
 	if in.Description == "" {
 		return invalid("description is required")
 	}
-	if in.Kind != models.KindIncome && in.Kind != models.KindExpense {
-		return invalid("kind must be %q or %q; use the transfer endpoint to move money between accounts",
-			models.KindIncome, models.KindExpense)
+	switch in.Kind {
+	case models.KindIncome, models.KindExpense:
+	case models.KindRefund:
+		// A refund with no category is a positive number sitting outside every
+		// spending total: it would raise the balance and cancel nothing.
+		if in.CategoryID == nil {
+			return invalid("a refund needs the category the money is coming back from")
+		}
+	default:
+		return invalid("kind must be %q, %q or %q; use the transfer endpoint to move money between accounts",
+			models.KindIncome, models.KindExpense, models.KindRefund)
 	}
 	if math.Abs(in.Amount) < 0.005 {
 		return invalid("amount must be greater than zero")
@@ -191,7 +203,7 @@ func (s *Service) CreateTransaction(ctx context.Context, householdID int, in Tra
 	if err := s.assertAccount(ctx, householdID, in.AccountID); err != nil {
 		return models.Transaction{}, err
 	}
-	if err := s.assertCategory(ctx, householdID, in.CategoryID); err != nil {
+	if err := s.assertCategory(ctx, householdID, in.CategoryID, in.Kind); err != nil {
 		return models.Transaction{}, err
 	}
 
@@ -217,7 +229,7 @@ func (s *Service) UpdateTransaction(ctx context.Context, householdID, id int, in
 	if err := s.assertAccount(ctx, householdID, in.AccountID); err != nil {
 		return models.Transaction{}, err
 	}
-	if err := s.assertCategory(ctx, householdID, in.CategoryID); err != nil {
+	if err := s.assertCategory(ctx, householdID, in.CategoryID, in.Kind); err != nil {
 		return models.Transaction{}, err
 	}
 
@@ -299,19 +311,31 @@ func (s *Service) assertAccount(ctx context.Context, householdID, accountID int)
 	return nil
 }
 
-func (s *Service) assertCategory(ctx context.Context, householdID int, categoryID *int) error {
+// assertCategory checks that a category belongs to the household and that its
+// kind matches what the transaction is doing with it.
+//
+// The kind half is not pedantry. Every spending query filters on the
+// transaction's kind and joins the category, so an expense filed against an
+// income category is accepted, moves the account balance, and then appears in no
+// budget, no category breakdown and no spending chart. The money is gone and
+// nothing says where — the worst kind of wrong, because it looks like nothing
+// happened. Catching it at the write is the only cheap moment.
+func (s *Service) assertCategory(ctx context.Context, householdID int, categoryID *int, txnKind string) error {
 	if categoryID == nil {
 		return nil
 	}
-	var ok bool
+	var catKind string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM categories WHERE id = $1 AND household_id = $2)`,
-		*categoryID, householdID).Scan(&ok)
+		`SELECT kind FROM categories WHERE id = $1 AND household_id = $2`,
+		*categoryID, householdID).Scan(&catKind)
+	if err == sql.ErrNoRows {
+		return invalid("category %d does not exist", *categoryID)
+	}
 	if err != nil {
 		return fmt.Errorf("checking category: %w", err)
 	}
-	if !ok {
-		return invalid("category %d does not exist", *categoryID)
+	if want := models.CategoryKindFor(txnKind); want != "" && catKind != want {
+		return invalid("a %s needs an %s category, and that one is %s", txnKind, want, catKind)
 	}
 	return nil
 }

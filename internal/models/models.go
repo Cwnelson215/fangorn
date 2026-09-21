@@ -34,7 +34,28 @@ const (
 	// only ever written by the trade endpoints, and like a transfer it is neither
 	// income nor spending.
 	KindTrade = "trade"
+	// KindRefund is money coming back from a category that was already spent in —
+	// a return, a reimbursement, a reversed charge. It is positive like income but
+	// counts as negative spending, so it reduces that category's totals instead of
+	// raising what the household earned. It always carries an expense category.
+	KindRefund = "refund"
 )
+
+// CategoryKindFor reports which category kind a transaction of this kind must
+// use, or "" when the kind does not constrain the category at all (transfers and
+// trade legs are not categorized spending).
+//
+// A refund takes the same side as the expense it is cancelling, because it
+// points at the category the money is coming back from.
+func CategoryKindFor(txnKind string) string {
+	switch txnKind {
+	case KindIncome:
+		return KindIncome
+	case KindExpense, KindRefund:
+		return KindExpense
+	}
+	return ""
+}
 
 // Recurrence frequencies.
 const (
@@ -199,7 +220,8 @@ type Budget struct {
 	Amount        float64 `json:"amount"`
 	EffectiveFrom string  `json:"effective_from"`
 
-	// Spent is the month-to-date spend against this category, as a positive number.
+	// Spent is the month-to-date spend against this category, as a positive
+	// number, net of any refunds filed against it.
 	Spent float64 `json:"spent"`
 
 	// Scheduled is recurring expenses in this category that fall in the month but
