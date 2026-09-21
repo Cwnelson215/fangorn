@@ -13,21 +13,21 @@ import (
 // along with that month's spend against each category. An empty month means the
 // current month in the household's timezone.
 func (s *Service) ListBudgets(ctx context.Context, householdID int, month string) ([]models.Budget, error) {
-	monthStart, err := s.budgetMonthStart(ctx, householdID, month)
+	monthStart, today, err := s.resolveBudgetMonth(ctx, householdID, month)
 	if err != nil {
 		return nil, err
 	}
-	return s.listBudgets(ctx, householdID, monthStart)
+	return s.listBudgets(ctx, householdID, monthStart, today)
 }
 
 // BudgetMonth is ListBudgets plus what the budgets page needs around it: the
 // month that was actually resolved, and the spend that no budget covers.
 func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string) (models.BudgetMonth, error) {
-	monthStart, err := s.budgetMonthStart(ctx, householdID, month)
+	monthStart, today, err := s.resolveBudgetMonth(ctx, householdID, month)
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
-	budgets, err := s.listBudgets(ctx, householdID, monthStart)
+	budgets, err := s.listBudgets(ctx, householdID, monthStart, today)
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
@@ -65,7 +65,7 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 // archived_at is filtered *after* picking the newest row, not before: an archived
 // row is a tombstone left by StopBudget, and it has to win over the older rows
 // beneath it so the budget stays stopped from that month on.
-func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart string) ([]models.Budget, error) {
+func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart string, today time.Time) ([]models.Budget, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`WITH active AS (
 		   SELECT DISTINCT ON (b.category_id)
@@ -108,6 +108,103 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 		b.EffectiveFrom = dateStr(effective)
 		out = append(out, b)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+
+	scheduled, err := s.scheduledSpend(ctx, householdID, monthStart, today)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Scheduled = scheduled[out[i].CategoryID]
+	}
+	return out, nil
+}
+
+// scheduledSpend totals, per category, the recurring expenses that fall in the
+// month but have not posted yet.
+//
+// Dates come from the rules through the date engine, not from
+// recurring_occurrences. Those rows only exist out to the scheduler's horizon,
+// vanish for a tick after a rule is edited, and linger for paused rules, so
+// they would be wrong for exactly the months someone looks ahead to. What stops
+// a date being counted twice is the same boundary the scheduler uses: anything
+// on or before the rule's last posted/skipped occurrence is already history
+// (and, if posted, already in Spent, since posted rows carry the due date).
+//
+// A due-but-unposted charge in the current month still counts — it is owed, the
+// scheduler just hasn't reached it. Past months report nothing: an unposted
+// charge there belongs to a manual rule nobody logged, and that's not a budget
+// commitment any more.
+func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStart string, today time.Time) (map[int]float64, error) {
+	month, err := models.ParseDate(monthStart)
+	if err != nil {
+		return nil, err
+	}
+	if month.Before(time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)) {
+		return nil, nil
+	}
+	monthEnd := month.AddDate(0, 1, -1)
+
+	rules, err := s.ListRules(ctx, householdID)
+	if err != nil {
+		return nil, err
+	}
+	handled, err := s.lastHandledByRule(ctx, householdID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := map[int]float64{}
+	for _, rule := range rules {
+		if rule.Paused || rule.Kind != models.KindExpense || rule.CategoryID == nil {
+			continue
+		}
+		spec, err := RuleSpec(rule)
+		if err != nil {
+			return nil, err
+		}
+		from := month
+		if last, ok := handled[rule.ID]; ok && !last.Before(from) {
+			from = last.AddDate(0, 0, 1)
+		}
+		if n := len(spec.Occurrences(from, monthEnd, 0)); n > 0 {
+			out[*rule.CategoryID] += float64(n) * rule.Amount
+		}
+	}
+	for id, v := range out {
+		out[id] = round2(v)
+	}
+	return out, nil
+}
+
+// lastHandledByRule is LastHandledOccurrence for every rule in a household at
+// once. Rules with nothing posted or skipped are absent.
+func (s *Service) lastHandledByRule(ctx context.Context, householdID int) (map[int]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT o.rule_id, MAX(o.due_date)
+		 FROM recurring_occurrences o
+		 JOIN recurring_rules r ON r.id = o.rule_id
+		 WHERE r.household_id = $1 AND o.status <> 'scheduled'
+		 GROUP BY o.rule_id`, householdID)
+	if err != nil {
+		return nil, fmt.Errorf("reading rule history: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[int]time.Time{}
+	for rows.Next() {
+		var id int
+		var last time.Time
+		if err := rows.Scan(&id, &last); err != nil {
+			return nil, fmt.Errorf("scanning rule history: %w", err)
+		}
+		out[id] = last
+	}
 	return out, rows.Err()
 }
 
@@ -128,7 +225,7 @@ func (s *Service) SetBudget(ctx context.Context, householdID int, in BudgetInput
 		return models.Budget{}, err
 	}
 
-	effective, err := s.budgetMonthStart(ctx, householdID, in.EffectiveFrom)
+	effective, today, err := s.resolveBudgetMonth(ctx, householdID, in.EffectiveFrom)
 	if err != nil {
 		return models.Budget{}, err
 	}
@@ -146,7 +243,7 @@ func (s *Service) SetBudget(ctx context.Context, householdID int, in BudgetInput
 		return models.Budget{}, fmt.Errorf("saving budget: %w", err)
 	}
 
-	budgets, err := s.listBudgets(ctx, householdID, effective)
+	budgets, err := s.listBudgets(ctx, householdID, effective, today)
 	if err != nil {
 		return models.Budget{}, err
 	}
@@ -167,7 +264,7 @@ func (s *Service) SetBudget(ctx context.Context, householdID int, in BudgetInput
 // after the month and writes an archived tombstone at the month, which
 // listBudgets treats as "no budget from here on".
 func (s *Service) StopBudget(ctx context.Context, householdID, id int, month string) error {
-	monthStart, err := s.budgetMonthStart(ctx, householdID, month)
+	monthStart, _, err := s.resolveBudgetMonth(ctx, householdID, month)
 	if err != nil {
 		return err
 	}
@@ -229,15 +326,17 @@ func (s *Service) assertBudgetCategory(ctx context.Context, householdID, categor
 	return nil
 }
 
-// budgetMonthStart resolves a requested month against the household's own
+// resolveBudgetMonth resolves a requested month against the household's own
 // calendar, so "this month" flips at midnight where the family lives rather than
-// at midnight UTC.
-func (s *Service) budgetMonthStart(ctx context.Context, householdID int, month string) (string, error) {
+// at midnight UTC. It also returns that "today", which scheduled spend needs.
+func (s *Service) resolveBudgetMonth(ctx context.Context, householdID int, month string) (string, time.Time, error) {
 	household, err := s.household(ctx, householdID)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	return monthStartOf(month, household.Today())
+	today := household.Today()
+	monthStart, err := monthStartOf(month, today)
+	return monthStart, today, err
 }
 
 // monthStartOf normalizes a date or "YYYY-MM" to the first of that month.

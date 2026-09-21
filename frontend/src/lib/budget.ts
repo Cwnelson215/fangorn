@@ -1,15 +1,18 @@
 import { today } from './format';
+import type { Budget } from './types';
 
 /**
  * How a budget is tracking against the calendar.
  *
  * - `over`: already past the limit.
+ * - `committed`: under the limit, but recurring charges still to post this month
+ *   would take it over. Certain rather than projected, so it outranks `ahead`.
  * - `ahead`: under the limit, but spending faster than the month is passing, by
  *   more than PACE_TOLERANCE. Spending evenly would pass the limit.
- * - `ok`: everything else, including every past and future month except an
- *   over-limit one (pace only means something while the month is in progress).
+ * - `ok`: everything else. Pace only means something while the month is in
+ *   progress; `over` and `committed` apply to any month.
  */
-export type PaceStatus = 'over' | 'ahead' | 'ok';
+export type PaceStatus = 'over' | 'committed' | 'ahead' | 'ok';
 
 export interface BudgetPace {
 	status: PaceStatus;
@@ -37,8 +40,7 @@ export function monthElapsed(month: string, on: string = today()): number {
 }
 
 export function budgetPace(
-	spent: number,
-	amount: number,
+	{ spent, amount, scheduled }: Pick<Budget, 'spent' | 'amount' | 'scheduled'>,
 	month: string,
 	on: string = today()
 ): BudgetPace {
@@ -49,6 +51,8 @@ export function budgetPace(
 	let status: PaceStatus = 'ok';
 	if (spent > amount) {
 		status = 'over';
+	} else if (spent + scheduled > amount) {
+		status = 'committed';
 	} else if (elapsed !== null && amount > 0 && spent / amount > elapsed + PACE_TOLERANCE) {
 		status = 'ahead';
 	}

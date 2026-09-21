@@ -529,6 +529,84 @@ func TestBudgetMonthUnbudgetedSpend(t *testing.T) {
 	money(t, "unbudgeted", bm.UnbudgetedSpent, 49.99)
 }
 
+func TestBudgetScheduledSpend(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	food := f.category("Food", models.KindExpense)
+	fun := f.category("Fun", models.KindExpense)
+
+	// Scheduled spend depends on the real "today", so every date here is relative
+	// to the fixture household's current month.
+	today := ledger.Household{Timezone: "America/Denver"}.Today()
+	thisMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	prev, next := thisMonth.AddDate(0, -1, 0), thisMonth.AddDate(0, 1, 0)
+	ym := func(d time.Time) string { return d.Format("2006-01") }
+	on := func(month time.Time, day int) string { return month.AddDate(0, 0, day-1).Format(models.DateOnly) }
+	day := func(d int) *int { return &d }
+
+	f.setBudget(food.ID, 400, ym(prev))
+
+	rule := func(in ledger.RuleInput) models.RecurringRule {
+		t.Helper()
+		in.AccountID = checking.ID
+		if in.Kind == "" {
+			in.Kind = models.KindExpense
+		}
+		r, err := f.svc.CreateRule(f.ctx, f.hh, in)
+		if err != nil {
+			t.Fatalf("CreateRule(%s): %v", in.Name, err)
+		}
+		return r
+	}
+
+	// Back-dated and never posted: its date in this month is still owed.
+	rule(ledger.RuleInput{Name: "streaming", CategoryID: &food.ID, Amount: 15,
+		Frequency: "monthly", DayOfMonth: day(10), StartDate: on(prev, 1)})
+	// Manual rules are commitments too, even though they never auto-post.
+	manual := false
+	rule(ledger.RuleInput{Name: "csa box", CategoryID: &food.ID, Amount: 3,
+		Frequency: "monthly", DayOfMonth: day(1), StartDate: on(prev, 1), AutoPost: &manual})
+	// Twice next month, and the 5th has already posted — only the 20th remains.
+	twice := rule(ledger.RuleInput{Name: "meal kit", CategoryID: &food.ID, Amount: 50,
+		Frequency: "semimonthly", DayOfMonth: day(5), SecondDayOfMonth: day(20), StartDate: on(next, 1)})
+	// None of these count against Food.
+	paused := rule(ledger.RuleInput{Name: "paused", CategoryID: &food.ID, Amount: 1000,
+		Frequency: "monthly", StartDate: on(prev, 1)})
+	if err := f.svc.SetRulePaused(f.ctx, f.hh, paused.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	rule(ledger.RuleInput{Name: "other category", CategoryID: &fun.ID, Amount: 7,
+		Frequency: "monthly", StartDate: on(prev, 1)})
+
+	var occID int
+	if err := f.svc.DB().QueryRow(
+		`INSERT INTO recurring_occurrences (rule_id, due_date) VALUES ($1, $2) RETURNING id`,
+		twice.ID, on(next, 5)).Scan(&occID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.PostOccurrence(f.ctx, twice, occID, next.AddDate(0, 0, 4)); err != nil {
+		t.Fatal(err)
+	}
+
+	food1 := func(month time.Time) models.Budget {
+		t.Helper()
+		budgets, err := f.svc.ListBudgets(f.ctx, f.hh, ym(month))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(budgets) != 1 {
+			t.Fatalf("%s: got %d budgets, want 1", ym(month), len(budgets))
+		}
+		return budgets[0]
+	}
+
+	money(t, "previous month scheduled (past months report none)", food1(prev).Scheduled, 0)
+	money(t, "this month scheduled", food1(thisMonth).Scheduled, 15+3)
+	nb := food1(next)
+	money(t, "next month scheduled", nb.Scheduled, 15+3+50)
+	money(t, "next month spent (the posted meal kit)", nb.Spent, 50)
+}
+
 func TestPostOccurrenceOnlyPostsOnce(t *testing.T) {
 	f := newFixture(t)
 	checking := f.account("Checking", models.AccountChecking, 100)

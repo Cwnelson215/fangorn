@@ -201,6 +201,10 @@ type Budget struct {
 
 	// Spent is the month-to-date spend against this category, as a positive number.
 	Spent float64 `json:"spent"`
+
+	// Scheduled is recurring expenses in this category that fall in the month but
+	// have not posted yet, as a positive number. Always 0 for past months.
+	Scheduled float64 `json:"scheduled"`
 }
 
 // BudgetMonth is one month of budgets as the budgets page shows it.

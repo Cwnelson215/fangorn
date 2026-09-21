@@ -158,6 +158,8 @@ export interface Budget {
 	amount: number;
 	effective_from: string;
 	spent: number;
+	/** Recurring expenses in the month not posted yet. Always 0 for past months. */
+	scheduled: number;
 }
 
 export interface BudgetMonth {

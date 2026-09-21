@@ -190,14 +190,14 @@
 					</div>
 					<div class="budget-list">
 						{#each data.budgets as budget (budget.id)}
-							{@const pace = budgetPace(budget.spent, budget.amount, monthStart())}
+							{@const pace = budgetPace(budget, monthStart())}
 							<div class="budget">
 								<div class="budget-head">
 									<span>{budget.category_name}</span>
 									<span
 										class="muted"
 										class:neg={pace.status === 'over'}
-										class:warn-text={pace.status === 'ahead'}
+										class:warn-text={pace.status === 'committed' || pace.status === 'ahead'}
 									>
 										{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)}
 									</span>
@@ -205,6 +205,7 @@
 								<BudgetBar
 									spent={budget.spent}
 									amount={budget.amount}
+									scheduled={budget.scheduled}
 									color={budget.category_color}
 									{pace}
 								/>

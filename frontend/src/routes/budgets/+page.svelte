@@ -118,6 +118,7 @@
 	let unbudgetedCategories = $derived(expenseCategories.filter((c) => !budgetedIds.has(c.id)));
 	let totalBudget = $derived(budgets.reduce((sum, b) => sum + b.amount, 0));
 	let totalSpent = $derived(budgets.reduce((sum, b) => sum + b.spent, 0));
+	let totalScheduled = $derived(budgets.reduce((sum, b) => sum + b.scheduled, 0));
 
 	function openBudget() {
 		budgetCategoryId = unbudgetedCategories[0]?.id ?? expenseCategories[0]?.id ?? 0;
@@ -320,7 +321,11 @@
 				<div class="summary">
 					<span>
 						<strong class:neg={totalSpent > totalBudget}>{formatCurrency(totalSpent)}</strong>
-						spent of {formatCurrency(totalBudget)} budgeted
+						spent
+						{#if totalScheduled > 0}
+							+ {formatCurrency(totalScheduled)} scheduled
+						{/if}
+						of {formatCurrency(totalBudget)} budgeted
 						{#if unbudgeted > 0}
 							· {formatCurrency(unbudgeted)} unbudgeted
 						{/if}
@@ -329,8 +334,8 @@
 
 				<div class="list">
 					{#each budgets as budget (budget.id)}
-						{@const pace = budgetPace(budget.spent, budget.amount, month)}
-						{@const remaining = budget.amount - budget.spent}
+						{@const pace = budgetPace(budget, month)}
+						{@const remaining = budget.amount - budget.spent - budget.scheduled}
 						<div class="item">
 							<div class="item-head">
 								<span class="item-name">{budget.category_name}</span>
@@ -344,13 +349,25 @@
 							<BudgetBar
 								spent={budget.spent}
 								amount={budget.amount}
+								scheduled={budget.scheduled}
 								color={budget.category_color}
 								{pace}
 							/>
 							<div class="item-foot muted">
 								{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)}
+								{#if budget.scheduled > 0}
+									· {formatCurrency(budget.scheduled)} scheduled
+								{/if}
 								{#if pace.status === 'over'}
-									· <span class="neg">{formatCurrency(-remaining)} over</span>
+									·
+									<span class="neg">
+										{formatCurrency(budget.spent - budget.amount)} over
+									</span>
+								{:else if pace.status === 'committed'}
+									·
+									<span class="warn-text">
+										{formatCurrency(-remaining)} over once scheduled charges post
+									</span>
 								{:else}
 									· {formatCurrency(remaining)} left
 								{/if}
@@ -365,6 +382,9 @@
 					{/each}
 				</div>
 				<p class="muted hint">
+					{#if totalScheduled > 0}
+						Striped: recurring charges scheduled but not posted yet.
+					{/if}
 					Stopping a budget ends it from {formatMonth(month)} on. Earlier months keep it.
 				</p>
 			{/if}
