@@ -313,6 +313,10 @@ but not built. The schema is already shaped for it.
   and escapes every value; `internal/config/config_test.go` guards it.
 - **`Dockerfile` must match `go.mod`'s Go version.** They drifted once (1.22 vs 1.26) and the image
   build failed.
+- **Node is 22 everywhere** — local dev, the `Dockerfile`'s frontend stage and `deploy.yml`.
+  `vitest` 5 needs Node ≥ 22.12 and `frontend/.npmrc` sets `engine-strict=true`, so an older Node
+  fails `npm ci` outright. The first deploy failed on exactly this (CI was on 20); a cached
+  `npm ci` layer hid it from a local `docker build`, so rebuild with `--no-cache` after bumping.
 - **An httptest handler must read a POST body before waiting on `r.Context().Done()`.** The server
   only notices the client hanging up once the body is consumed; the vision timeout test hung on it.
 - **GHCR images are public.** `.dockerignore` excludes `.env*`, `teller/`, `client_secret*.json`,
