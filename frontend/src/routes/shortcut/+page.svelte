@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	// Sets up the iPhone Shortcuts: one key per phone, then the steps to build
 	// "Snap receipt" and "Log expense" with that key and this server's address
 	// filled in.
@@ -148,9 +149,7 @@
 					</Field>
 					<Field label="Logs to" id="phoneAccount">
 						<select id="phoneAccount" bind:value={accountId}>
-							{#each accounts as a (a.id)}
-								<option value={a.id}>{a.name}</option>
-							{/each}
+							<AccountOptions {accounts} />
 						</select>
 					</Field>
 				</div>

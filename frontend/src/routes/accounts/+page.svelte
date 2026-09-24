@@ -14,6 +14,9 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import GroupBySwitch from '$lib/components/GroupBySwitch.svelte';
+	import { groupAccounts, institutionNames } from '$lib/grouping';
+	import { grouping } from '$lib/grouping.svelte';
 
 	let accounts: Account[] = $state([]);
 	let loading = $state(true);
@@ -52,6 +55,8 @@
 	let liabilities = $derived(accounts.filter((a) => a.class === 'liability'));
 	let totalAssets = $derived(assets.reduce((sum, a) => sum + a.balance, 0));
 	let totalDebt = $derived(liabilities.reduce((sum, a) => sum + Math.abs(a.balance), 0));
+	let groups = $derived(groupAccounts(accounts, grouping.by));
+	let institutions = $derived(institutionNames(accounts));
 
 	function openCreate() {
 		editing = null;
@@ -178,25 +183,31 @@
 			</div>
 		</div>
 
-		{#each [{ label: 'Assets', items: assets }, { label: 'Credit Cards & Loans', items: liabilities }] as group}
-			{#if group.items.length > 0}
-				<section>
-					<h2>{group.label}</h2>
-					<div class="grid">
-						{#each group.items as account (account.id)}
-							<div class="account-wrapper">
-								<AccountCard {account} />
-								<div class="row-actions">
-									<Button variant="ghost" size="sm" onclick={() => openEdit(account)}>Edit</Button>
-									<Button variant="ghost" size="sm" onclick={() => toggleArchive(account)}>
-										{account.archived ? 'Restore' : 'Archive'}
-									</Button>
-								</div>
+		<div class="group-bar">
+			<span class="muted">Group by</span>
+			<GroupBySwitch />
+		</div>
+
+		{#each groups as group (group.key)}
+			<section>
+				<h2>
+					<span>{group.label}</span>
+					<span class="group-total" class:neg={group.total < 0}>{formatCurrency(group.total)}</span>
+				</h2>
+				<div class="grid">
+					{#each group.items as account (account.id)}
+						<div class="account-wrapper">
+							<AccountCard {account} />
+							<div class="row-actions">
+								<Button variant="ghost" size="sm" onclick={() => openEdit(account)}>Edit</Button>
+								<Button variant="ghost" size="sm" onclick={() => toggleArchive(account)}>
+									{account.archived ? 'Restore' : 'Archive'}
+								</Button>
 							</div>
-						{/each}
-					</div>
-				</section>
-			{/if}
+						</div>
+					{/each}
+				</div>
+			</section>
 		{/each}
 	{/if}
 </div>
@@ -216,7 +227,19 @@
 				</select>
 			</Field>
 			<Field label="Institution" id="institution">
-				<input id="institution" bind:value={institution} placeholder="Gesa" disabled={saving} />
+				<input
+					id="institution"
+					list="institution-names"
+					bind:value={institution}
+					placeholder="Gesa"
+					autocomplete="off"
+					disabled={saving}
+				/>
+				<datalist id="institution-names">
+					{#each institutions as i (i)}
+						<option value={i}></option>
+					{/each}
+				</datalist>
 			</Field>
 		</div>
 
@@ -275,9 +298,29 @@
 
 <style>
 	h2 {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
 		font-size: 1rem;
 		margin-bottom: 0.75rem;
 		color: var(--muted);
+	}
+
+	.group-total {
+		font-variant-numeric: tabular-nums;
+		font-weight: 600;
+	}
+
+	.group-total.neg {
+		color: var(--neg);
+	}
+
+	.group-bar {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		font-size: 0.8125rem;
 	}
 
 	.actions {
@@ -331,7 +374,7 @@
 
 	.grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
 		gap: 1rem;
 	}
 

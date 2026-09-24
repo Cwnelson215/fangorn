@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	import { onMount } from 'svelte';
 	import {
 		createTransaction,
@@ -234,9 +235,7 @@
 			<Field label="Account" id="filterAccount">
 				<select id="filterAccount" bind:value={filterAccount} onchange={load}>
 					<option value={0}>All accounts</option>
-					{#each accounts as account (account.id)}
-						<option value={account.id}>{account.name}</option>
-					{/each}
+					<AccountOptions {accounts} />
 				</select>
 			</Field>
 			<Field label="Category" id="filterCategory">
@@ -371,9 +370,7 @@
 		<div class="form-row">
 			<Field label="Account" id="account">
 				<select id="account" bind:value={accountId} disabled={saving}>
-					{#each accounts as account (account.id)}
-						<option value={account.id}>{account.name}</option>
-					{/each}
+					<AccountOptions {accounts} />
 				</select>
 			</Field>
 			<Field label={kind === 'refund' ? 'Refund of' : 'Category'} id="category">

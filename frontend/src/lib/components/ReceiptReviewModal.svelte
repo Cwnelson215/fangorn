@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountOptions from './AccountOptions.svelte';
 	import { deleteReceipt, postReceipt, receiptImageUrl, retryReceipt } from '$lib/api';
 	import { formatCurrency } from '$lib/format';
 	import { today } from '$lib/format';
@@ -157,11 +158,7 @@
 				<div class="form-row">
 					<Field label="Account" id="rAccount">
 						<select id="rAccount" bind:value={accountId} disabled={busy}>
-							{#each accounts as account (account.id)}
-								<option value={account.id}>
-									{account.name}{account.mask ? ` ····${account.mask}` : ''}
-								</option>
-							{/each}
+							<AccountOptions {accounts} showMask />
 						</select>
 					</Field>
 					<Field label={kind === 'refund' ? 'Refund of' : 'Category'} id="rCategory">

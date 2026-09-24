@@ -258,6 +258,11 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
   a desktop column-header row the `table-head` class, put rows in a `.table-scroll`, and group dated
   rows under `.day-heading` with `groupByDate` / `formatDayHeading`. Paired fields go in a
   `.form-row`, which wraps on narrow screens. Money inputs carry `inputmode="decimal"`.
+- **Accounts group by type or institution**, chosen per device (`lib/grouping.svelte.ts`,
+  localStorage). `groupAccounts` in `lib/grouping.ts` is the one grouping — institutions merge
+  case- and whitespace-insensitively, and the backend trims `institution_name` too. The
+  `GroupBySwitch` appears only where accounts are listed (`/accounts`, the dashboard); every account
+  `<select>` renders `<AccountOptions {accounts} />` and follows the same choice with `<optgroup>`s.
 - **Logging is one screen.** `/add` is where the home-screen icon opens (`start_url`) and where the
   tab bar's **+** goes: amount, category chips sorted by recent use, Save, Undo. It fills in the
   description from the category, remembers the last account per device (`lib/remember.ts`), scans

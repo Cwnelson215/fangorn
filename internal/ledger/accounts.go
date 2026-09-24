@@ -97,11 +97,25 @@ type AccountInput struct {
 	Notes               *string `json:"notes"`
 }
 
+func trimmedOrNil(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	t := strings.TrimSpace(*s)
+	if t == "" {
+		return nil
+	}
+	return &t
+}
+
 func (in *AccountInput) normalize() error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
 		return invalid("name is required")
 	}
+	// Accounts are grouped by institution, so "Gesa" and "Gesa " must be one.
+	in.InstitutionName = trimmedOrNil(in.InstitutionName)
+	in.Mask = trimmedOrNil(in.Mask)
 	if !models.ValidAccountType(in.Type) {
 		return invalid("unknown account type %q", in.Type)
 	}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -194,16 +195,12 @@
 		<div class="form-row">
 			<Field label="From" id="from">
 				<select id="from" bind:value={fromId} disabled={saving}>
-					{#each accounts as account (account.id)}
-						<option value={account.id}>{account.name}</option>
-					{/each}
+					<AccountOptions {accounts} />
 				</select>
 			</Field>
 			<Field label="To" id="to">
 				<select id="to" bind:value={toId} disabled={saving}>
-					{#each accounts as account (account.id)}
-						<option value={account.id}>{account.name}</option>
-					{/each}
+					<AccountOptions {accounts} />
 				</select>
 			</Field>
 		</div>

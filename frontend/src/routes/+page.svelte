@@ -15,8 +15,12 @@
 	import DonutChart from '$lib/components/DonutChart.svelte';
 	import ValueChart from '$lib/components/ValueChart.svelte';
 	import TrendChart from '$lib/components/TrendChart.svelte';
+	import GroupBySwitch from '$lib/components/GroupBySwitch.svelte';
+	import { groupAccounts } from '$lib/grouping';
+	import { grouping } from '$lib/grouping.svelte';
 
 	let data = $state<Dashboard | null>(null);
+	let accountGroups = $derived(data ? groupAccounts(data.accounts, grouping.by) : []);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -101,20 +105,26 @@
 			</div>
 
 			<div class="card">
-				<h2>Accounts</h2>
+				<div class="card-head accounts-head">
+					<h2>Accounts</h2>
+					<GroupBySwitch />
+				</div>
 				<div class="account-list">
-					{#each data.accounts as account (account.id)}
-						<a class="account-line" href="/accounts/{account.id}">
-							<span class="account-name">{account.name}</span>
-							<span
-								class="account-balance"
-								class:neg={account.class === 'liability' && account.balance !== 0}
-							>
-								{formatCurrency(
-									account.class === 'liability' ? Math.abs(account.balance) : account.balance
-								)}
-							</span>
-						</a>
+					{#each accountGroups as group (group.key)}
+						<h3 class="group-heading">{group.label}</h3>
+						{#each group.items as account (account.id)}
+							<a class="account-line" href="/accounts/{account.id}">
+								<span class="account-name">{account.name}</span>
+								<span
+									class="account-balance"
+									class:neg={account.class === 'liability' && account.balance !== 0}
+								>
+									{formatCurrency(
+										account.class === 'liability' ? Math.abs(account.balance) : account.balance
+									)}
+								</span>
+							</a>
+						{/each}
 					{/each}
 				</div>
 			</div>
@@ -315,6 +325,25 @@
 	.budget-list {
 		display: flex;
 		flex-direction: column;
+	}
+
+	.accounts-head {
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.group-heading {
+		margin: 0.75rem 0 0;
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--muted);
+	}
+
+	.group-heading:first-child {
+		margin-top: 0;
 	}
 
 	.account-line {

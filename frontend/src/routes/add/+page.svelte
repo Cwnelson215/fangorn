@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	// The quick-log screen: what the home-screen icon and the tab bar's + open.
 	// Everything that can be defaulted is — today, the last account used, a
 	// description from the category — so the common case is amount, category,
@@ -270,9 +271,7 @@
 				<label class="pill">
 					<span class="pill-label">From</span>
 					<select bind:value={accountId} aria-label="Account">
-						{#each accounts as a (a.id)}
-							<option value={a.id}>{a.name}</option>
-						{/each}
+						<AccountOptions {accounts} />
 					</select>
 				</label>
 				<label class="pill date">

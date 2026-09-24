@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	import { onMount } from 'svelte';
 	import {
 		createRule,
@@ -369,9 +370,7 @@
 			</Field>
 			<Field label={kind === 'transfer' ? 'From account' : 'Account'} id="ruleAccount">
 				<select id="ruleAccount" bind:value={accountId} disabled={saving}>
-					{#each accounts as account (account.id)}
-						<option value={account.id}>{account.name}</option>
-					{/each}
+					<AccountOptions {accounts} />
 				</select>
 			</Field>
 		</div>
@@ -379,9 +378,7 @@
 		{#if kind === 'transfer'}
 			<Field label="To account" id="ruleToAccount">
 				<select id="ruleToAccount" bind:value={toAccountId} disabled={saving}>
-					{#each accounts as account (account.id)}
-						<option value={account.id}>{account.name}</option>
-					{/each}
+					<AccountOptions {accounts} />
 				</select>
 			</Field>
 			{#if sameAccount}

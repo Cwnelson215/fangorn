@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	import { onMount } from 'svelte';
 	import {
 		achieveGoal,
@@ -520,9 +521,7 @@
 		>
 			<select id="goalAccount" bind:value={goalAccountId} disabled={goalSaving}>
 				<option value={0}>Track manually</option>
-				{#each accounts as account (account.id)}
-					<option value={account.id}>{account.name}</option>
-				{/each}
+				<AccountOptions {accounts} />
 			</select>
 		</Field>
 
