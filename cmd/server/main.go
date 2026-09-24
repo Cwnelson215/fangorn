@@ -75,7 +75,7 @@ func main() {
 		if cfg.AnthropicAPIKey == "" {
 			log.Fatalf("RECEIPTS_PROVIDER=anthropic needs ANTHROPIC_API_KEY")
 		}
-		extractor = vision.NewAnthropic(cfg.AnthropicAPIKey, cfg.ReceiptsModel)
+		extractor = vision.NewAnthropic(cfg.AnthropicAPIKey, cfg.ReceiptsModel).WithWorkspace(cfg.AnthropicWorkspaceID)
 		log.Printf("Receipts read with %s", cfg.ReceiptsModel)
 	case "none":
 		log.Println("Receipt reading disabled (RECEIPTS_PROVIDER=none)")

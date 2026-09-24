@@ -35,6 +35,9 @@ type Anthropic struct {
 	baseURL string
 	apiKey  string
 	model   string
+	// workspaceID is sent as anthropic-workspace-id. A key that isn't scoped to
+	// one workspace is refused without it; a scoped key doesn't need it.
+	workspaceID string
 }
 
 const (
@@ -57,6 +60,13 @@ func NewAnthropic(apiKey, model string) *Anthropic {
 		apiKey:  apiKey,
 		model:   model,
 	}
+}
+
+// WithWorkspace names the workspace requests run in, for an API key that isn't
+// scoped to one. Empty leaves the header off.
+func (a *Anthropic) WithWorkspace(id string) *Anthropic {
+	a.workspaceID = id
+	return a
 }
 
 // newAnthropicAt points the client at a test server.
@@ -212,6 +222,9 @@ func (a *Anthropic) Extract(ctx context.Context, image []byte, mediaType string,
 	req.Header.Set("anthropic-version", anthropicVersion)
 	req.Header.Set("anthropic-beta", fallbackBeta)
 	req.Header.Set("content-type", "application/json")
+	if a.workspaceID != "" {
+		req.Header.Set("anthropic-workspace-id", a.workspaceID)
+	}
 
 	resp, err := a.client.Do(req)
 	if err != nil {

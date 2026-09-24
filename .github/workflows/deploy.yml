@@ -137,6 +137,8 @@ jobs:
         env:
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional: only a key that isn't scoped to one workspace needs it.
+          ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}
         run: |
           # An unset APP_PASSWORD switches login off entirely, and the pod would
           # crash-loop without an API key (RECEIPTS_PROVIDER=anthropic). Refuse to
@@ -149,6 +151,7 @@ jobs:
             --namespace fangorn \
             --from-literal=APP_PASSWORD="$APP_PASSWORD" \
             --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            --from-literal=ANTHROPIC_WORKSPACE_ID="$ANTHROPIC_WORKSPACE_ID" \
             --dry-run=client -o yaml \
             | kubectl apply -f -
 

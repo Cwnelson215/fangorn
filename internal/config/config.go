@@ -36,6 +36,9 @@ type Config struct {
 	ReceiptsProvider string
 	// AnthropicAPIKey is required when ReceiptsProvider is "anthropic".
 	AnthropicAPIKey string
+	// AnthropicWorkspaceID (wrkspc_…) is needed only when the API key isn't
+	// scoped to a single workspace.
+	AnthropicWorkspaceID string
 	// ReceiptsModel is the Claude model receipts are read with.
 	ReceiptsModel string
 }
@@ -56,6 +59,7 @@ func Load() *Config {
 		QuotesMarketTTL:      getEnvDuration("QUOTES_MARKET_TTL", time.Minute),
 		ReceiptsProvider:     getEnv("RECEIPTS_PROVIDER", "none"),
 		AnthropicAPIKey:      os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicWorkspaceID: strings.TrimSpace(os.Getenv("ANTHROPIC_WORKSPACE_ID")),
 		ReceiptsModel:        getEnv("RECEIPTS_MODEL", "claude-opus-5"),
 	}
 }

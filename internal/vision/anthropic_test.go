@@ -74,6 +74,9 @@ func checkRequest(t *testing.T, r *http.Request) {
 			t.Errorf("%s = %q, want %q", header, got, want)
 		}
 	}
+	if got, ok := r.Header["Anthropic-Workspace-Id"]; ok {
+		t.Errorf("anthropic-workspace-id = %q, want it left off when no workspace is set", got)
+	}
 
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -216,5 +219,21 @@ func TestTimeoutIsUnavailable(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Error("Extract did not honour the context deadline")
+	}
+}
+
+func TestWorkspaceHeader(t *testing.T) {
+	got := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		got <- r.Header.Get("anthropic-workspace-id")
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	newAnthropicAt(srv.URL, "k", "m").WithWorkspace("wrkspc_test").
+		Extract(context.Background(), fakeImage, "image/jpeg", Hints{})
+	if id := <-got; id != "wrkspc_test" {
+		t.Errorf("anthropic-workspace-id = %q, want wrkspc_test", id)
 	}
 }

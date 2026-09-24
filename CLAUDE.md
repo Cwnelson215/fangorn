@@ -281,7 +281,9 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 - **Env vars:** `PORT`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`,
   `APP_PASSWORD`, `SCHEDULER_INTERVAL`, `SCHEDULER_HORIZON_DAYS`, `QUOTES_PROVIDER` (`yahoo` default,
   or `none`), `QUOTES_MARKET_TTL`, `RECEIPTS_PROVIDER` (`none` default, or `anthropic`),
-  `ANTHROPIC_API_KEY` (required with `anthropic`), `RECEIPTS_MODEL` (default `claude-opus-5`)
+  `ANTHROPIC_API_KEY` (required with `anthropic`), `ANTHROPIC_WORKSPACE_ID` (`wrkspc_…`, sent as
+  `anthropic-workspace-id`; needed only when the key isn't scoped to one workspace — the API 400s
+  without it), `RECEIPTS_MODEL` (default `claude-opus-5`)
 
 ## Auth
 
@@ -351,7 +353,7 @@ ECS service, RDS database or Pulumi stack.
   `fangorn` database in `Cluster/platform-pg`, with `db-creds` (`host`, `port`, `database`,
   `username`, `password`) in the `fangorn` namespace. CI never touches these.
 - **GitHub repo secrets:** `KUBECONFIG`, `TS_AUTHKEY` (same values as the other apps),
-  `APP_PASSWORD`, `ANTHROPIC_API_KEY`. The workflow refuses to deploy if either of the last two is
+  `APP_PASSWORD`, `ANTHROPIC_API_KEY`, and optionally `ANTHROPIC_WORKSPACE_ID`. The workflow refuses to deploy if either of the last two is
   empty — an unset `APP_PASSWORD` would switch login off on the public internet.
 - A change to `app-secrets` alone doesn't restart the pod; run
   `kubectl rollout restart deployment/fangorn -n fangorn`.
