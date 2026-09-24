@@ -306,7 +306,7 @@
 
 	.grid-2 {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
 		gap: 1.5rem;
 	}
 
@@ -423,5 +423,54 @@
 
 	.small {
 		font-size: 0.875rem;
+	}
+
+	@media (max-width: 639px) {
+		/* Net worth gets the full width; the three 30-day figures share a row. */
+		.stats {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 0.5rem;
+		}
+
+		.stats .stat:first-child {
+			grid-column: 1 / -1;
+		}
+
+		.stats .stat:not(:first-child) {
+			padding: 0.75rem;
+		}
+
+		.stats .stat:not(:first-child) .stat-value {
+			font-size: 1rem;
+		}
+
+		.stats .stat:not(:first-child) .stat-label,
+		.stats .stat:not(:first-child) .muted {
+			font-size: 0.6875rem;
+		}
+
+		.upcoming-row {
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				'name amount'
+				'name when';
+			column-gap: 0.75rem;
+			row-gap: 0;
+		}
+
+		.upcoming-name {
+			grid-area: name;
+		}
+
+		.upcoming-amount {
+			grid-area: amount;
+			min-width: 0;
+		}
+
+		.upcoming-when {
+			grid-area: when;
+			text-align: right;
+			font-size: 0.75rem;
+		}
 	}
 </style>

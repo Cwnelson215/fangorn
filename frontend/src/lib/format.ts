@@ -138,3 +138,35 @@ export function relativeDays(date: string): string {
 	if (days > 0) return `in ${days} days`;
 	return `${Math.abs(days)} days ago`;
 }
+
+/**
+ * Heading for a day in a phone-sized list: "Today", "Yesterday", "Mon, Sep 22",
+ * with the year only once it isn't this year's.
+ */
+export function formatDayHeading(date: string, now: string = today()): string {
+	const days = Math.round((parseDate(now).getTime() - parseDate(date).getTime()) / 86400000);
+	if (days === 0) return 'Today';
+	if (days === 1) return 'Yesterday';
+	const d = parseDate(date);
+	return d.toLocaleDateString('en-US', {
+		weekday: 'short',
+		month: 'short',
+		day: 'numeric',
+		year: d.getFullYear() === parseDate(now).getFullYear() ? undefined : 'numeric'
+	});
+}
+
+/**
+ * Splits a newest-first list into runs of the same date, keeping order. Rows
+ * only carry the date on desktop; on a phone each run gets a heading instead.
+ */
+export function groupByDate<T>(items: T[], dateOf: (item: T) => string): { date: string; items: T[] }[] {
+	const groups: { date: string; items: T[] }[] = [];
+	for (const item of items) {
+		const date = dateOf(item);
+		const last = groups[groups.length - 1];
+		if (last && last.date === date) last.items.push(item);
+		else groups.push({ date, items: [item] });
+	}
+	return groups;
+}

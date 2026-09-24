@@ -293,11 +293,11 @@
 
 			<div class="month-nav">
 				<Button variant="ghost" size="sm" onclick={() => goToMonth(shiftMonth(month, -1))}>
-					‹ {formatMonth(shiftMonth(month, -1))}
+					‹ <span class="neighbor">{formatMonth(shiftMonth(month, -1))}</span>
 				</Button>
 				<strong class="month-label" class:loading={budgetsLoading}>{formatMonth(month)}</strong>
 				<Button variant="ghost" size="sm" onclick={() => goToMonth(shiftMonth(month, 1))}>
-					{formatMonth(shiftMonth(month, 1))} ›
+					<span class="neighbor">{formatMonth(shiftMonth(month, 1))}</span> ›
 				</Button>
 				{#if !isCurrentMonth}
 					<Button variant="secondary" size="sm" onclick={() => goToMonth(monthStart())}>
@@ -459,6 +459,7 @@
 			<input
 				id="budgetAmount"
 				type="number"
+				inputmode="decimal"
 				step="0.01"
 				min="0.01"
 				placeholder="0.00"
@@ -498,6 +499,7 @@
 				<input
 					id="goalTarget"
 					type="number"
+					inputmode="decimal"
 					step="0.01"
 					min="0.01"
 					placeholder="0.00"
@@ -554,6 +556,7 @@
 				<input
 					id="contribAmount"
 					type="number"
+					inputmode="decimal"
 					step="0.01"
 					min="0.01"
 					placeholder="0.00"
@@ -723,5 +726,46 @@
 
 	.spacer {
 		flex: 1;
+	}
+
+	@media (max-width: 639px) {
+		/* Arrows either side of the month, like a calendar header. */
+		.month-nav {
+			justify-content: space-between;
+			flex-wrap: nowrap;
+			background: var(--bg);
+			border-radius: var(--radius-sm);
+			padding: 0.125rem;
+		}
+
+		.neighbor {
+			display: none;
+		}
+
+		.month-label {
+			min-width: 0;
+			flex: 1;
+		}
+
+		.month-nav :global(.btn) {
+			font-size: 1.25rem;
+			line-height: 1;
+			min-width: 44px;
+			min-height: 40px;
+		}
+
+		.month-nav :global(.btn.secondary) {
+			font-size: 0.75rem;
+		}
+
+		.item-head {
+			flex-wrap: wrap;
+			row-gap: 0.25rem;
+		}
+
+		.item-actions {
+			margin-left: auto;
+			margin-right: -0.5rem;
+		}
 	}
 </style>

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
 	import type { WeekSpend } from '$lib/types';
 	import { parseDate } from '$lib/format';
@@ -9,6 +8,8 @@
 	// undercount once a period held more rows than the transactions API returns.
 	let { data: weeks }: { data: WeekSpend[] } = $props();
 	let container: HTMLDivElement;
+	// Redrawn whenever the box changes size: a phone rotating, a window resizing.
+	let boxWidth = $state(0);
 
 	function render() {
 		if (!container) return;
@@ -42,7 +43,7 @@
 
 		svg.append('g')
 			.attr('transform', `translate(0,${height})`)
-			.call(d3.axisBottom(x).ticks(5).tickFormat(d3.timeFormat('%b %d') as any))
+			.call(d3.axisBottom(x).ticks(Math.min(5, Math.max(2, Math.floor(width / 70)))).tickFormat(d3.timeFormat('%b %d') as any))
 			.selectAll('text')
 			.attr('fill', '#999')
 			.attr('font-size', '0.7rem');
@@ -77,11 +78,10 @@
 			.attr('d', line);
 	}
 
-	onMount(render);
-	$effect(() => { weeks; render(); });
+	$effect(() => { weeks; boxWidth; render(); });
 </script>
 
-<div bind:this={container} class="chart"></div>
+<div bind:this={container} bind:clientWidth={boxWidth} class="chart"></div>
 
 <style>
 	.chart {

@@ -358,6 +358,7 @@
 				<input
 					id="ruleAmount"
 					type="number"
+					inputmode="decimal"
 					step="0.01"
 					min="0.01"
 					placeholder="0.00"
@@ -414,6 +415,7 @@
 				<input
 					id="ruleInterval"
 					type="number"
+					inputmode="numeric"
 					min="1"
 					max="12"
 					bind:value={intervalCount}
@@ -437,6 +439,7 @@
 					<input
 						id="ruleDay1"
 						type="number"
+						inputmode="numeric"
 						min="1"
 						max="31"
 						placeholder="1"
@@ -448,6 +451,7 @@
 					<input
 						id="ruleDay2"
 						type="number"
+						inputmode="numeric"
 						min="1"
 						max="31"
 						placeholder="15"
@@ -465,6 +469,7 @@
 				<input
 					id="ruleDay"
 					type="number"
+					inputmode="numeric"
 					min="1"
 					max="31"
 					placeholder="Same as start date"
@@ -611,6 +616,34 @@
 		gap: 0.25rem;
 		flex-wrap: wrap;
 		justify-content: flex-end;
+	}
+
+	@media (max-width: 639px) {
+		/* Amount pinned top-right beside the name; actions get a row of their own. */
+		.rule {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 0.5rem 0.75rem;
+			padding: 1rem;
+		}
+
+		.rule-side {
+			display: contents;
+		}
+
+		.rule-amount {
+			grid-row: 1;
+			grid-column: 2;
+			font-size: 1.0625rem;
+		}
+
+		.rule-actions {
+			grid-column: 1 / -1;
+			justify-content: flex-start;
+			margin-left: -0.625rem;
+			border-top: 1px solid var(--divider);
+			padding-top: 0.375rem;
+		}
 	}
 
 	form {

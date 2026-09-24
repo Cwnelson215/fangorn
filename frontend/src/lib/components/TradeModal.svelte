@@ -203,6 +203,7 @@
 				<input
 					id="shares"
 					type="number"
+					inputmode="decimal"
 					step="any"
 					min="0"
 					placeholder="0"
@@ -219,6 +220,7 @@
 				<input
 					id="price"
 					type="number"
+					inputmode="decimal"
 					step="any"
 					min="0"
 					placeholder="0.00"
@@ -239,6 +241,7 @@
 					<input
 						id="fees"
 						type="number"
+						inputmode="decimal"
 						step="0.01"
 						min="0"
 						placeholder="0.00"
@@ -257,6 +260,7 @@
 			<input
 				id="total"
 				type="number"
+				inputmode="decimal"
 				step="0.01"
 				min="0"
 				placeholder={computedTotal ? computedTotal.toFixed(2) : '0.00'}
@@ -358,10 +362,6 @@
 	@media (max-width: 480px) {
 		.toggle {
 			grid-template-columns: repeat(2, 1fr);
-		}
-
-		.form-row {
-			flex-direction: column;
 		}
 	}
 </style>

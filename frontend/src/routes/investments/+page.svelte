@@ -217,6 +217,31 @@
 		margin-top: 0.75rem;
 	}
 
+	@media (max-width: 639px) {
+		/* Total value gets the full width; today, unrealized and realized share a row. */
+		.stats {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 0.5rem;
+		}
+
+		.stats .stat:first-child {
+			grid-column: 1 / -1;
+		}
+
+		.stats .stat:not(:first-child) {
+			padding: 0.75rem;
+		}
+
+		.stats .stat:not(:first-child) .stat-value {
+			font-size: 1rem;
+		}
+
+		.stats .stat:not(:first-child) .stat-label,
+		.stats .stat:not(:first-child) .muted {
+			font-size: 0.6875rem;
+		}
+	}
+
 	.small {
 		font-size: 0.875rem;
 	}

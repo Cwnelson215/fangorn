@@ -331,9 +331,4 @@
 		box-shadow: var(--shadow);
 	}
 
-	@media (max-width: 480px) {
-		.form-row {
-			flex-direction: column;
-		}
-	}
 </style>

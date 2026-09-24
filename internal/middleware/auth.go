@@ -19,11 +19,14 @@ func Auth(appPassword string) func(http.Handler) http.Handler {
 			}
 
 			// Exempt paths. /health and /ready are container probes and must stay
-			// reachable without a session or the pod never comes up.
+			// reachable without a session or the pod never comes up. The manifest
+			// and icons are fetched without cookies when a phone adds the app to its
+			// home screen, so redirecting them to /login breaks the install.
 			path := r.URL.Path
 			if path == "/health" || path == "/ready" || path == "/api/login" ||
 				path == "/api/logout" || path == "/api/auth/status" ||
-				path == "/login" || strings.HasPrefix(path, "/_app/") {
+				path == "/login" || strings.HasPrefix(path, "/_app/") ||
+				path == "/manifest.webmanifest" || strings.HasPrefix(path, "/icons/") {
 				next.ServeHTTP(w, r)
 				return
 			}

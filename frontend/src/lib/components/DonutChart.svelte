@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
 	import type { Slice } from '$lib/types';
 	import { formatCurrencyWhole } from '$lib/format';
@@ -15,7 +14,7 @@
 		centerLabel?: string;
 		legendValue?: (slice: Slice, total: number) => string;
 	} = $props();
-	let container: HTMLDivElement;
+	let container = $state<HTMLDivElement>();
 
 	// Fallback palette for categories with no colour of their own.
 	const COLORS = [
@@ -33,19 +32,27 @@
 
 	const colorFor = (d: Slice, i: number) => d.color || COLORS[i % COLORS.length];
 
+	let data = $derived(slices.filter((s) => s.value > 0));
+	let total = $derived(data.reduce((sum, d) => sum + d.value, 0));
+
+	// The legend is HTML beside the ring, so it can wrap underneath on a phone
+	// instead of being clipped at the edge of a fixed-size SVG.
+	const SIZE = 220;
+
 	function render() {
 		if (!container) return;
 		d3.select(container).selectAll('*').remove();
-		const data = slices.filter((s) => s.value > 0);
 		if (data.length === 0) return;
 
-		const width = container.clientWidth;
-		const height = 300;
-		const radius = Math.min(width * 0.4, height * 0.45);
+		const radius = SIZE / 2 - 4;
+		const svg = d3
+			.select(container)
+			.append('svg')
+			.attr('viewBox', `0 0 ${SIZE} ${SIZE}`)
+			.attr('width', SIZE)
+			.attr('height', SIZE);
 
-		const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
-
-		const g = svg.append('g').attr('transform', `translate(${width * 0.35}, ${height / 2})`);
+		const g = svg.append('g').attr('transform', `translate(${SIZE / 2}, ${SIZE / 2})`);
 
 		const pie = d3
 			.pie<Slice>()
@@ -54,7 +61,7 @@
 
 		const arc = d3
 			.arc<d3.PieArcDatum<Slice>>()
-			.innerRadius(radius * 0.55)
+			.innerRadius(radius * 0.62)
 			.outerRadius(radius);
 
 		g.selectAll('.arc')
@@ -67,7 +74,6 @@
 			.attr('stroke', 'white')
 			.attr('stroke-width', 2);
 
-		const total = data.reduce((sum, d) => sum + d.value, 0);
 		g.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '-0.2em')
@@ -81,47 +87,78 @@
 			.attr('font-weight', '700')
 			.attr('fill', '#1a1a2e')
 			.text(formatCurrencyWhole(total));
-
-		const legend = svg.append('g').attr('transform', `translate(${width * 0.7}, 20)`);
-
-		const items = legend
-			.selectAll('.legend-item')
-			.data(data.slice(0, 8))
-			.enter()
-			.append('g')
-			.attr('transform', (_, i) => `translate(0, ${i * 28})`);
-
-		items
-			.append('rect')
-			.attr('width', 12)
-			.attr('height', 12)
-			.attr('rx', 2)
-			.attr('fill', (d, i) => colorFor(d, i));
-
-		items
-			.append('text')
-			.attr('x', 18)
-			.attr('y', 10)
-			.attr('font-size', '0.75rem')
-			.attr('fill', '#666')
-			.text((d) => {
-				const label = d.label.length > 14 ? d.label.slice(0, 14) + '…' : d.label;
-				return `${label} ${legendValue(d, total)}`;
-			});
 	}
 
-	onMount(render);
 	$effect(() => {
-		slices;
+		data;
 		render();
 	});
 </script>
 
-<div bind:this={container} class="chart"></div>
+{#if data.length > 0}
+	<div class="donut">
+		<div bind:this={container} class="ring"></div>
+		<ul class="legend">
+			{#each data.slice(0, 8) as slice, i (slice.label)}
+				<li>
+					<span class="swatch" style="background: {colorFor(slice, i)}"></span>
+					<span class="label">{slice.label}</span>
+					<span class="value">{legendValue(slice, total)}</span>
+				</li>
+			{/each}
+		</ul>
+	</div>
+{/if}
 
 <style>
-	.chart {
-		width: 100%;
-		min-height: 300px;
+	.donut {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: center;
+		gap: 1rem 2rem;
+	}
+
+	.ring {
+		flex: none;
+		width: 220px;
+		height: 220px;
+	}
+
+	.legend {
+		list-style: none;
+		flex: 1 1 12rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+		min-width: 0;
+	}
+
+	.legend li {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.swatch {
+		width: 12px;
+		height: 12px;
+		border-radius: 2px;
+		flex: none;
+	}
+
+	.label {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--muted);
+	}
+
+	.value {
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
 	}
 </style>

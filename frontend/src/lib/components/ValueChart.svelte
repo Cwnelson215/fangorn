@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import * as d3 from 'd3';
 	import { formatCurrencyWhole, parseDate } from '$lib/format';
 
@@ -10,6 +9,8 @@
 	// silently restyle the first.
 	let { points, id }: { points: { date: string; value: number }[]; id: string } = $props();
 	let container: HTMLDivElement;
+	// Redrawn whenever the box changes size: a phone rotating, a window resizing.
+	let boxWidth = $state(0);
 	let gradientId = $derived(`${id}-gradient`);
 
 	function render() {
@@ -47,7 +48,7 @@
 
 		svg.append('g')
 			.attr('transform', `translate(0,${height})`)
-			.call(d3.axisBottom(x).ticks(6).tickFormat(d3.timeFormat(tickFormat) as any))
+			.call(d3.axisBottom(x).ticks(Math.min(6, Math.max(2, Math.floor(width / 70)))).tickFormat(d3.timeFormat(tickFormat) as any))
 			.selectAll('text')
 			.attr('fill', '#999')
 			.attr('font-size', '0.7rem');
@@ -125,11 +126,10 @@
 			.text(formatCurrencyWhole(latest.value));
 	}
 
-	onMount(render);
-	$effect(() => { points; render(); });
+	$effect(() => { points; boxWidth; render(); });
 </script>
 
-<div bind:this={container} class="chart"></div>
+<div bind:this={container} bind:clientWidth={boxWidth} class="chart"></div>
 
 <style>
 	.chart {

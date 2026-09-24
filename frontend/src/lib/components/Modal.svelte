@@ -21,6 +21,17 @@
 	function onKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') close();
 	}
+
+	// Without this, a swipe that reaches the end of a long form on a phone keeps
+	// going and scrolls the page underneath.
+	$effect(() => {
+		if (!open) return;
+		const previous = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.body.style.overflow = previous;
+		};
+	});
 </script>
 
 <svelte:window onkeydown={open ? onKeydown : undefined} />
@@ -69,6 +80,7 @@
 		padding: 2rem 1rem;
 		z-index: 200;
 		overflow-y: auto;
+		overscroll-behavior: contain;
 	}
 
 	.dialog {
@@ -109,5 +121,56 @@
 
 	.body {
 		padding: 1.5rem;
+	}
+
+	/* On a phone the dialog is a bottom sheet: full width, within thumb reach,
+	   and scrolling inside itself so the header and close button stay put. */
+	@media (max-width: 899px) {
+		.backdrop {
+			align-items: flex-end;
+			padding: 0;
+			overflow: hidden;
+		}
+
+		.dialog {
+			max-width: none;
+			margin: 0;
+			border-radius: var(--radius) var(--radius) 0 0;
+			max-height: calc(100dvh - env(safe-area-inset-top) - 1.5rem);
+			display: flex;
+			flex-direction: column;
+			animation: rise 0.2s ease-out;
+		}
+
+		header {
+			padding: 0.875rem 1rem;
+			flex-shrink: 0;
+		}
+
+		.close {
+			width: 44px;
+			height: 44px;
+			margin: -0.5rem -0.75rem -0.5rem 0;
+		}
+
+		.body {
+			padding: 1rem max(1rem, env(safe-area-inset-right))
+				calc(1rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+			overflow-y: auto;
+			overscroll-behavior: contain;
+		}
+	}
+
+	@keyframes rise {
+		from {
+			transform: translateY(24px);
+			opacity: 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.dialog {
+			animation: none;
+		}
 	}
 </style>

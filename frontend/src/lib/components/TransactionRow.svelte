@@ -186,4 +186,69 @@
 	.amount {
 		color: var(--ink);
 	}
+
+	/* Phone: the date moves up into a day heading (see .day-heading), leaving a
+	   two-line row — what it was and how much on top, where and what kind below. */
+	@media (max-width: 639px) {
+		.row,
+		.row.with-balance {
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				'desc amount'
+				'desc tags';
+			column-gap: 0.75rem;
+			row-gap: 0.125rem;
+			padding: 0.625rem 0.25rem;
+			font-size: 0.9375rem;
+			align-items: start;
+		}
+
+		/* A register row also carries the running balance, so the category drops
+		   below the description instead. */
+		.row.with-balance {
+			grid-template-areas:
+				'desc amount'
+				'tags running';
+		}
+
+		.date {
+			display: none;
+		}
+
+		.desc {
+			grid-area: desc;
+		}
+
+		.amount {
+			grid-area: amount;
+		}
+
+		.tags {
+			grid-area: tags;
+			justify-self: end;
+			max-width: 10rem;
+			overflow: hidden;
+		}
+
+		.row.with-balance .tags {
+			justify-self: start;
+		}
+
+		.tags .tag {
+			max-width: 100%;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			vertical-align: top;
+		}
+
+		.running {
+			grid-area: running;
+			font-size: 0.75rem;
+		}
+
+		.clickable:active {
+			background: var(--bg);
+		}
+	}
 </style>

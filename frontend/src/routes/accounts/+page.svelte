@@ -237,6 +237,7 @@
 				<input
 					id="balance"
 					type="number"
+					inputmode="decimal"
 					step="0.01"
 					min="0"
 					placeholder="0.00"
@@ -308,9 +309,29 @@
 		font-variant-numeric: tabular-nums;
 	}
 
+	@media (max-width: 639px) {
+		.totals {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 0.5rem;
+		}
+
+		.totals .stat:last-child {
+			grid-column: 1 / -1;
+			order: -1;
+		}
+
+		.totals .stat:not(:last-child) {
+			padding: 0.75rem;
+		}
+
+		.totals .stat:not(:last-child) .stat-value {
+			font-size: 1.125rem;
+		}
+	}
+
 	.grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
 		gap: 1rem;
 	}
 

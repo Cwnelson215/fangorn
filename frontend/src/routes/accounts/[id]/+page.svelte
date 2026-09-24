@@ -8,6 +8,8 @@
 		formatCurrency,
 		formatDate,
 		formatDateShort,
+		formatDayHeading,
+		groupByDate,
 		formatMarketTime,
 		formatPercent,
 		formatPrice,
@@ -81,6 +83,7 @@
 	}
 
 	let isLiability = $derived(detail?.account.class === 'liability');
+	let registerDays = $derived(groupByDate(detail?.transactions ?? [], (t) => t.date));
 	let hasFunds = $derived(holdings?.positions.some((p) => p.quote_type === 'MUTUALFUND') ?? false);
 </script>
 
@@ -180,7 +183,7 @@
 					<h2>Trades</h2>
 					<div class="table-scroll">
 						<div class="trades">
-							<div class="trade-row head">
+							<div class="trade-row head table-head">
 								<span>Date</span>
 								<span>Trade</span>
 								<span class="right">Shares</span>
@@ -194,8 +197,12 @@
 										<span class="name">{TRADE_SIDE_LABELS[trade.side]} {trade.symbol}</span>
 										<span class="sub">{trade.security_name ?? ''}</span>
 									</span>
-									<span class="right num">{formatShares(trade.shares)}</span>
-									<span class="right num">{formatPrice(trade.price)}</span>
+									<span class="right num shares">{formatShares(trade.shares)}</span>
+									<span class="right num price">{formatPrice(trade.price)}</span>
+									<!-- Phone only: date, shares and price on one line under the name. -->
+									<span class="terms">
+										{formatDateShort(trade.trade_date)} · {formatShares(trade.shares)} @ {formatPrice(trade.price)}
+									</span>
 									<span class="right num">{formatCurrency(trade.amount)}</span>
 								</button>
 							{/each}
@@ -218,15 +225,18 @@
 			{:else}
 				<div class="table-scroll">
 					<div class="table">
-						<div class="head">
+						<div class="head table-head">
 							<span>Date</span>
 							<span>Description</span>
 							<span>Category</span>
 							<span class="right">Amount</span>
 							<span class="right">{isInvestment ? 'Cash' : 'Balance'}</span>
 						</div>
-						{#each detail.transactions as transaction (transaction.id)}
-							<TransactionRow {transaction} showAccount={false} showRunningBalance={true} />
+						{#each registerDays as day (day.date)}
+							<div class="day-heading">{formatDayHeading(day.date)}</div>
+							{#each day.items as transaction (transaction.id)}
+								<TransactionRow {transaction} showAccount={false} showRunningBalance={true} />
+							{/each}
 						{/each}
 					</div>
 				</div>
@@ -412,5 +422,57 @@
 
 	.right {
 		text-align: right;
+	}
+
+	.terms {
+		display: none;
+	}
+
+	@media (max-width: 639px) {
+		h1 {
+			font-size: 1.375rem;
+		}
+
+		/* The balance sits under the name rather than squeezed beside it. */
+		.header-card {
+			flex-direction: column;
+			gap: 0.75rem;
+		}
+
+		.balance-block {
+			align-items: flex-start;
+			text-align: left;
+		}
+
+		.trade-row {
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				'desc amount'
+				'terms terms';
+			row-gap: 0.125rem;
+			padding: 0.625rem 0.25rem;
+		}
+
+		.trade-row > .date,
+		.trade-row > .shares,
+		.trade-row > .price {
+			display: none;
+		}
+
+		.trade-row > .desc {
+			grid-area: desc;
+		}
+
+		.trade-row > .num:last-child {
+			grid-area: amount;
+		}
+
+		.terms {
+			display: block;
+			grid-area: terms;
+			font-size: 0.75rem;
+			color: var(--muted-light);
+			font-variant-numeric: tabular-nums;
+		}
 	}
 </style>

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import {
 		createTransaction,
 		deleteTransaction,
@@ -11,7 +13,7 @@
 		type TransactionQuery
 	} from '$lib/api';
 	import type { Account, Category, Transaction, TransactionInput } from '$lib/types';
-	import { today } from '$lib/format';
+	import { formatDayHeading, groupByDate, today } from '$lib/format';
 	import TransactionRow from '$lib/components/TransactionRow.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
@@ -30,6 +32,12 @@
 	let filterKind = $state('');
 	let dateFrom = $state('');
 	let dateTo = $state('');
+	// On a phone only search shows until the rest are asked for.
+	let filtersOpen = $state(false);
+	let activeFilters = $derived(
+		[filterAccount, filterCategory, filterKind, dateFrom, dateTo].filter(Boolean).length
+	);
+	let days = $derived(groupByDate(transactions, (t) => t.date));
 
 	// Entry form
 	let modalOpen = $state(false);
@@ -47,13 +55,24 @@
 	let categoryId = $state(0);
 	let notes = $state('');
 
+	let ready = $state(false);
+
 	onMount(async () => {
 		try {
 			[accounts, categories] = await Promise.all([getAccounts(), getCategories()]);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Could not load accounts';
 		}
+		ready = true;
 		await load();
+	});
+
+	// Quick add from the tab bar lands here as ?new. It can arrive while this
+	// page is already open, so it's watched rather than read once on mount.
+	$effect(() => {
+		if (!ready || !page.url.searchParams.has('new')) return;
+		if (accounts.length > 0) openCreate();
+		goto('/transactions', { replaceState: true, noScroll: true, keepFocus: true });
 	});
 
 	async function load() {
@@ -201,10 +220,27 @@
 			<a class="cta" href="/accounts">Go to accounts</a>
 		</div>
 	{:else}
-		<div class="card filters">
-			<Field label="Search" id="search">
-				<input id="search" bind:value={search} placeholder="Description or merchant" onchange={load} />
-			</Field>
+		<div class="card filters" class:open={filtersOpen}>
+			<div class="search-row">
+				<Field label="Search" id="search">
+					<input
+						id="search"
+						type="search"
+						enterkeyhint="search"
+						bind:value={search}
+						placeholder="Description or merchant"
+						onchange={load}
+					/>
+				</Field>
+				<button
+					type="button"
+					class="filters-toggle"
+					aria-expanded={filtersOpen}
+					onclick={() => (filtersOpen = !filtersOpen)}
+				>
+					Filters{#if activeFilters > 0}<span class="badge">{activeFilters}</span>{/if}
+				</button>
+			</div>
 			<Field label="Account" id="filterAccount">
 				<select id="filterAccount" bind:value={filterAccount} onchange={load}>
 					<option value={0}>All accounts</option>
@@ -249,17 +285,20 @@
 			{:else}
 				<div class="table-scroll">
 					<div class="table">
-						<div class="head">
+						<div class="head table-head">
 							<span>Date</span>
 							<span>Description</span>
 							<span>Category</span>
 							<span class="right">Amount</span>
 						</div>
-						{#each transactions as transaction (transaction.id)}
-							<TransactionRow
-								{transaction}
-								onedit={isEditable(transaction) ? openEdit : undefined}
-							/>
+						{#each days as day (day.date)}
+							<div class="day-heading">{formatDayHeading(day.date)}</div>
+							{#each day.items as transaction (transaction.id)}
+								<TransactionRow
+									{transaction}
+									onedit={isEditable(transaction) ? openEdit : undefined}
+								/>
+							{/each}
 						{/each}
 					</div>
 				</div>
@@ -315,6 +354,7 @@
 				<input
 					id="amount"
 					type="number"
+					inputmode="decimal"
 					step="0.01"
 					min="0.01"
 					placeholder="0.00"
@@ -401,6 +441,15 @@
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 		gap: 1rem;
+	}
+
+	/* On a desktop the search row dissolves into the grid like any other field. */
+	.search-row {
+		display: contents;
+	}
+
+	.filters-toggle {
+		display: none;
 	}
 
 	.table-scroll {
@@ -507,6 +556,72 @@
 		background: var(--surface);
 		color: var(--ink);
 		box-shadow: var(--shadow);
+	}
+
+	@media (max-width: 639px) {
+		.filters {
+			grid-template-columns: 1fr 1fr;
+			gap: 0.75rem;
+		}
+
+		.search-row {
+			display: flex;
+			align-items: flex-end;
+			gap: 0.5rem;
+			grid-column: 1 / -1;
+		}
+
+		.filters > :global(.field) {
+			display: none;
+		}
+
+		.filters.open > :global(.field) {
+			display: flex;
+		}
+
+		/* The search box is labelled by its placeholder on a phone. */
+		.search-row :global(label) {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip: rect(0 0 0 0);
+		}
+
+		.filters-toggle {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.375rem;
+			min-height: 44px;
+			padding: 0 0.875rem;
+			border: 1px solid var(--border);
+			border-radius: var(--radius-sm);
+			background: var(--surface);
+			font: inherit;
+			font-size: 0.9375rem;
+			font-weight: 600;
+			color: var(--ink);
+			cursor: pointer;
+		}
+
+		.filters-toggle[aria-expanded='true'] {
+			border-color: var(--accent);
+		}
+
+		.badge {
+			min-width: 1.25rem;
+			padding: 0 0.3rem;
+			border-radius: 999px;
+			background: var(--accent);
+			font-size: 0.75rem;
+			line-height: 1.25rem;
+			text-align: center;
+		}
+
+		/* Logging lives on the tab bar's add button on a phone. */
+		.header-actions {
+			display: none;
+		}
 	}
 
 	.cta {

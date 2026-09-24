@@ -84,6 +84,17 @@
 		background: #fef2f2;
 	}
 
+	@media (pointer: coarse) {
+		.md {
+			min-height: 44px;
+		}
+
+		.sm {
+			min-height: 36px;
+			padding: 0.375rem 0.75rem;
+		}
+	}
+
 	.btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;

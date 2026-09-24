@@ -78,4 +78,17 @@
 		resize: vertical;
 		min-height: 4rem;
 	}
+
+	/* Touch sizing: 44px targets, and 16px text so iOS doesn't zoom on focus. */
+	@media (max-width: 899px), (pointer: coarse) {
+		.field :global(input:not([type='checkbox']):not([type='color'])),
+		.field :global(select) {
+			min-height: 44px;
+			font-size: 1rem;
+		}
+
+		.field :global(textarea) {
+			font-size: 1rem;
+		}
+	}
 </style>

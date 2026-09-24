@@ -249,6 +249,15 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 - **Frontend:** shared formatters in `src/lib/format.ts`, design tokens as CSS custom properties in
   `+layout.svelte`, form primitives in `src/lib/components/{Field,Button,Modal}.svelte`. Use them
   rather than re-declaring `Intl.NumberFormat` or hex colours per page.
+- **Phone first.** The app is used mostly on phones and is installable (`static/manifest.webmanifest`,
+  `static/icons/`). Below 900px the layout swaps the top nav for a bottom tab bar (Home, Activity,
+  **+** quick add, Budgets, More) and `Modal` becomes a bottom sheet. Below 640px table-like lists
+  stack: give a desktop column-header row the `table-head` class, put rows in a `.table-scroll`, and
+  group dated rows under `.day-heading` with `groupByDate` / `formatDayHeading`. Paired fields go in
+  a `.form-row`, which wraps on narrow screens. Money inputs carry `inputmode="decimal"`. Quick add
+  links to `/transactions?new` and `/transfers?new`; those pages watch for `?new`, open their form
+  and strip the param. The manifest and `/icons/` are exempt from auth — a phone fetches them
+  without cookies when adding the app to its home screen.
 - **Health check:** `GET /health` must return 200.
 - **Env vars:** `PORT`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`,
   `APP_PASSWORD`, `SCHEDULER_INTERVAL`, `SCHEDULER_HORIZON_DAYS`, `QUOTES_PROVIDER` (`yahoo` default,

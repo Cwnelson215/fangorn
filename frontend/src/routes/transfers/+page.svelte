@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import {
 		createTransfer,
 		deleteTransfer,
@@ -31,7 +33,20 @@
 	let description = $state('');
 	let notes = $state('');
 
-	onMount(load);
+	let ready = $state(false);
+
+	onMount(async () => {
+		await load();
+		ready = true;
+	});
+
+	// Quick add from the tab bar lands here as ?new, possibly while this page
+	// is already open.
+	$effect(() => {
+		if (!ready || !page.url.searchParams.has('new')) return;
+		if (accounts.length >= 2) openCreate();
+		goto('/transfers', { replaceState: true, noScroll: true, keepFocus: true });
+	});
 
 	async function load() {
 		loading = true;
@@ -198,6 +213,7 @@
 				<input
 					id="transferAmount"
 					type="number"
+					inputmode="decimal"
 					step="0.01"
 					min="0.01"
 					placeholder="0.00"
@@ -316,6 +332,37 @@
 		text-align: right;
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
+	}
+
+	@media (max-width: 639px) {
+		.row {
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				'route amount'
+				'route date';
+			column-gap: 0.75rem;
+			row-gap: 0;
+			padding: 0.625rem 0.25rem;
+			align-items: start;
+		}
+
+		.route {
+			grid-area: route;
+		}
+
+		.amount {
+			grid-area: amount;
+		}
+
+		.date {
+			grid-area: date;
+			text-align: right;
+			font-size: 0.75rem;
+		}
+
+		.row:active {
+			background: var(--bg);
+		}
 	}
 
 	form {

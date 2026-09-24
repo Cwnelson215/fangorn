@@ -56,6 +56,9 @@
 		justify-content: center;
 		align-items: center;
 		min-height: 100vh;
+		min-height: 100dvh;
+		padding: 1rem;
+		padding-top: max(1rem, env(safe-area-inset-top));
 		background: #f8f9fa;
 	}
 
@@ -119,6 +122,17 @@
 	button:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	@media (max-width: 639px) {
+		.login-card {
+			padding: 2rem 1.5rem;
+		}
+
+		input,
+		button {
+			min-height: 48px;
+		}
 	}
 
 	.error {

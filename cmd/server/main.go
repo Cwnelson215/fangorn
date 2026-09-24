@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -111,6 +112,11 @@ func main() {
 	frontendFS, err := fs.Sub(fangorn.FrontendAssets, "frontend/build")
 	if err != nil {
 		log.Fatalf("Failed to create frontend sub-filesystem: %v", err)
+	}
+	// Go's built-in type table lacks .webmanifest and the alpine image has no
+	// /etc/mime.types, so without this the manifest is sniffed as text/plain.
+	if err := mime.AddExtensionType(".webmanifest", "application/manifest+json"); err != nil {
+		log.Fatalf("Failed to register manifest type: %v", err)
 	}
 	fileServer := http.FileServer(http.FS(frontendFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
