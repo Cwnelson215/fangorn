@@ -251,8 +251,10 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
   `+layout.svelte`, form primitives in `src/lib/components/{Field,Button,Modal}.svelte`. Use them
   rather than re-declaring `Intl.NumberFormat` or hex colours per page.
 - **Phone first.** The app is used mostly on phones and is installable (`static/manifest.webmanifest`,
-  `static/icons/`). Below 900px the layout swaps the top nav for a bottom tab bar (Home, Activity,
-  **+**, Budgets, More) and `Modal` becomes a bottom sheet. Below 640px table-like lists stack: give
+  `static/icons/`). From 900px up, the top bar groups pages into Money / Plan / Wealth menus
+  beside Dashboard, with a **+ Add** menu (log, scan a receipt, transfer) and the Settings gear —
+  `GROUPS` in `+layout.svelte`. Below 900px it swaps to a bottom tab bar (Home, Activity, **+**,
+  Budgets, More) and `Modal` becomes a bottom sheet. Below 640px table-like lists stack: give
   a desktop column-header row the `table-head` class, put rows in a `.table-scroll`, and group dated
   rows under `.day-heading` with `groupByDate` / `formatDayHeading`. Paired fields go in a
   `.form-row`, which wraps on narrow screens. Money inputs carry `inputmode="decimal"`.

@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { authStatus } from '$lib/api';
 	import { capture, dismissNotice, openCamera, registerCameraInput, uploadPhoto } from '$lib/capture.svelte';
 	import { isAppleMobile } from '$lib/device';
@@ -11,7 +11,7 @@
 	let authChecked = $state(false);
 	let isLoginPage = $derived(page.url.pathname === '/login');
 
-	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear';
+	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear' | 'chevron';
 
 	const NAV: { href: string; label: string; icon: Icon }[] = [
 		{ href: '/', label: 'Dashboard', icon: 'home' },
@@ -24,6 +24,82 @@
 		{ href: '/budgets', label: 'Budgets', icon: 'target' },
 		{ href: '/categories', label: 'Categories', icon: 'tag' }
 	];
+
+	// On a wider screen the pages are grouped into three menus instead of nine
+	// links in a row. Dashboard stays a plain link; Settings is the gear.
+	type NavItem = (typeof NAV)[number];
+	const pick = (href: string, label?: string): NavItem => {
+		const item = NAV.find((n) => n.href === href)!;
+		return label ? { ...item, label } : item;
+	};
+	const GROUPS: { id: string; label: string; items: NavItem[] }[] = [
+		{ id: 'money', label: 'Money', items: [pick('/transactions'), pick('/receipts'), pick('/transfers')] },
+		{
+			id: 'plan',
+			label: 'Plan',
+			items: [pick('/budgets', 'Budgets & goals'), pick('/recurring'), pick('/categories')]
+		},
+		{ id: 'wealth', label: 'Wealth', items: [pick('/accounts'), pick('/investments')] }
+	];
+
+	let openMenu = $state<string | null>(null);
+
+	function groupActive(group: (typeof GROUPS)[number]): boolean {
+		return group.items.some((item) => isActive(item.href));
+	}
+
+	function toggleMenu(id: string) {
+		openMenu = openMenu === id ? null : id;
+	}
+
+	function menuItems(id: string): HTMLElement[] {
+		return [...document.querySelectorAll<HTMLElement>(`#menu-${id} [role='menuitem']`)];
+	}
+
+	// Enter, Space or ArrowDown on a trigger opens its menu with the first item
+	// focused, the way a native menu button behaves.
+	async function onTriggerKeydown(event: KeyboardEvent, id: string) {
+		if (event.key !== 'ArrowDown' && event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		openMenu = id;
+		await tick();
+		menuItems(id)[0]?.focus();
+	}
+
+	function onMenuKeydown(event: KeyboardEvent, id: string) {
+		const items = menuItems(id);
+		const at = items.indexOf(document.activeElement as HTMLElement);
+		const move = (to: number) => {
+			event.preventDefault();
+			items[(to + items.length) % items.length]?.focus();
+		};
+		if (event.key === 'ArrowDown') move(at + 1);
+		else if (event.key === 'ArrowUp') move(at - 1);
+		else if (event.key === 'Home') move(0);
+		else if (event.key === 'End') move(items.length - 1);
+		else if (event.key === 'Escape') {
+			event.preventDefault();
+			openMenu = null;
+			document.querySelector<HTMLElement>(`[aria-controls='menu-${id}']`)?.focus();
+		}
+	}
+
+	// Tabbing or clicking away from a menu closes it.
+	function onMenuFocusout(event: FocusEvent) {
+		const wrap = event.currentTarget as HTMLElement;
+		if (!wrap.contains(event.relatedTarget as Node | null)) openMenu = null;
+	}
+
+	function onWindowClick(event: MouseEvent) {
+		if (openMenu && !(event.target as Element).closest('[data-menu]')) openMenu = null;
+	}
+
+	// Opens the camera from inside the menu item's own click, which is what lets
+	// the browser show the file picker.
+	function snapFromMenu() {
+		openMenu = null;
+		openCamera();
+	}
 
 	const SETTINGS = { href: '/settings', label: 'Settings', icon: 'gear' as Icon };
 	const SHORTCUT = { href: '/shortcut', label: 'iPhone Shortcut', icon: 'phone' as Icon };
@@ -46,14 +122,18 @@
 	let sheet = $state<'more' | null>(null);
 	let moreActive = $derived(MORE.some((item) => isActive(item.href)));
 
-	// Any navigation, including the browser back button, dismisses the sheet.
+	// Any navigation, including the browser back button, dismisses the sheet
+	// and any open menu.
 	$effect(() => {
 		page.url.href;
 		sheet = null;
+		openMenu = null;
 	});
 
 	function onKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') sheet = null;
+		if (event.key !== 'Escape') return;
+		sheet = null;
+		openMenu = null;
 	}
 
 	function isActive(href: string): boolean {
@@ -126,6 +206,8 @@
 			<path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3" />
 		{:else if name === 'camera'}
 			<path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" />
+		{:else if name === 'chevron'}
+			<path d="M6 9l6 6 6-6" />
 		{:else if name === 'gear'}
 			<circle cx="12" cy="12" r="3" /><path
 				d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
@@ -138,7 +220,7 @@
 	</svg>
 {/snippet}
 
-<svelte:window onkeydown={sheet ? onKeydown : undefined} />
+<svelte:window onkeydown={sheet || openMenu ? onKeydown : undefined} onclick={onWindowClick} />
 
 {#if isLoginPage}
 	{@render children()}
@@ -147,11 +229,77 @@
 		<nav class="topbar">
 			<a class="nav-brand" href="/">Fangorn</a>
 			<div class="nav-links">
-				{#each NAV as item}
-					<a href={item.href} class:active={isActive(item.href)}>{item.label}</a>
+				<a href="/" class:active={isActive('/')}>Dashboard</a>
+				{#each GROUPS as group (group.id)}
+					<div class="menu-wrap" data-menu onfocusout={onMenuFocusout}>
+						<button
+							class="menu-trigger"
+							class:active={groupActive(group)}
+							aria-haspopup="menu"
+							aria-expanded={openMenu === group.id}
+							aria-controls="menu-{group.id}"
+							onclick={() => toggleMenu(group.id)}
+							onkeydown={(e) => onTriggerKeydown(e, group.id)}
+						>
+							{group.label}{@render glyph('chevron')}
+						</button>
+						{#if openMenu === group.id}
+							<div
+								class="menu"
+								id="menu-{group.id}"
+								role="menu"
+								tabindex="-1"
+								aria-label={group.label}
+								onkeydown={(e) => onMenuKeydown(e, group.id)}
+							>
+								{#each group.items as item (item.href)}
+									<a
+										role="menuitem"
+										href={item.href}
+										class:active={isActive(item.href)}
+										aria-current={isActive(item.href) ? 'page' : undefined}
+									>
+										{@render glyph(item.icon)}{item.label}
+									</a>
+								{/each}
+							</div>
+						{/if}
+					</div>
 				{/each}
 			</div>
-			<!-- A receipt is one tap from every page, same as typing one in. -->
+
+			<!-- Everything that adds to the ledger, in one place; the camera opens
+			     straight from its menu item. -->
+			<div class="menu-wrap add-wrap" data-menu onfocusout={onMenuFocusout}>
+				<button
+					class="add-trigger"
+					aria-haspopup="menu"
+					aria-expanded={openMenu === 'add'}
+					aria-controls="menu-add"
+					onclick={() => toggleMenu('add')}
+					onkeydown={(e) => onTriggerKeydown(e, 'add')}
+				>
+					{@render glyph('plus')}<span>{capture.stage ? 'Reading…' : 'Add'}</span>{@render glyph('chevron')}
+				</button>
+				{#if openMenu === 'add'}
+					<div
+						class="menu right"
+						id="menu-add"
+						role="menu"
+						tabindex="-1"
+						aria-label="Add"
+						onkeydown={(e) => onMenuKeydown(e, 'add')}
+					>
+						<a role="menuitem" href="/add">{@render glyph('list')}Log a transaction</a>
+						<button role="menuitem" onclick={snapFromMenu} disabled={capture.stage !== null}>
+							{@render glyph('camera')}Scan a receipt
+						</button>
+						<a role="menuitem" href="/transfers?new">{@render glyph('swap')}Record a transfer</a>
+					</div>
+				{/if}
+			</div>
+
+			<!-- On a phone the camera is its own button; the tab bar has the rest. -->
 			<button
 				class="camera"
 				onclick={openCamera}
@@ -420,29 +568,165 @@
 
 	.nav-links {
 		display: flex;
-		gap: 1.5rem;
-		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.25rem;
 	}
 
-	.nav-links a {
-		color: rgba(255, 255, 255, 0.7);
-		text-decoration: none;
+	.nav-links > a,
+	.menu-trigger {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		height: 36px;
+		padding: 0 0.75rem;
+		border: none;
+		border-radius: var(--radius-sm);
+		background: none;
+		font: inherit;
 		font-size: 0.9rem;
 		font-weight: 500;
-		transition: color 0.2s;
+		color: rgba(255, 255, 255, 0.7);
+		text-decoration: none;
+		cursor: pointer;
+		transition:
+			color 0.15s,
+			background 0.15s;
 	}
 
-	.nav-links a:hover {
+	.nav-links > a:hover,
+	.menu-trigger:hover,
+	.menu-trigger[aria-expanded='true'] {
 		color: white;
+		background: rgba(255, 255, 255, 0.08);
 	}
 
-	.nav-links a.active {
+	.nav-links > a.active,
+	.menu-trigger.active {
 		color: var(--accent);
 	}
 
-	.camera {
+	.menu-trigger :global(svg),
+	.add-trigger :global(svg:last-child) {
+		width: 14px;
+		height: 14px;
+		transition: transform 0.15s;
+	}
+
+	.menu-trigger[aria-expanded='true'] :global(svg),
+	.add-trigger[aria-expanded='true'] :global(svg:last-child) {
+		transform: rotate(180deg);
+	}
+
+	.menu-wrap {
+		position: relative;
+	}
+
+	.menu {
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 0;
+		z-index: 120;
+		display: flex;
+		flex-direction: column;
+		min-width: 210px;
+		padding: 0.375rem;
+		border-radius: var(--radius);
+		background: var(--surface);
+		box-shadow:
+			0 10px 30px rgba(0, 0, 0, 0.18),
+			0 0 0 1px rgba(0, 0, 0, 0.04);
+		animation: drop 0.12s ease-out;
+	}
+
+	.menu.right {
+		left: auto;
+		right: 0;
+	}
+
+	.menu [role='menuitem'] {
+		display: flex;
+		align-items: center;
+		gap: 0.625rem;
+		min-height: 40px;
+		padding: 0 0.75rem;
+		border: none;
+		border-radius: var(--radius-sm);
+		background: none;
+		font: inherit;
+		font-size: 0.9rem;
+		font-weight: 500;
+		color: var(--ink);
+		text-align: left;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.menu [role='menuitem'] :global(svg) {
+		width: 18px;
+		height: 18px;
+		color: var(--muted-light);
+	}
+
+	.menu [role='menuitem']:hover,
+	.menu [role='menuitem']:focus-visible {
+		background: var(--bg);
+		outline: none;
+	}
+
+	.menu [role='menuitem'].active {
+		color: var(--accent-hover);
+	}
+
+	.menu [role='menuitem'].active :global(svg) {
+		color: var(--accent-hover);
+	}
+
+	.menu [role='menuitem']:disabled {
+		opacity: 0.5;
+		cursor: progress;
+	}
+
+	.add-wrap {
 		margin-left: auto;
+	}
+
+	.add-trigger {
 		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		height: 36px;
+		padding: 0 0.75rem 0 0.625rem;
+		border: none;
+		border-radius: 999px;
+		background: var(--accent);
+		font: inherit;
+		font-size: 0.875rem;
+		font-weight: 700;
+		color: var(--ink);
+		cursor: pointer;
+	}
+
+	.add-trigger:hover,
+	.add-trigger[aria-expanded='true'] {
+		background: var(--accent-hover);
+	}
+
+	.add-trigger :global(svg:first-child) {
+		width: 18px;
+		height: 18px;
+		stroke-width: 2.5;
+	}
+
+	@keyframes drop {
+		from {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+	}
+
+	.camera {
+		display: none;
+		margin-left: auto;
 		align-items: center;
 		gap: 0.375rem;
 		min-height: 36px;
@@ -604,9 +888,11 @@
 			height: calc(48px + env(safe-area-inset-top));
 		}
 
-		/* On a phone Settings is in More. */
+		/* On a phone Settings is in More, and the tab bar's + and the camera
+		   button replace the Add menu. */
 		.nav-links,
-		.settings {
+		.settings,
+		.add-wrap {
 			display: none;
 		}
 
@@ -615,6 +901,7 @@
 		}
 
 		.camera {
+			display: inline-flex;
 			min-height: 36px;
 			background: var(--accent);
 			border-color: var(--accent);
@@ -781,6 +1068,7 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.sheet,
+		.menu,
 		.capture-banner {
 			animation: none;
 		}
