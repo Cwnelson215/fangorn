@@ -116,6 +116,23 @@ jobs:
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
 
+      # Joining the tailnet returns before a path to bulbasaur is up, and the
+      # first kubectl call can time out on it. Wait for the API server to answer
+      # at all — any HTTP status, even 401, means it's reachable.
+      - name: Wait for the cluster
+        run: |
+          server=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+          for i in $(seq 12); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$server/readyz" || true)
+            if [ "$code" != "000" ]; then
+              echo "API server answered ($code) after $i attempt(s)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::API server at $server unreachable over the tailnet after ~2 minutes — check the Tailscale ACL lets the CI tag reach tag:server:6443"
+          exit 1
+
       - name: Apply app-secrets
         env:
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
