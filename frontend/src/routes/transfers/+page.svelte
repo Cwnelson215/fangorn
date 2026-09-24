@@ -41,8 +41,7 @@
 		ready = true;
 	});
 
-	// Quick add from the tab bar lands here as ?new, possibly while this page
-	// is already open.
+	// The quick-log screen's Transfer button lands here as ?new.
 	$effect(() => {
 		if (!ready || !page.url.searchParams.has('new')) return;
 		if (accounts.length >= 2) openCreate();

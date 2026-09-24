@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import {
 		createTransaction,
 		deleteTransaction,
@@ -56,24 +54,13 @@
 	let categoryId = $state(0);
 	let notes = $state('');
 
-	let ready = $state(false);
-
 	onMount(async () => {
 		try {
 			[accounts, categories] = await Promise.all([getAccounts(), getCategories()]);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Could not load accounts';
 		}
-		ready = true;
 		await load();
-	});
-
-	// Quick add from the tab bar lands here as ?new. It can arrive while this
-	// page is already open, so it's watched rather than read once on mount.
-	$effect(() => {
-		if (!ready || !page.url.searchParams.has('new')) return;
-		if (accounts.length > 0) openCreate();
-		goto('/transactions', { replaceState: true, noScroll: true, keepFocus: true });
 	});
 
 	async function load() {
@@ -621,7 +608,7 @@
 			text-align: center;
 		}
 
-		/* Logging lives on the tab bar's add button on a phone. */
+		/* Logging lives on the tab bar's + (the quick-log screen) on a phone. */
 		.header-actions {
 			display: none;
 		}

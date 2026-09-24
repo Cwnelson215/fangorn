@@ -1,4 +1,5 @@
-import type { Receipt } from './types';
+import type { Receipt, ReceiptUpload } from './types';
+import { formatCurrency } from './format';
 
 /**
  * Explains, in words, why a receipt is waiting for a person. The server sends
@@ -44,4 +45,31 @@ export function reasonText(reason: string, r: Receipt): string {
 
 export function isWorking(r: Receipt): boolean {
 	return r.status === 'pending' || r.status === 'processing';
+}
+
+export type UploadNotice = { text: string; tone: 'ok' | 'warn' | 'error' };
+
+/** One line on what happened to a photo just uploaded. */
+export function describeUpload(
+	{ receipt: r, duplicate, enabled }: ReceiptUpload,
+	accountName: Map<number, string>,
+	categoryName: Map<number, string>
+): UploadNotice {
+	if (duplicate) return { text: 'That photo was already uploaded.', tone: 'warn' };
+	if (r.status === 'posted') {
+		const parts = [
+			formatCurrency(r.total ?? 0),
+			r.merchant ? `at ${r.merchant}` : null,
+			r.account_id ? `on ${accountName.get(r.account_id) ?? 'your account'}` : null,
+			r.category_id ? `under ${categoryName.get(r.category_id) ?? 'its category'}` : null
+		];
+		return { text: `Posted ${parts.filter(Boolean).join(' ')}.`, tone: 'ok' };
+	}
+	if (r.status === 'needs_review') {
+		return {
+			text: enabled ? 'Read it, but it needs a look before it goes in.' : 'Saved. Enter the details below.',
+			tone: 'warn'
+		};
+	}
+	return { text: "Still reading it. It'll post on its own, or show up below if it needs you.", tone: 'ok' };
 }

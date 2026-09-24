@@ -50,5 +50,10 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie("fangorn_session")
 	authenticated := err == nil && middleware.ValidSession(cookie.Value, h.appPassword)
+	// The frontend checks status on every page it opens, which makes this the
+	// place to slide the expiry forward.
+	if authenticated {
+		middleware.SetSessionCookie(w, h.appPassword)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": authenticated, "required": true})
 }

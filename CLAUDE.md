@@ -251,13 +251,20 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
   rather than re-declaring `Intl.NumberFormat` or hex colours per page.
 - **Phone first.** The app is used mostly on phones and is installable (`static/manifest.webmanifest`,
   `static/icons/`). Below 900px the layout swaps the top nav for a bottom tab bar (Home, Activity,
-  **+** quick add, Budgets, More) and `Modal` becomes a bottom sheet. Below 640px table-like lists
-  stack: give a desktop column-header row the `table-head` class, put rows in a `.table-scroll`, and
-  group dated rows under `.day-heading` with `groupByDate` / `formatDayHeading`. Paired fields go in
-  a `.form-row`, which wraps on narrow screens. Money inputs carry `inputmode="decimal"`. Quick add
-  links to `/transactions?new` and `/transfers?new`; those pages watch for `?new`, open their form
-  and strip the param. The manifest and `/icons/` are exempt from auth — a phone fetches them
-  without cookies when adding the app to its home screen.
+  **+**, Budgets, More) and `Modal` becomes a bottom sheet. Below 640px table-like lists stack: give
+  a desktop column-header row the `table-head` class, put rows in a `.table-scroll`, and group dated
+  rows under `.day-heading` with `groupByDate` / `formatDayHeading`. Paired fields go in a
+  `.form-row`, which wraps on narrow screens. Money inputs carry `inputmode="decimal"`.
+- **Logging is one screen.** `/add` is where the home-screen icon opens (`start_url`) and where the
+  tab bar's **+** goes: amount, category chips sorted by recent use, Save, Undo. It fills in the
+  description from the category, remembers the last account per device (`lib/remember.ts`), scans
+  receipts in place, and takes a prefill from `?amount=&kind=&category=&note=`. `/transfers?new`
+  opens the transfer form. Android long-press shortcuts are in the manifest.
+- **Service worker** (`src/service-worker.ts`) caches the build output and icons so the installed
+  app launches without the network. Page loads are network-first with the cached page as an
+  offline fallback; `/api/` is never cached. The manifest, `/icons/` and `/service-worker.js` are
+  exempt from auth — they're fetched without a session, and a redirected service worker script
+  fails to register.
 - **Health check:** `GET /health` must return 200.
 - **Env vars:** `PORT`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`,
   `APP_PASSWORD`, `SCHEDULER_INTERVAL`, `SCHEDULER_HORIZON_DAYS`, `QUOTES_PROVIDER` (`yahoo` default,
@@ -266,9 +273,11 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 
 ## Auth
 
-Still a **single shared password** (`APP_PASSWORD`) with an HMAC cookie, unchanged from before the
-pivot. Note what it is not: the cookie value is a constant, identical for every login forever, with
-no expiry and no revocation. If `APP_PASSWORD` is unset, auth is disabled entirely.
+Still a **single shared password** (`APP_PASSWORD`) with an HMAC cookie. The cookie lasts 90 days
+and `GET /api/auth/status` — called on every page — re-issues it, so a phone in use is never logged
+out. Note what it is not: the cookie value is a constant, identical for every login forever, with no
+server-side revocation; a lost phone stays signed in until `APP_PASSWORD` changes. If
+`APP_PASSWORD` is unset, auth is disabled entirely.
 
 Real accounts — email/password users, email invites, and passkey-or-PIN device unlock — are planned
 but not built. The schema is already shaped for it.

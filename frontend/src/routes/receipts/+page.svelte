@@ -4,7 +4,7 @@
 	import { downscale } from '$lib/image';
 	import { formatCurrency, formatDateShort } from '$lib/format';
 	import { startPolling } from '$lib/poll';
-	import { isWorking, reasonText } from '$lib/receipts';
+	import { describeUpload, isWorking, reasonText, type UploadNotice } from '$lib/receipts';
 	import type { Account, Category, Receipt } from '$lib/types';
 	import ReceiptReviewModal from '$lib/components/ReceiptReviewModal.svelte';
 
@@ -21,7 +21,7 @@
 
 	let fileInput: HTMLInputElement;
 	let stage = $state<'idle' | 'preparing' | 'uploading'>('idle');
-	let notice = $state<{ text: string; tone: 'ok' | 'warn' | 'error' } | null>(null);
+	let notice = $state<UploadNotice | null>(null);
 
 	let reviewing = $state<Receipt | null>(null);
 	let reviewOpen = $state(false);
@@ -86,7 +86,7 @@
 			const image = await downscale(file);
 			stage = 'uploading';
 			const res = await uploadReceipt(image);
-			notice = describe(res.receipt, res.duplicate, res.enabled);
+			notice = describeUpload(res, accountName, categoryName);
 			await load();
 			if (res.receipt.status === 'needs_review' && !res.duplicate) openReview(res.receipt);
 		} catch (e) {
@@ -94,26 +94,6 @@
 		} finally {
 			stage = 'idle';
 		}
-	}
-
-	function describe(r: Receipt, duplicate: boolean, enabled: boolean): NonNullable<typeof notice> {
-		if (duplicate) return { text: 'That photo was already uploaded.', tone: 'warn' };
-		if (r.status === 'posted') {
-			const parts = [
-				formatCurrency(r.total ?? 0),
-				r.merchant ? `at ${r.merchant}` : null,
-				r.account_id ? `on ${accountName.get(r.account_id) ?? 'your account'}` : null,
-				r.category_id ? `under ${categoryName.get(r.category_id) ?? 'its category'}` : null
-			];
-			return { text: `Posted ${parts.filter(Boolean).join(' ')}.`, tone: 'ok' };
-		}
-		if (r.status === 'needs_review') {
-			return {
-				text: enabled ? 'Read it, but it needs a look before it goes in.' : 'Saved. Enter the details below.',
-				tone: 'warn'
-			};
-		}
-		return { text: "Still reading it. It'll post on its own, or show up below if it needs you.", tone: 'ok' };
 	}
 
 	function openReview(r: Receipt) {

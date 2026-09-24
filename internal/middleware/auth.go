@@ -21,12 +21,15 @@ func Auth(appPassword string) func(http.Handler) http.Handler {
 			// Exempt paths. /health and /ready are container probes and must stay
 			// reachable without a session or the pod never comes up. The manifest
 			// and icons are fetched without cookies when a phone adds the app to its
-			// home screen, so redirecting them to /login breaks the install.
+			// home screen, so redirecting them to /login breaks the install; a
+			// service worker script that redirects fails to register at all. Like
+			// /_app/, these are the public app code, not data.
 			path := r.URL.Path
 			if path == "/health" || path == "/ready" || path == "/api/login" ||
 				path == "/api/logout" || path == "/api/auth/status" ||
 				path == "/login" || strings.HasPrefix(path, "/_app/") ||
-				path == "/manifest.webmanifest" || strings.HasPrefix(path, "/icons/") {
+				path == "/manifest.webmanifest" || strings.HasPrefix(path, "/icons/") ||
+				path == "/service-worker.js" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -49,6 +52,11 @@ func Auth(appPassword string) func(http.Handler) http.Handler {
 	}
 }
 
+// SessionMaxAge is how long a device stays signed in without being used. The
+// app renews the cookie every time it opens (see AuthHandler.Status), so a
+// phone in regular use is never logged out.
+const SessionMaxAge = 90 * 24 * time.Hour
+
 func SetSessionCookie(w http.ResponseWriter, appPassword string) {
 	token := makeSessionToken(appPassword)
 	http.SetCookie(w, &http.Cookie{
@@ -57,7 +65,7 @@ func SetSessionCookie(w http.ResponseWriter, appPassword string) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   7 * 24 * 60 * 60, // 7 days
+		MaxAge:   int(SessionMaxAge / time.Second),
 	})
 }
 

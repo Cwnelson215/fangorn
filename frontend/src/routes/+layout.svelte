@@ -28,19 +28,10 @@
 	const TABS = ['/', '/transactions', '/budgets'];
 	const MORE = NAV.filter((item) => !TABS.includes(item.href));
 
-	// Quick add is the reason to open the app on a phone, so it is one tap from
-	// every page. The target pages open their entry form on ?new.
-	const QUICK_ADD = [
-		{ href: '/transactions?new', label: 'Log a transaction', hint: 'Money in, out, or a refund', icon: 'list' },
-		{ href: '/receipts', label: 'Scan a receipt', hint: 'Take a photo, it posts itself', icon: 'receipt' },
-		{ href: '/transfers?new', label: 'Record a transfer', hint: 'Between your own accounts', icon: 'swap' }
-	] as const;
-
-	let sheet = $state<'more' | 'add' | null>(null);
+	let sheet = $state<'more' | null>(null);
 	let moreActive = $derived(MORE.some((item) => isActive(item.href)));
 
 	// Any navigation, including the browser back button, dismisses the sheet.
-	// href rather than pathname: quick add can target the page already open.
 	$effect(() => {
 		page.url.href;
 		sheet = null;
@@ -149,15 +140,10 @@
 			<a href="/transactions" class:active={isActive('/transactions')}>
 				{@render glyph('list')}<span>Activity</span>
 			</a>
-			<button
-				class="add"
-				class:open={sheet === 'add'}
-				aria-label="Add"
-				aria-expanded={sheet === 'add'}
-				onclick={() => (sheet = sheet === 'add' ? null : 'add')}
-			>
+			<!-- Straight to the quick-log screen: logging is the reason to open the app. -->
+			<a href="/add" class="add" class:active={isActive('/add')} aria-label="Log a transaction">
 				{@render glyph('plus')}
-			</button>
+			</a>
 			<a href="/budgets" class:active={isActive('/budgets')}>{@render glyph('target')}<span>Budgets</span></a>
 			<button
 				class:active={moreActive || sheet === 'more'}
@@ -171,29 +157,17 @@
 		{#if sheet}
 			<!-- Same click-to-dismiss backdrop pattern as Modal; Escape is handled on the window. -->
 			<div class="sheet-backdrop" role="presentation" onclick={() => (sheet = null)}></div>
-			<div class="sheet" role="dialog" aria-modal="true" aria-label={sheet === 'add' ? 'Add' : 'More'}>
-				{#if sheet === 'add'}
-					{#each QUICK_ADD as item (item.href)}
-						<a class="sheet-item" href={item.href}>
-							<span class="sheet-icon accent">{@render glyph(item.icon)}</span>
-							<span class="sheet-text">
-								<span>{item.label}</span>
-								<span class="muted">{item.hint}</span>
-							</span>
-						</a>
-					{/each}
-				{:else}
-					{#each MORE as item (item.href)}
-						<a class="sheet-item" href={item.href} class:active={isActive(item.href)}>
-							<span class="sheet-icon">{@render glyph(item.icon)}</span>
-							<span class="sheet-text"><span>{item.label}</span></span>
-						</a>
-					{/each}
-					{#if showLogout}
-						<button class="sheet-item signout" onclick={handleLogout}>
-							<span class="sheet-text"><span>Sign out</span></span>
-						</button>
-					{/if}
+			<div class="sheet" role="dialog" aria-modal="true" aria-label="More">
+				{#each MORE as item (item.href)}
+					<a class="sheet-item" href={item.href} class:active={isActive(item.href)}>
+						<span class="sheet-icon">{@render glyph(item.icon)}</span>
+						<span class="sheet-text"><span>{item.label}</span></span>
+					</a>
+				{/each}
+				{#if showLogout}
+					<button class="sheet-item signout" onclick={handleLogout}>
+						<span class="sheet-text"><span>Sign out</span></span>
+					</button>
 				{/if}
 			</div>
 		{/if}
@@ -513,11 +487,11 @@
 			cursor: pointer;
 		}
 
-		.tabbar .active {
+		.tabbar .active:not(.add) {
 			color: var(--ink);
 		}
 
-		.tabbar .active svg {
+		.tabbar .active:not(.add) svg {
 			stroke: var(--accent-hover);
 		}
 
@@ -529,7 +503,6 @@
 			background: var(--accent);
 			color: var(--ink);
 			box-shadow: 0 4px 12px rgba(78, 204, 163, 0.45);
-			transition: transform 0.15s;
 		}
 
 		.tabbar .add svg {
@@ -538,9 +511,6 @@
 			stroke-width: 2.5;
 		}
 
-		.tabbar .add.open {
-			transform: rotate(45deg);
-		}
 
 		.sheet-backdrop {
 			display: block;
@@ -609,11 +579,6 @@
 			height: 20px;
 		}
 
-		.sheet-icon.accent {
-			background: #e6f8f1;
-			color: #1f8a68;
-		}
-
 		.sheet-item.active .sheet-icon {
 			color: var(--accent-hover);
 		}
@@ -622,10 +587,6 @@
 			display: flex;
 			flex-direction: column;
 			line-height: 1.3;
-		}
-
-		.sheet-text .muted {
-			font-size: 0.8125rem;
 		}
 
 		.signout {
