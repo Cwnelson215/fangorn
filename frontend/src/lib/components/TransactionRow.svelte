@@ -36,6 +36,7 @@
 				{transaction.account_name}
 			{/if}
 			{#if transaction.source === 'recurring'}· auto{/if}
+			{#if transaction.receipt_id}· receipt{/if}
 		</span>
 	</span>
 

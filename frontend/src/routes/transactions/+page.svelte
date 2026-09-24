@@ -6,6 +6,7 @@
 		getAccounts,
 		getCategories,
 		getTransactions,
+		receiptImageUrl,
 		updateTransaction,
 		type TransactionQuery
 	} from '$lib/api';
@@ -187,7 +188,10 @@
 <div class="page">
 	<div class="page-header">
 		<h1>Transactions</h1>
-		<Button onclick={openCreate} disabled={accounts.length === 0}>Log Transaction</Button>
+		<span class="header-actions">
+			<a class="scan" href="/receipts">Scan receipt</a>
+			<Button onclick={openCreate} disabled={accounts.length === 0}>Log Transaction</Button>
+		</span>
 	</div>
 
 	{#if accounts.length === 0 && !loading}
@@ -360,6 +364,14 @@
 			<textarea id="txnNotes" bind:value={notes} disabled={saving}></textarea>
 		</Field>
 
+		{#if editing?.receipt_id}
+			<p class="hint muted">
+				Posted from a receipt ·
+				<a href={receiptImageUrl(editing.receipt_id)} target="_blank" rel="noopener">view the photo</a>.
+				Deleting this transaction deletes the photo too.
+			</p>
+		{/if}
+
 		{#if formError}
 			<p class="error-text">{formError}</p>
 		{/if}
@@ -430,6 +442,27 @@
 	.form-row {
 		display: flex;
 		gap: 1rem;
+	}
+
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.scan {
+		font-weight: 600;
+		font-size: 0.9rem;
+		color: var(--ink);
+		text-decoration: none;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--surface);
+	}
+
+	.scan:hover {
+		border-color: var(--accent);
 	}
 
 	.form-actions {

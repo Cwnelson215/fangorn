@@ -30,6 +30,14 @@ type Config struct {
 	// QuotesMarketTTL is how stale a stock or ETF price may get during market
 	// hours before it is fetched again.
 	QuotesMarketTTL time.Duration
+
+	// ReceiptsProvider picks what reads photographed receipts: "anthropic", or
+	// "none" (the default) to store photos without reading them.
+	ReceiptsProvider string
+	// AnthropicAPIKey is required when ReceiptsProvider is "anthropic".
+	AnthropicAPIKey string
+	// ReceiptsModel is the Claude model receipts are read with.
+	ReceiptsModel string
 }
 
 func Load() *Config {
@@ -46,6 +54,9 @@ func Load() *Config {
 		SchedulerHorizonDays: getEnvInt("SCHEDULER_HORIZON_DAYS", 60),
 		QuotesProvider:       getEnv("QUOTES_PROVIDER", "yahoo"),
 		QuotesMarketTTL:      getEnvDuration("QUOTES_MARKET_TTL", time.Minute),
+		ReceiptsProvider:     getEnv("RECEIPTS_PROVIDER", "none"),
+		AnthropicAPIKey:      os.Getenv("ANTHROPIC_API_KEY"),
+		ReceiptsModel:        getEnv("RECEIPTS_MODEL", "claude-opus-5"),
 	}
 }
 

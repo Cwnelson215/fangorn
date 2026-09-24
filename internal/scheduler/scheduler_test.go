@@ -42,7 +42,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	return &fixture{
-		t: t, ctx: context.Background(), svc: svc, sched: New(svc, nil, time.Minute, 60),
+		t: t, ctx: context.Background(), svc: svc, sched: New(svc, nil, nil, time.Minute, 60),
 		household: household, checking: checking,
 	}
 }

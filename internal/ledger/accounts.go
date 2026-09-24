@@ -229,17 +229,18 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, account_id, date, amount, kind, description, merchant,
 		        category_id, category_name, notes, transfer_group_id,
-		        recurring_rule_id, trade_id, source, created_at, running_balance
+		        recurring_rule_id, trade_id, source, created_at, receipt_id, running_balance
 		 FROM (
 		   SELECT t.id, t.account_id, t.date, t.amount, t.kind, t.description, t.merchant,
 		          t.category_id, c.name AS category_name, t.notes, t.transfer_group_id,
-		          t.recurring_rule_id, t.trade_id, t.source, t.created_at,
+		          t.recurring_rule_id, t.trade_id, t.source, t.created_at, r.id AS receipt_id,
 		          a.starting_balance + SUM(t.amount) OVER (
 		              ORDER BY t.date, t.id ROWS UNBOUNDED PRECEDING
 		          ) AS running_balance
 		   FROM transactions t
 		   JOIN accounts a ON a.id = t.account_id
 		   LEFT JOIN categories c ON c.id = t.category_id
+		   LEFT JOIN receipts r ON r.transaction_id = t.id
 		   WHERE t.account_id = $1 AND t.household_id = $2
 		 ) reg
 		 ORDER BY date DESC, id DESC
@@ -255,13 +256,13 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 	for rows.Next() {
 		var t models.Transaction
 		var merchant, categoryName, notes, groupID sql.NullString
-		var categoryID, ruleID, tradeID sql.NullInt64
+		var categoryID, ruleID, tradeID, receiptID sql.NullInt64
 		var running sql.NullFloat64
 		var date, createdAt time.Time
 		if err := rows.Scan(
 			&t.ID, &t.AccountID, &date, &t.Amount, &t.Kind, &t.Description, &merchant,
 			&categoryID, &categoryName, &notes, &groupID, &ruleID, &tradeID, &t.Source,
-			&createdAt, &running,
+			&createdAt, &receiptID, &running,
 		); err != nil {
 			return nil, fmt.Errorf("scanning register row: %w", err)
 		}
@@ -274,6 +275,7 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 		t.TransferGroupID = strPtr(groupID)
 		t.RecurringRuleID = intPtr(ruleID)
 		t.TradeID = intPtr(tradeID)
+		t.ReceiptID = intPtr(receiptID)
 		t.RunningBalance = floatPtr(running)
 		out = append(out, t)
 	}

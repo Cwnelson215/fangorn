@@ -14,6 +14,7 @@
 		{ href: '/accounts', label: 'Accounts' },
 		{ href: '/investments', label: 'Investments' },
 		{ href: '/transactions', label: 'Transactions' },
+		{ href: '/receipts', label: 'Receipts' },
 		{ href: '/transfers', label: 'Transfers' },
 		{ href: '/recurring', label: 'Recurring' },
 		{ href: '/budgets', label: 'Budgets' },

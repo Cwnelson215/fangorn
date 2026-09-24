@@ -10,7 +10,10 @@
 // for every account type without special-casing.
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Account types and the class each implies.
 const (
@@ -79,6 +82,8 @@ const (
 const (
 	SourceManual    = "manual"
 	SourceRecurring = "recurring"
+	// SourceReceipt is a transaction posted from a photographed receipt.
+	SourceReceipt = "receipt"
 )
 
 // ClassForType returns the balance class implied by an account type.
@@ -152,9 +157,67 @@ type Transaction struct {
 	TradeID         *int    `json:"trade_id"`
 	Source          string  `json:"source"`
 	CreatedAt       string  `json:"created_at"`
+	// ReceiptID is the photographed receipt this transaction was posted from.
+	ReceiptID *int `json:"receipt_id"`
 
 	// RunningBalance is only populated by the per-account register view.
 	RunningBalance *float64 `json:"running_balance,omitempty"`
+}
+
+// Receipt statuses. See migration 009 for what each one means.
+const (
+	ReceiptPending     = "pending"
+	ReceiptProcessing  = "processing"
+	ReceiptNeedsReview = "needs_review"
+	ReceiptPosted      = "posted"
+)
+
+// Reasons a receipt is held for review instead of posting itself. The frontend
+// turns each into a sentence, so these are part of the API.
+const (
+	ReasonMissingTotal       = "missing_total"
+	ReasonMissingDate        = "missing_date"
+	ReasonNoCategoryMatch    = "no_category_match"
+	ReasonAccountUnresolved  = "account_unresolved"
+	ReasonNotAReceipt        = "not_a_receipt"
+	ReasonLooksLikeReturn    = "looks_like_return"
+	ReasonNonUSD             = "non_usd"
+	ReasonPossibleDuplicate  = "possible_duplicate"
+	ReasonDateOutOfRange     = "date_out_of_range"
+	ReasonTotalsDisagree     = "totals_disagree"
+	ReasonUnreadable         = "unreadable"
+	ReasonExtractionDisabled = "extraction_disabled"
+	ReasonExtractionFailed   = "extraction_failed"
+)
+
+// Receipt is a photographed receipt and what was read from it. The image itself
+// is never part of this — it is served on its own endpoint.
+type Receipt struct {
+	ID            int      `json:"id"`
+	Status        string   `json:"status"`
+	ReviewReasons []string `json:"review_reasons"`
+	MediaType     string   `json:"media_type"`
+	ByteSize      int      `json:"byte_size"`
+
+	Merchant          *string         `json:"merchant"`
+	PurchasedOn       *string         `json:"purchased_on"`
+	Currency          *string         `json:"currency"`
+	TxnType           *string         `json:"txn_type"`
+	Subtotal          *float64        `json:"subtotal"`
+	Tax               *float64        `json:"tax"`
+	Tip               *float64        `json:"tip"`
+	Total             *float64        `json:"total"`
+	Tender            *string         `json:"tender"`
+	CardLast4         *string         `json:"card_last4"`
+	CategorySuggested *string         `json:"category_suggested"`
+	LineItems         json.RawMessage `json:"line_items"`
+	Model             *string         `json:"model"`
+
+	AccountID     *int    `json:"account_id"`
+	CategoryID    *int    `json:"category_id"`
+	TransactionID *int    `json:"transaction_id"`
+	ExtractError  *string `json:"extract_error"`
+	CreatedAt     string  `json:"created_at"`
 }
 
 // Transfer is the paired view of two transactions sharing a transfer_group_id.

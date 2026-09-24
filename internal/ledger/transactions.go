@@ -15,21 +15,22 @@ import (
 const txnSelect = `
 	SELECT t.id, t.account_id, a.name, t.date, t.amount, t.kind, t.description,
 	       t.merchant, t.category_id, c.name, t.notes, t.transfer_group_id,
-	       t.recurring_rule_id, t.trade_id, t.source, t.created_at
+	       t.recurring_rule_id, t.trade_id, t.source, t.created_at, r.id
 	FROM transactions t
 	JOIN accounts a ON a.id = t.account_id
-	LEFT JOIN categories c ON c.id = t.category_id`
+	LEFT JOIN categories c ON c.id = t.category_id
+	LEFT JOIN receipts r ON r.transaction_id = t.id`
 
 func scanTxn(rows interface{ Scan(...any) error }) (models.Transaction, error) {
 	var t models.Transaction
 	var merchant, categoryName, notes, groupID sql.NullString
-	var categoryID, ruleID, tradeID sql.NullInt64
+	var categoryID, ruleID, tradeID, receiptID sql.NullInt64
 	var date, createdAt time.Time
 
 	err := rows.Scan(
 		&t.ID, &t.AccountID, &t.AccountName, &date, &t.Amount, &t.Kind, &t.Description,
 		&merchant, &categoryID, &categoryName, &notes, &groupID, &ruleID, &tradeID,
-		&t.Source, &createdAt,
+		&t.Source, &createdAt, &receiptID,
 	)
 	if err != nil {
 		return t, err
@@ -43,6 +44,7 @@ func scanTxn(rows interface{ Scan(...any) error }) (models.Transaction, error) {
 	t.TransferGroupID = strPtr(groupID)
 	t.RecurringRuleID = intPtr(ruleID)
 	t.TradeID = intPtr(tradeID)
+	t.ReceiptID = intPtr(receiptID)
 	return t, nil
 }
 
@@ -207,19 +209,35 @@ func (s *Service) CreateTransaction(ctx context.Context, householdID int, in Tra
 		return models.Transaction{}, err
 	}
 
-	var id int
-	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO transactions
-		   (household_id, account_id, date, amount, kind, description, merchant, category_id, notes, source)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'manual')
-		 RETURNING id`,
-		householdID, in.AccountID, in.Date, in.signedAmount(), in.Kind,
-		in.Description, nullStr(in.Merchant), nullInt(in.CategoryID), nullStr(in.Notes),
-	).Scan(&id)
+	id, err := insertTxn(ctx, s.db, householdID, in, models.SourceManual)
 	if err != nil {
-		return models.Transaction{}, fmt.Errorf("creating transaction: %w", err)
+		return models.Transaction{}, err
 	}
 	return s.GetTransaction(ctx, householdID, id)
+}
+
+// rowQuerier is satisfied by both *sql.DB and *sql.Tx.
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// insertTxn writes one already-validated income, expense or refund row. It is
+// shared by the entry form and by receipts, which must write the row in the same
+// database transaction that marks the receipt posted.
+func insertTxn(ctx context.Context, q rowQuerier, householdID int, in TransactionInput, source string) (int, error) {
+	var id int
+	err := q.QueryRowContext(ctx,
+		`INSERT INTO transactions
+		   (household_id, account_id, date, amount, kind, description, merchant, category_id, notes, source)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		 RETURNING id`,
+		householdID, in.AccountID, in.Date, in.signedAmount(), in.Kind,
+		in.Description, nullStr(in.Merchant), nullInt(in.CategoryID), nullStr(in.Notes), source,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("creating transaction: %w", err)
+	}
+	return id, nil
 }
 
 func (s *Service) UpdateTransaction(ctx context.Context, householdID, id int, in TransactionInput) (models.Transaction, error) {

@@ -21,6 +21,15 @@ frontend/build
 frontend/.svelte-kit
 server
 
+# Receipt photos are a family's purchases. Test fixtures are JSON only, and
+# nothing that looks like a real photo may be baked into a public image.
+**/testdata/**/*.jpg
+**/testdata/**/*.jpeg
+**/testdata/**/*.png
+**/testdata/**/*.heic
+**/testdata/**/*.webp
+receipts-samples/
+
 # Not compiled — see _deprecated/README.md
 _deprecated/
 

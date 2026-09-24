@@ -12,6 +12,9 @@ import type {
 	Holdings,
 	InvestmentsSummary,
 	Occurrence,
+	Receipt,
+	ReceiptStatus,
+	ReceiptUpload,
 	RecurringRule,
 	RuleInput,
 	Security,
@@ -155,6 +158,32 @@ export const createTransaction = (input: TransactionInput) =>
 export const updateTransaction = (id: number, input: TransactionInput) =>
 	send<Transaction>('PATCH', `/api/transactions/${id}`, input);
 export const deleteTransaction = (id: number) => send<void>('DELETE', `/api/transactions/${id}`);
+
+// ---------------------------------------------------------------------------
+// receipts
+// ---------------------------------------------------------------------------
+
+/**
+ * Uploads one receipt photo. The server tries to read it before answering, so
+ * this can take several seconds; if it is still being read, the returned
+ * receipt's status is pending or processing and the caller polls getReceipt.
+ */
+export function uploadReceipt(image: Blob): Promise<ReceiptUpload> {
+	const form = new FormData();
+	form.append('image', image, 'receipt.jpg');
+	// No Content-Type header: the browser sets the multipart boundary itself.
+	return request<ReceiptUpload>('/api/receipts', { method: 'POST', body: form });
+}
+
+export const getReceipts = (status?: ReceiptStatus) =>
+	request<Receipt[]>(`/api/receipts${qs({ status })}`);
+export const getReceipt = (id: number) => request<Receipt>(`/api/receipts/${id}`);
+export const receiptImageUrl = (id: number) => `${BASE}/api/receipts/${id}/image`;
+/** Posts a receipt held for review, as the person confirmed it. */
+export const postReceipt = (id: number, input: TransactionInput) =>
+	send<Transaction>('POST', `/api/receipts/${id}/post`, input);
+export const retryReceipt = (id: number) => send<Receipt>('POST', `/api/receipts/${id}/retry`);
+export const deleteReceipt = (id: number) => send<void>('DELETE', `/api/receipts/${id}`);
 
 // ---------------------------------------------------------------------------
 // transfers

@@ -12,9 +12,10 @@
 //
 // Together those mean a tick can run twice, overlap with another process, or not
 // run for a week, and the ledger still ends up in exactly the right state. That
-// last case is the one that matters most in practice: the AWS deployment scales
-// to zero overnight, so a rule due at 2 AM has to be picked up when the container
-// next wakes rather than being silently missed.
+// last case is the one that matters most in practice: the app runs on a single
+// home server, and a deploy, a pod restart or a reboot can leave it down when a
+// rule comes due. It has to be picked up when the process next starts rather
+// than being silently missed.
 package scheduler
 
 import (
@@ -27,6 +28,7 @@ import (
 	"github.com/cwnelson/fangorn/internal/ledger"
 	"github.com/cwnelson/fangorn/internal/models"
 	"github.com/cwnelson/fangorn/internal/prices"
+	"github.com/cwnelson/fangorn/internal/receipts"
 )
 
 // advisoryLockKey is an arbitrary constant identifying this app's scheduler lock.
@@ -38,6 +40,7 @@ const advisoryLockKey int64 = 0x66616e676f726e1 // "fangorn" + 1
 type Scheduler struct {
 	svc         *ledger.Service
 	prices      *prices.Refresher
+	receipts    *receipts.Processor
 	interval    time.Duration
 	horizonDays int
 }
@@ -46,16 +49,26 @@ type Scheduler struct {
 // net worth snapshot. A slow provider costs freshness, never the snapshot.
 const priceRefreshBudget = 30 * time.Second
 
+// receiptBudget caps how long one household's receipts may hold up the rest of
+// its pass. It is checked between receipts, never during one: a model call that
+// has been paid for is allowed to finish.
+const receiptBudget = 2 * time.Minute
+
+// receiptsPerTick bounds one pass. A backlog bigger than this drains over
+// several ticks.
+const receiptsPerTick = 10
+
 // New builds a scheduler. refresher may be nil, in which case holdings are
-// snapshotted at whatever prices are already stored.
-func New(svc *ledger.Service, refresher *prices.Refresher, interval time.Duration, horizonDays int) *Scheduler {
+// snapshotted at whatever prices are already stored. receiptProc may be nil, in
+// which case uploaded receipts are only read by the upload request itself.
+func New(svc *ledger.Service, refresher *prices.Refresher, receiptProc *receipts.Processor, interval time.Duration, horizonDays int) *Scheduler {
 	if interval <= 0 {
 		interval = 5 * time.Minute
 	}
 	if horizonDays <= 0 {
 		horizonDays = 60
 	}
-	return &Scheduler{svc: svc, prices: refresher, interval: interval, horizonDays: horizonDays}
+	return &Scheduler{svc: svc, prices: refresher, receipts: receiptProc, interval: interval, horizonDays: horizonDays}
 }
 
 // Start runs a tick immediately, then on every interval until ctx is cancelled.
@@ -150,6 +163,10 @@ func (s *Scheduler) runHousehold(ctx context.Context, household ledger.Household
 		log.Printf("Scheduler: posted %d recurring transaction(s) for household %d", posted, household.ID)
 	}
 
+	// Receipts before the snapshot too, so an expense photographed today is in
+	// today's net worth.
+	s.processReceipts(ctx, household)
+
 	// Prices before the snapshot, so the day's net worth values holdings at the
 	// latest figures rather than whatever was last fetched.
 	s.refreshPrices(ctx, household)
@@ -181,6 +198,30 @@ func (s *Scheduler) refreshPrices(ctx context.Context, household ledger.Househol
 	// here means the charts are usually complete before anyone opens them.
 	if err := s.prices.BackfillHistory(rctx, household.ID, nil); err != nil {
 		log.Printf("Scheduler: price history backfill for household %d: %v", household.ID, err)
+	}
+}
+
+// processReceipts finishes receipts an upload did not: ones still waiting after
+// the phone stopped waiting, ones backing off after an overloaded API, and ones
+// whose worker died mid-call (their lease has run out). Claims make it safe for
+// this to overlap with an upload working on the same receipt.
+func (s *Scheduler) processReceipts(ctx context.Context, household ledger.Household) {
+	if s.receipts == nil {
+		return
+	}
+	ids, err := s.svc.ClaimableReceipts(ctx, household.ID, receipts.Lease, receiptsPerTick)
+	if err != nil {
+		log.Printf("Scheduler: cannot list receipts for household %d: %v", household.ID, err)
+		return
+	}
+	deadline := time.Now().Add(receiptBudget)
+	for _, id := range ids {
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return
+		}
+		if err := s.receipts.Process(ctx, household.ID, id); err != nil && ctx.Err() == nil {
+			log.Printf("Scheduler: receipt %d: %v", id, err)
+		}
 	}
 }
 

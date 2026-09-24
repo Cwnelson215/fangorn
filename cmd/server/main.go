@@ -23,7 +23,9 @@ import (
 	"github.com/cwnelson/fangorn/internal/middleware"
 	"github.com/cwnelson/fangorn/internal/prices"
 	"github.com/cwnelson/fangorn/internal/quotes"
+	"github.com/cwnelson/fangorn/internal/receipts"
 	"github.com/cwnelson/fangorn/internal/scheduler"
+	"github.com/cwnelson/fangorn/internal/vision"
 )
 
 func main() {
@@ -64,9 +66,27 @@ func main() {
 	}
 	refresher := prices.New(svc, provider, cfg.QuotesMarketTTL)
 
+	// Receipt reading. Also optional: with RECEIPTS_PROVIDER=none, photos are
+	// stored and every receipt waits for someone to enter it by hand.
+	var extractor vision.Extractor
+	switch cfg.ReceiptsProvider {
+	case "anthropic":
+		if cfg.AnthropicAPIKey == "" {
+			log.Fatalf("RECEIPTS_PROVIDER=anthropic needs ANTHROPIC_API_KEY")
+		}
+		extractor = vision.NewAnthropic(cfg.AnthropicAPIKey, cfg.ReceiptsModel)
+		log.Printf("Receipts read with %s", cfg.ReceiptsModel)
+	case "none":
+		log.Println("Receipt reading disabled (RECEIPTS_PROVIDER=none)")
+	default:
+		log.Fatalf("Unknown RECEIPTS_PROVIDER %q (want anthropic or none)", cfg.ReceiptsProvider)
+	}
+	receiptProc := receipts.New(svc, extractor)
+
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
 	ledgerH := handlers.NewLedgerHandler(svc, householdID)
 	investmentH := handlers.NewInvestmentHandler(svc, refresher, householdID)
+	receiptH := handlers.NewReceiptHandler(svc, receiptProc, householdID)
 
 	mux := http.NewServeMux()
 
@@ -78,11 +98,12 @@ func main() {
 
 	ledgerH.Register(mux)
 	investmentH.Register(mux)
+	receiptH.Register(mux)
 
 	// The scheduler posts recurring items, refreshes prices and snapshots net
 	// worth. It runs a pass immediately on boot, which is what backfills anything
 	// missed while the process was down.
-	sched := scheduler.New(svc, refresher, cfg.SchedulerInterval, cfg.SchedulerHorizonDays)
+	sched := scheduler.New(svc, refresher, receiptProc, cfg.SchedulerInterval, cfg.SchedulerHorizonDays)
 	schedCtx, stopScheduler := context.WithCancel(context.Background())
 	go sched.Start(schedCtx)
 
@@ -137,5 +158,8 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+	// Receipts still being read for an upload that already answered. Anything
+	// not done by the deadline hands its claim back for the next boot.
+	receiptProc.Wait(ctx)
 	log.Println("Server exited")
 }

@@ -95,10 +95,59 @@ export interface Transaction {
 	transfer_group_id: string | null;
 	recurring_rule_id: number | null;
 	trade_id: number | null;
-	source: 'manual' | 'recurring';
+	source: 'manual' | 'recurring' | 'receipt';
 	created_at: string;
+	/** The photographed receipt this was posted from, if any. */
+	receipt_id: number | null;
 	/** Only present in the per-account register view. */
 	running_balance?: number;
+}
+
+export type ReceiptStatus = 'pending' | 'processing' | 'needs_review' | 'posted';
+
+export interface ReceiptLineItem {
+	description: string;
+	quantity: number | null;
+	amount: number;
+}
+
+/**
+ * A photographed receipt and what was read from it. The extracted fields are a
+ * record of the reading; once posted, the transaction is what counts.
+ */
+export interface Receipt {
+	id: number;
+	status: ReceiptStatus;
+	/** Why it is waiting for a person. Empty unless status is needs_review. */
+	review_reasons: string[];
+	media_type: string;
+	byte_size: number;
+	merchant: string | null;
+	purchased_on: string | null;
+	currency: string | null;
+	txn_type: 'purchase' | 'return' | null;
+	subtotal: number | null;
+	tax: number | null;
+	tip: number | null;
+	total: number | null;
+	tender: string | null;
+	card_last4: string | null;
+	category_suggested: string | null;
+	line_items: ReceiptLineItem[] | null;
+	model: string | null;
+	account_id: number | null;
+	category_id: number | null;
+	transaction_id: number | null;
+	extract_error: string | null;
+	created_at: string;
+}
+
+export interface ReceiptUpload {
+	receipt: Receipt;
+	/** This exact photo was uploaded before; `receipt` is that earlier upload. */
+	duplicate: boolean;
+	/** False when automatic reading is switched off on the server. */
+	enabled: boolean;
 }
 
 export interface Transfer {

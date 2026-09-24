@@ -9,7 +9,8 @@ the household logs transactions by hand from there — nothing connects to a ban
 and running balances, categorized income and spending, transfers between your own accounts,
 recurring subscriptions and scheduled transfers that post themselves, monthly category budgets,
 savings goals, net worth over time, and investment accounts whose holdings (stocks, ETFs, mutual
-funds) are priced automatically. Go backend, SvelteKit frontend with D3 visualizations.
+funds) are priced automatically. A photographed receipt is read by Claude and posts itself as an
+expense when it can be matched unambiguously, or waits for review when it can't. Go backend, SvelteKit frontend with D3 visualizations.
 
 It **used** to sync real accounts through the Teller API, import CSV statements, and scrape bank
 notification emails out of Gmail. That code is not deleted — it lives in `_deprecated/`, which the
@@ -22,7 +23,8 @@ Go toolchain ignores because the directory name starts with `_`. See `_deprecate
 - **Frontend:** SvelteKit (Svelte 5 runes), TypeScript, D3. Static adapter — a pure SPA that the Go
   binary embeds and serves. No Tailwind, no component library.
 - **Database:** PostgreSQL
-- **Infrastructure:** Pulumi (TypeScript), AWS ECS Fargate — see "Migration status" below
+- **Infrastructure:** the k3s cluster on `bulbasaur` — GHCR image, raw YAML + kustomize, Postgres in
+  CloudNativePG. See "Deployment" below; AWS and Pulumi are not used.
 
 ## Commands
 
@@ -113,6 +115,8 @@ internal/recurring/       PURE date engine — no DB, no clock. The best-tested 
 internal/portfolio/       PURE trade-log math — replay, average cost, cent rounding, daily value series
 internal/quotes/          price Provider interface + Yahoo client (network, no DB)
 internal/prices/          Refresher: decides when a price is stale, fetches, saves, backs off
+internal/vision/          receipt Extractor interface + Anthropic Messages API client (network, no DB)
+internal/receipts/        Decide (pure: extraction -> post or hold) + Processor (claim, read, finish)
 internal/ledger/          every read and write against the ledger
 internal/scheduler/       posts due recurring items, refreshes prices, snapshots net worth
 internal/handlers/        HTTP layer
@@ -154,9 +158,9 @@ boot, under a `pg_try_advisory_lock`. It is **idempotent rather than reliable**:
   monthly charge from the 1st to the 15th back-posted every 15th since `start_date`.
 
 So a tick can run twice, overlap another process, or not run for a week, and the ledger still lands
-correct. That last case is not hypothetical: the AWS deployment scales to zero overnight
-(`Pulumi.dev.yaml: enableScheduledScaling`), so anything due at 2 AM has to be picked up when the
-container next wakes. "Today" is computed in the **household's** timezone, not the server's.
+correct. The last case is real on a single home server: a deploy, a pod restart or `bulbasaur`
+rebooting can leave the process down when something comes due, and it has to be picked up on the
+next boot's immediate pass. "Today" is computed in the **household's** timezone, not the server's.
 
 ## Investment Prices
 
@@ -187,6 +191,42 @@ Yahoo quirks: the full Chrome User-Agent got 429s while `Mozilla/5.0` didn't; da
 from `regularMarketChangePercent` because a fund's latest NAV is often dated the next morning, and
 `chartPreviousClose` is the close before the *range*, not before today.
 
+## Receipts
+
+`POST /api/receipts` takes one multipart `image` (jpeg/png/webp by sniffing, 5 MB cap, read in
+memory — never `ParseMultipartForm`, which spills to disk). The browser downscales to 2576px and
+re-encodes to JPEG first (`src/lib/image.ts`), which also converts HEIC and strips EXIF/GPS. The
+photo is stored as `receipts.image` BYTEA; list queries never select it.
+
+**Reading is done twice-safe, like prices.** The upload starts `Processor.Start` detached from the
+request and waits up to 10s from request start (the server's WriteTimeout is 15s): 201 if the
+receipt finished, 202 if not. The scheduler's `processReceipts` finishes the rest. Both go through
+`ledger.ClaimReceipt` — one `UPDATE ... pending -> processing` with a 3-minute lease and a
+`claim_seq` bump — and every write that ends a claim matches on that `claim_seq`. So only one caller
+pays for a model call per claim, a worker whose lease was taken over rolls back
+(`ledger.ErrLostClaim`), and the transaction insert and the `posted` flip share one database
+transaction. A cancelled context hands the claim back uncounted; a real failure backs off
+2/4/8/16 min and goes to review after 5.
+
+**Statuses:** `pending`, `processing`, `needs_review`, `posted` — no `failed`; an unreadable
+receipt needs the same thing from the user as a doubtful one. `CHECK ((status='posted') =
+(transaction_id IS NOT NULL))`, and `transaction_id` is `ON DELETE CASCADE`: deleting the
+transaction deletes the photo, and `DELETE /api/receipts/{id}` refuses a posted one.
+
+**It posts by itself only when `receipts.Decide` finds nothing to hold for:** total and date read,
+date within 60 days and not in the future, USD, a purchase not a return, subtotal+tax+tip matching
+the total, the suggested category matching one of the household's non-archived expense categories
+exactly (case-insensitive), and exactly one account — card last-4 against `accounts.mask`, or
+tender cash with exactly one `cash` account. Then the processor holds it anyway if an expense of
+the same amount is already on that account within a day (`possible_duplicate`: the ledger is kept
+by hand, so a receipt is often photographed after being typed in). Reason codes are in
+`models.Reason*`; the frontend words them in `src/lib/receipts.ts`.
+
+**Model output is untrusted.** Claude gets the photo, today's date and expense category *names* —
+nothing about accounts. The schema (`output_config.format`, a byte-stable const in
+`vision/anthropic.go`) constrains shape only; `Decide` cleans and bounds every string and matches
+every id against the household's own lists. Categories are never put in the schema as an enum.
+
 ## Migrations
 
 `internal/database/migrations/NNN_snake_case.{up,down}.sql`, embedded and applied at every boot.
@@ -195,6 +235,7 @@ it drops everything from before and creates households, accounts, categories, tr
 recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_worth_snapshots.
 `007_investments` adds securities, security_prices, trades, and the `trade` transaction kind.
 `008_refunds` adds the `refund` kind (positive, expense category required).
+`009_receipts` adds the `receipts` table and the `receipt` transaction source.
 
 ## Conventions
 
@@ -211,7 +252,8 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 - **Health check:** `GET /health` must return 200.
 - **Env vars:** `PORT`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`,
   `APP_PASSWORD`, `SCHEDULER_INTERVAL`, `SCHEDULER_HORIZON_DAYS`, `QUOTES_PROVIDER` (`yahoo` default,
-  or `none`), `QUOTES_MARKET_TTL`
+  or `none`), `QUOTES_MARKET_TTL`, `RECEIPTS_PROVIDER` (`none` default, or `anthropic`),
+  `ANTHROPIC_API_KEY` (required with `anthropic`), `RECEIPTS_MODEL` (default `claude-opus-5`)
 
 ## Auth
 
@@ -238,13 +280,25 @@ but not built. The schema is already shaped for it.
   and escapes every value; `internal/config/config_test.go` guards it.
 - **`Dockerfile` must match `go.mod`'s Go version.** They drifted once (1.22 vs 1.26) and the image
   build failed.
+- **An httptest handler must read a POST body before waiting on `r.Context().Done()`.** The server
+  only notices the client hanging up once the body is consumed; the vision timeout test hung on it.
 - **GHCR images are public.** `.dockerignore` excludes `.env*`, `teller/`, `client_secret*.json`,
   `*.pem`, `*.key` — `Dockerfile` does `COPY . .`, and the GHA cache exports intermediate layers.
 
-## Migration Status
+## Deployment
 
-Still on AWS ECS Fargate via Pulumi (`index.ts`), fronted by the shared platform ALB at
-`fangorn.cwnel.com`. **Moving to the k3s cluster** (`bulbasaur`) is planned but not started — it
-matters here because the ECS service scales to zero 10 PM–6 AM, which the scheduler's catch-up
-design already tolerates. Per the rule in `~/Dev/portfolio/CLAUDE.md`, the AWS stack stays
-authoritative until a k3s deploy is proven.
+fangorn runs on the k3s cluster (`bulbasaur`). **Its AWS infrastructure has been torn down
+entirely** — there is no ECS service, RDS database or Pulumi stack, and nothing to migrate from.
+The k3s deploy is not built yet. Following the pattern of
+`~/Dev/portfolio/detailing`, it needs:
+
+- `k8s/base` + `k8s/overlays/prod` and a `.github/workflows/deploy.yml` (build → GHCR → Tailscale →
+  `kubectl apply -k`)
+- a `fangorn` namespace, a RoleBinding for `github-deployer` in `bulbasaur-infra/ci/`, and a
+  `fangorn` database/role in `Cluster/platform-pg` with its `db-creds` Secret
+- `app-secrets` from GitHub repo secrets: `APP_PASSWORD`, `ANTHROPIC_API_KEY`; plain env
+  `RECEIPTS_PROVIDER=anthropic`, `DB_SSLMODE=require`
+
+`index.ts`, `Pulumi.yaml`, `Pulumi.dev.yaml`, the root `package.json`/`tsconfig.json` and
+`.github/workflows/deploy.yml.txt` are leftovers from the torn-down AWS deployment. Nothing uses
+them and they point at resources that no longer exist; don't extend them.
