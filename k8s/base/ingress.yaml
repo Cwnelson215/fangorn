@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fangorn
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: fangorn.cwnel.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fangorn
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - fangorn.cwnel.com
+      secretName: fangorn-tls

@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fangorn
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: fangorn
+  template:
+    metadata:
+      labels:
+        app: fangorn
+    spec:
+      # Nothing in the pod talks to the Kubernetes API.
+      automountServiceAccountToken: false
+      containers:
+        - name: fangorn
+          image: ghcr.io/cwnelson215/fangorn:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            # platform-pg serves TLS with its own CA; lib/pq's "require" encrypts
+            # without verifying the chain, the same trade detailing makes.
+            - name: DB_SSLMODE
+              value: "require"
+            - name: RECEIPTS_PROVIDER
+              value: "anthropic"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: port
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: database
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: password
+          # APP_PASSWORD and ANTHROPIC_API_KEY, written by the deploy workflow.
+          envFrom:
+            - secretRef:
+                name: app-secrets
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            # Receipt uploads are held in memory (5 MB cap each), so leave room
+            # for a few at once on top of a small Go heap.
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          # /health is dependency-free: a database outage must not get the pod
+          # killed and restarted, only taken out of rotation by /ready.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities:
+              drop: ["ALL"]
+          # The server writes nothing to disk (receipt photos go to Postgres), but
+          # Go and libraries may still reach for $TMPDIR.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

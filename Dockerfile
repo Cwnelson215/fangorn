@@ -24,11 +24,13 @@ FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates curl
 
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# A numeric UID: Kubernetes can only verify runAsNonRoot against a number, and
+# k8s/base/deployment.yaml pins the same 1001.
+RUN addgroup -S -g 1001 appgroup && adduser -S -u 1001 -G appgroup appuser
 
 COPY --from=builder /app/server /server
 
-USER appuser
+USER 1001:1001
 
 EXPOSE 3000
 

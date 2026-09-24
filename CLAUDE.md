@@ -320,18 +320,28 @@ but not built. The schema is already shaped for it.
 
 ## Deployment
 
-fangorn runs on the k3s cluster (`bulbasaur`). **Its AWS infrastructure has been torn down
-entirely** — there is no ECS service, RDS database or Pulumi stack, and nothing to migrate from.
-The k3s deploy is not built yet. Following the pattern of
-`~/Dev/portfolio/detailing`, it needs:
+fangorn runs on the k3s cluster (`bulbasaur`) at `fangorn.cwnel.com`, following the
+`~/Dev/portfolio/detailing` pattern. Its AWS infrastructure was torn down entirely — there is no
+ECS service, RDS database or Pulumi stack.
 
-- `k8s/base` + `k8s/overlays/prod` and a `.github/workflows/deploy.yml` (build → GHCR → Tailscale →
-  `kubectl apply -k`)
-- a `fangorn` namespace, a RoleBinding for `github-deployer` in `bulbasaur-infra/ci/`, and a
-  `fangorn` database/role in `Cluster/platform-pg` with its `db-creds` Secret
-- `app-secrets` from GitHub repo secrets: `APP_PASSWORD`, `ANTHROPIC_API_KEY`; plain env
-  `RECEIPTS_PROVIDER=anthropic`, `DB_SSLMODE=require`
+- **`.github/workflows/deploy.yml`** — every push to `main`: frontend check/test/build, `go vet`,
+  `go test` (DB tests against a Postgres service container), then build → GHCR
+  (`ghcr.io/cwnelson215/fangorn`, public) → Tailscale → write `app-secrets` → `kubectl apply -k
+  k8s/overlays/prod` → wait for rollout. PRs run the tests only.
+- **`k8s/base` + `k8s/overlays/prod`** — Deployment (1 replica, read-only root FS, UID 1001, which
+  the `Dockerfile` pins to match), Service, Traefik Ingress, cert-manager `Certificate`
+  (`letsencrypt-prod`). Readiness is `/ready`, liveness `/health`. Plain env
+  `RECEIPTS_PROVIDER=anthropic`, `DB_SSLMODE=require`.
+- **Provisioned once by hand (2026-09-24):** the `fangorn` namespace, the `github-deployer`
+  RoleBinding (also in `bulbasaur-infra/ci/github-deployer.yaml`), and a `fangorn` role owning a
+  `fangorn` database in `Cluster/platform-pg`, with `db-creds` (`host`, `port`, `database`,
+  `username`, `password`) in the `fangorn` namespace. CI never touches these.
+- **GitHub repo secrets:** `KUBECONFIG`, `TS_AUTHKEY` (same values as the other apps),
+  `APP_PASSWORD`, `ANTHROPIC_API_KEY`. The workflow refuses to deploy if either of the last two is
+  empty — an unset `APP_PASSWORD` would switch login off on the public internet.
+- A change to `app-secrets` alone doesn't restart the pod; run
+  `kubectl rollout restart deployment/fangorn -n fangorn`.
 
-`index.ts`, `Pulumi.yaml`, `Pulumi.dev.yaml`, the root `package.json`/`tsconfig.json` and
-`.github/workflows/deploy.yml.txt` are leftovers from the torn-down AWS deployment. Nothing uses
-them and they point at resources that no longer exist; don't extend them.
+`index.ts`, `Pulumi.yaml`, `Pulumi.dev.yaml` and the root `package.json`/`tsconfig.json` are
+leftovers from the torn-down AWS deployment. Nothing uses them and they point at resources that no
+longer exist; don't extend them.

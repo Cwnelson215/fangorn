@@ -1,0 +1,148 @@
+name: Deploy to k3s
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/cwnelson215/fangorn
+
+jobs:
+  # Gate: nothing is built or deployed unless every test passes, including the
+  # ledger/scheduler/receipt tests that need a real Postgres.
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fangorn_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FANGORN_TEST_DSN: host=localhost port=5432 user=postgres password=postgres dbname=fangorn_test sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run check
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      # The Go binary embeds frontend/build, so it has to exist before go vet.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test backend
+        run: go test ./...
+
+  deploy:
+    needs: test
+    # Push to main and manual runs only — a pull request has no deploy secrets and
+    # must never touch the cluster. The test job still runs on PRs.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The image is public. .dockerignore keeps .env*, keys and photos out of
+      # the build context, which the GHA cache would otherwise export.
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.34.0'
+
+      - name: Set up kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: '5.4.3'
+
+      - name: Connect to tailnet
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Apply app-secrets
+        env:
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # An unset APP_PASSWORD switches login off entirely, and the pod would
+          # crash-loop without an API key (RECEIPTS_PROVIDER=anthropic). Refuse to
+          # deploy either way rather than find out from the public internet.
+          if [ -z "$APP_PASSWORD" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::APP_PASSWORD and ANTHROPIC_API_KEY repo secrets must both be set"
+            exit 1
+          fi
+          kubectl create secret generic app-secrets \
+            --namespace fangorn \
+            --from-literal=APP_PASSWORD="$APP_PASSWORD" \
+            --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            --dry-run=client -o yaml \
+            | kubectl apply -f -
+
+      - name: Set image tag in overlay
+        working-directory: k8s/overlays/prod
+        run: kustomize edit set image "$IMAGE=$IMAGE:$GITHUB_SHA"
+
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/prod
+
+      # A changed app-secrets doesn't restart the pod by itself; a new image tag
+      # does. A secrets-only change needs `kubectl rollout restart`.
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/fangorn -n fangorn --timeout=3m
