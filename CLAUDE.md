@@ -285,7 +285,10 @@ server-side revocation; a lost phone stays signed in until `APP_PASSWORD` change
 `APP_PASSWORD` is unset, auth is disabled entirely.
 
 **The iPhone Shortcut uses device keys instead** (`/shortcut` page, `ledger/devicekeys.go`,
-`handlers/shortcut.go`). A Shortcut can't carry the cookie, so each phone gets its own `fgn_…` key,
+`handlers/shortcut.go`). Setup (`/shortcut`) is offered only on iPhone/iPad (`lib/device.ts` —
+iPadOS reports itself as a Mac, so a touch-screen "Mac" counts); everywhere else it's out of the
+nav and the page just points to Settings. `/settings` (the gear on desktop, More on phones) lists
+and revokes phones and holds Sign out. A Shortcut can't carry the cookie, so each phone gets its own `fgn_…` key,
 sent as `Authorization: Bearer`. Only its SHA-256 is stored; it's shown once and revoked by
 deleting the row. A key reaches exactly three endpoints — `GET /api/shortcut/categories` (names, most
 used first), `POST /api/shortcut/log` (`amount`, `category` by name, optional `note`/`refund`),

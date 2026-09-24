@@ -2,15 +2,16 @@
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { authStatus, logout } from '$lib/api';
+	import { onMount } from 'svelte';
+	import { authStatus } from '$lib/api';
 	import { capture, dismissNotice, openCamera, registerCameraInput, uploadPhoto } from '$lib/capture.svelte';
+	import { isAppleMobile } from '$lib/device';
 
 	let { children }: { children: Snippet } = $props();
 	let authChecked = $state(false);
-	let showLogout = $state(false);
 	let isLoginPage = $derived(page.url.pathname === '/login');
 
-	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera';
+	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear';
 
 	const NAV: { href: string; label: string; icon: Icon }[] = [
 		{ href: '/', label: 'Dashboard', icon: 'home' },
@@ -21,14 +22,26 @@
 		{ href: '/transfers', label: 'Transfers', icon: 'swap' },
 		{ href: '/recurring', label: 'Recurring', icon: 'repeat' },
 		{ href: '/budgets', label: 'Budgets', icon: 'target' },
-		{ href: '/categories', label: 'Categories', icon: 'tag' },
-		{ href: '/shortcut', label: 'iPhone Shortcut', icon: 'phone' }
+		{ href: '/categories', label: 'Categories', icon: 'tag' }
 	];
+
+	const SETTINGS = { href: '/settings', label: 'Settings', icon: 'gear' as Icon };
+	const SHORTCUT = { href: '/shortcut', label: 'iPhone Shortcut', icon: 'phone' as Icon };
+
+	// Shortcuts only run on iPhone and iPad, so nobody else is offered the setup.
+	let onAppleMobile = $state(false);
+	onMount(() => {
+		onAppleMobile = isAppleMobile();
+	});
 
 	// On a phone the bottom bar has room for four destinations and the add
 	// button; everything else lives behind More.
 	const TABS = ['/', '/transactions', '/budgets'];
-	const MORE = NAV.filter((item) => !TABS.includes(item.href));
+	let MORE = $derived([
+		...NAV.filter((item) => !TABS.includes(item.href)),
+		...(onAppleMobile ? [SHORTCUT] : []),
+		SETTINGS
+	]);
 
 	let sheet = $state<'more' | null>(null);
 	let moreActive = $derived(MORE.some((item) => isActive(item.href)));
@@ -63,7 +76,6 @@
 		authStatus()
 			.then((data) => {
 				if (page.url.pathname !== path) return; // stale: navigated away meanwhile
-				showLogout = data.required;
 				if (data.required && !data.authenticated) {
 					goto('/login');
 					return;
@@ -87,15 +99,6 @@
 		const file = input.files?.[0];
 		input.value = ''; // so the same photo can be picked again
 		if (file) uploadPhoto(file);
-	}
-
-	async function handleLogout() {
-		sheet = null;
-		try {
-			await logout();
-		} finally {
-			goto('/login');
-		}
 	}
 </script>
 
@@ -123,6 +126,10 @@
 			<path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3" />
 		{:else if name === 'camera'}
 			<path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" />
+		{:else if name === 'gear'}
+			<circle cx="12" cy="12" r="3" /><path
+				d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
+			/>
 		{:else if name === 'phone'}
 			<rect x="6" y="2" width="12" height="20" rx="2.5" /><path d="M11 18h2" />
 		{:else if name === 'tag'}
@@ -153,9 +160,15 @@
 			>
 				{@render glyph('camera')}<span>{capture.stage ? 'Reading…' : 'Receipt'}</span>
 			</button>
-			{#if showLogout}
-				<button class="logout" onclick={handleLogout}>Sign out</button>
-			{/if}
+			<a
+				class="settings"
+				class:active={isActive('/settings') || isActive('/shortcut')}
+				href="/settings"
+				aria-label="Settings"
+				title="Settings"
+			>
+				{@render glyph('gear')}
+			</a>
 		</nav>
 
 		<input
@@ -217,11 +230,6 @@
 						<span class="sheet-text"><span>{item.label}</span></span>
 					</a>
 				{/each}
-				{#if showLogout}
-					<button class="sheet-item signout" onclick={handleLogout}>
-						<span class="sheet-text"><span>Sign out</span></span>
-					</button>
-				{/if}
 			</div>
 		{/if}
 	</div>
@@ -533,19 +541,24 @@
 		}
 	}
 
-	.logout {
-		margin-left: 1rem;
-		background: none;
-		border: none;
-		color: rgba(255, 255, 255, 0.6);
-		font: inherit;
-		font-size: 0.85rem;
-		cursor: pointer;
-		padding: 0.25rem 0;
+	.settings {
+		display: grid;
+		place-items: center;
+		width: 36px;
+		height: 36px;
+		margin-left: 0.5rem;
+		border-radius: 50%;
+		color: rgba(255, 255, 255, 0.7);
 	}
 
-	.logout:hover {
-		color: white;
+	.settings svg {
+		width: 20px;
+		height: 20px;
+	}
+
+	.settings:hover,
+	.settings.active {
+		color: var(--accent);
 	}
 
 	main {
@@ -591,8 +604,9 @@
 			height: calc(48px + env(safe-area-inset-top));
 		}
 
+		/* On a phone Settings is in More. */
 		.nav-links,
-		.logout {
+		.settings {
 			display: none;
 		}
 
@@ -755,13 +769,6 @@
 			display: flex;
 			flex-direction: column;
 			line-height: 1.3;
-		}
-
-		.signout {
-			margin-top: 0.25rem;
-			border-top: 1px solid var(--divider);
-			border-radius: 0;
-			color: var(--neg);
 		}
 	}
 

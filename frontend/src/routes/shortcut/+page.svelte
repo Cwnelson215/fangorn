@@ -6,20 +6,17 @@
 	// A Shortcut can't use the login cookie, so it sends a key instead. The key
 	// can list category names, log to the account it was made for, and send a
 	// receipt photo — and can't read anything back.
+	//
+	// Only iPhones and iPads run Shortcuts, so the nav offers this page only
+	// there. Listing and revoking phones lives in Settings, which works anywhere.
 	import { onMount } from 'svelte';
-	import {
-		createDeviceKey,
-		deleteDeviceKey,
-		getAccounts,
-		getDeviceKeys,
-		testDeviceKey
-	} from '$lib/api';
+	import { createDeviceKey, getAccounts, testDeviceKey } from '$lib/api';
 	import type { Account, DeviceKey } from '$lib/types';
 	import { pickRemembered } from '$lib/remember';
+	import { isAppleMobile } from '$lib/device';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
 
-	let keys = $state<DeviceKey[]>([]);
 	let accounts = $state<Account[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
@@ -33,7 +30,7 @@
 	let fresh = $state<{ key: DeviceKey; token: string } | null>(null);
 	let test = $state<{ ok: boolean; text: string } | null>(null);
 	let copied = $state<string | null>(null);
-	let revoking = $state<number | null>(null);
+	let onAppleMobile = $state(true);
 
 	let origin = $state('');
 	let token = $derived(fresh?.token ?? 'YOUR-KEY');
@@ -46,8 +43,9 @@
 
 	onMount(async () => {
 		origin = location.origin;
+		onAppleMobile = isAppleMobile();
 		try {
-			[keys, accounts] = await Promise.all([getDeviceKeys(), getAccounts()]);
+			accounts = await getAccounts();
 			accountId = pickRemembered('transaction.account', accounts, accounts[0]?.id ?? 0);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load your phones';
@@ -63,7 +61,6 @@
 		test = null;
 		try {
 			fresh = await createDeviceKey(name, accountId);
-			keys = [...keys, fresh.key];
 			name = '';
 		} catch (e) {
 			formError = e instanceof Error ? e.message : 'Could not make a key';
@@ -83,19 +80,6 @@
 		}
 	}
 
-	async function revoke(key: DeviceKey) {
-		revoking = key.id;
-		try {
-			await deleteDeviceKey(key.id);
-			keys = keys.filter((k) => k.id !== key.id);
-			if (fresh?.key.id === key.id) fresh = null;
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not revoke that key';
-		} finally {
-			revoking = null;
-		}
-	}
-
 	async function copy(label: string, text: string) {
 		try {
 			await navigator.clipboard.writeText(text);
@@ -108,11 +92,6 @@
 		}
 	}
 
-	function when(iso: string | null): string {
-		if (!iso) return 'never used';
-		const d = new Date(iso);
-		return `last used ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-	}
 </script>
 
 {#snippet value(label: string, text: string)}
@@ -140,7 +119,17 @@
 		<p class="error-text">{error}</p>
 	{/if}
 
-	{#if loading}
+	{#if !onAppleMobile}
+		<div class="card elsewhere">
+			<p>
+				The Shortcut is set up on the iPhone itself: open Fangorn there and go to
+				<strong>More → iPhone Shortcut</strong>.
+			</p>
+			<p class="muted small">
+				To see or revoke phones that already have it, go to <a href="/settings">Settings</a>.
+			</p>
+		</div>
+	{:else if loading}
 		<p class="muted">Loading…</p>
 	{:else}
 		<section class="card">
@@ -148,24 +137,9 @@
 			<p class="muted small">
 				Each phone gets its own key, so one can be switched off without touching the others. A key
 				can send receipt photos, log entries to the account you pick here, and list your category
-				names — it can't see balances or anything else.
+				names — it can't see balances or anything else. Phones already set up are in
+				<a href="/settings">Settings</a>, where they can be revoked.
 			</p>
-
-			{#if keys.length > 0}
-				<ul class="keys">
-					{#each keys as key (key.id)}
-						<li>
-							<span class="key-text">
-								<strong>{key.name}</strong>
-								<span class="muted">logs to {key.account_name} · {when(key.last_used_at)}</span>
-							</span>
-							<Button variant="danger" size="sm" disabled={revoking === key.id} onclick={() => revoke(key)}>
-								{revoking === key.id ? 'Revoking…' : 'Revoke'}
-							</Button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
 
 			<form onsubmit={create}>
 				<div class="form-row">
@@ -325,30 +299,10 @@
 		margin-top: 0.75rem;
 	}
 
-	.keys {
-		list-style: none;
-		margin: 0.75rem 0;
-		border-top: 1px solid var(--divider);
-	}
-
-	.keys li {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.75rem;
-		padding: 0.625rem 0;
-		border-bottom: 1px solid var(--divider);
-	}
-
-	.key-text {
+	.elsewhere {
 		display: flex;
 		flex-direction: column;
-		line-height: 1.35;
-		min-width: 0;
-	}
-
-	.key-text .muted {
-		font-size: 0.8125rem;
+		gap: 0.5rem;
 	}
 
 	form {
