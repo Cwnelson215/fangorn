@@ -1,0 +1,16 @@
+{
+ "quotes": [
+  {
+   "exchange": "NAS",
+   "shortname": "Fidelity Government Money Marke",
+   "quoteType": "MONEY_MARKET",
+   "symbol": "SPAXX",
+   "index": "quotes",
+   "typeDisp": "Money Market",
+   "longname": "Fidelity Government Money Market Fund",
+   "exchDisp": "NASDAQ",
+   "isYahooFinance": true
+  }
+ ],
+ "news": []
+}

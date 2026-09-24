@@ -44,6 +44,10 @@ func newYahooAt(baseURL string) *Yahoo {
 
 // holdableTypes are the search results worth offering. Yahoo also returns
 // indexes (^GSPC), futures and currencies, none of which can sit in an account.
+//
+// The search endpoint spells money market funds MONEY_MARKET while the chart
+// endpoint says MONEYMARKET; searchType folds the first into the second, so
+// SPAXX isn't filtered out and both paths agree on what is stored.
 var holdableTypes = map[string]bool{
 	"EQUITY": true, "ETF": true, "MUTUALFUND": true, "MONEYMARKET": true, "CRYPTOCURRENCY": true,
 }
@@ -174,17 +178,25 @@ func (y *Yahoo) Search(ctx context.Context, query string) ([]Match, error) {
 	}
 	out := []Match{}
 	for _, r := range res.Quotes {
-		if !holdableTypes[r.QuoteType] {
+		qt := searchType(r.QuoteType)
+		if !holdableTypes[qt] {
 			continue
 		}
 		out = append(out, Match{
 			Symbol:    strings.ToUpper(r.Symbol),
 			Name:      firstNonEmpty(r.LongName, r.ShortName, r.Symbol),
-			QuoteType: r.QuoteType,
+			QuoteType: qt,
 			Exchange:  r.ExchDisp,
 		})
 	}
 	return out, nil
+}
+
+func searchType(t string) string {
+	if t == "MONEY_MARKET" {
+		return "MONEYMARKET"
+	}
+	return t
 }
 
 // get performs the request and decodes a JSON body into dst. It returns the

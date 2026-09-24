@@ -181,3 +181,16 @@ func TestPreviousCloseFallbacks(t *testing.T) {
 	approx(t, "from closes", previousClose(11, nil, nil, recent), 9, 1e-9)
 	approx(t, "nothing", previousClose(11, nil, nil, nil), 11, 1e-9)
 }
+
+// Search says MONEY_MARKET where the chart says MONEYMARKET. SPAXX, the core
+// cash position in a Fidelity account, used to be filtered out by it.
+func TestSearchKeepsMoneyMarketFunds(t *testing.T) {
+	y := serve(t, map[string]string{"/v1/finance/search": "search_spaxx.json"})
+	matches, err := y.Search(context.Background(), "SPAXX")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Symbol != "SPAXX" || matches[0].QuoteType != "MONEYMARKET" {
+		t.Fatalf("matches = %+v", matches)
+	}
+}
