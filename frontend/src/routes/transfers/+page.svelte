@@ -11,6 +11,7 @@
 	} from '$lib/api';
 	import type { Account, Transfer, TransferInput } from '$lib/types';
 	import { formatCurrency, formatDate, today } from '$lib/format';
+	import { pickRemembered, rememberId } from '$lib/remember';
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -62,8 +63,10 @@
 
 	function openCreate() {
 		editing = null;
-		fromId = accounts[0]?.id ?? 0;
-		toId = accounts[1]?.id ?? 0;
+		fromId = pickRemembered('transfer.from', accounts, accounts[0]?.id ?? 0);
+		toId = pickRemembered('transfer.to', accounts, accounts[1]?.id ?? 0);
+		// The remembered pair can collide once one side has been changed alone.
+		if (toId === fromId) toId = accounts.find((a) => a.id !== fromId)?.id ?? 0;
 		amount = '';
 		date = today();
 		description = '';
@@ -112,6 +115,8 @@
 				await updateTransfer(editing.group_id, buildInput());
 			} else {
 				await createTransfer(buildInput());
+				rememberId('transfer.from', fromId);
+				rememberId('transfer.to', toId);
 			}
 			modalOpen = false;
 			await load();

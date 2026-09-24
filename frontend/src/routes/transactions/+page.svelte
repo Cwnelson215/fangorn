@@ -14,6 +14,7 @@
 	} from '$lib/api';
 	import type { Account, Category, Transaction, TransactionInput } from '$lib/types';
 	import { formatDayHeading, groupByDate, today } from '$lib/format';
+	import { pickRemembered, rememberId } from '$lib/remember';
 	import TransactionRow from '$lib/components/TransactionRow.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
@@ -105,7 +106,7 @@
 	function openCreate() {
 		editing = null;
 		kind = 'expense';
-		accountId = accounts[0]?.id ?? 0;
+		accountId = pickRemembered('transaction.account', accounts, accounts[0]?.id ?? 0);
 		date = today();
 		amount = '';
 		description = '';
@@ -173,6 +174,8 @@
 				await updateTransaction(editing.id, buildInput());
 			} else {
 				await createTransaction(buildInput());
+				// Only a new entry sets the default; fixing an old one shouldn't.
+				rememberId('transaction.account', accountId);
 			}
 			modalOpen = false;
 			await load();
