@@ -88,6 +88,7 @@ func main() {
 	ledgerH := handlers.NewLedgerHandler(svc, householdID)
 	investmentH := handlers.NewInvestmentHandler(svc, refresher, householdID)
 	receiptH := handlers.NewReceiptHandler(svc, receiptProc, householdID)
+	shortcutH := handlers.NewShortcutHandler(svc, receiptH, householdID)
 
 	mux := http.NewServeMux()
 
@@ -100,6 +101,7 @@ func main() {
 	ledgerH.Register(mux)
 	investmentH.Register(mux)
 	receiptH.Register(mux)
+	shortcutH.Register(mux)
 
 	// The scheduler posts recurring items, refreshes prices and snapshots net
 	// worth. It runs a pass immediately on boot, which is what backfills anything

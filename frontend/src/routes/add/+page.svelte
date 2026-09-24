@@ -2,7 +2,8 @@
 	// The quick-log screen: what the home-screen icon and the tab bar's + open.
 	// Everything that can be defaulted is — today, the last account used, a
 	// description from the category — so the common case is amount, category,
-	// Save. It also takes a prefill from the URL (?amount=&kind=&category=&note=)
+	// Save. A receipt photo is the other way in and gets the same prominence:
+	// one tap on the camera and it logs itself. It also takes a prefill from the URL (?amount=&kind=&category=&note=)
 	// so a phone shortcut can open it half filled in.
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
@@ -12,14 +13,12 @@
 		deleteTransaction,
 		getAccounts,
 		getCategories,
-		getTransactions,
-		uploadReceipt
+		getTransactions
 	} from '$lib/api';
 	import type { Account, Category, Transaction } from '$lib/types';
 	import { formatCurrency, formatDateShort, today } from '$lib/format';
 	import { pickRemembered, rememberId } from '$lib/remember';
-	import { downscale } from '$lib/image';
-	import { describeUpload, type UploadNotice } from '$lib/receipts';
+	import { capture, openCamera } from '$lib/capture.svelte';
 
 	type Kind = 'expense' | 'income' | 'refund';
 
@@ -49,9 +48,6 @@
 	let undoing = $state(false);
 
 	let amountInput = $state<HTMLInputElement>();
-	let fileInput = $state<HTMLInputElement>();
-	let scanning = $state<'preparing' | 'uploading' | null>(null);
-	let scanNotice = $state<(UploadNotice & { review?: boolean }) | null>(null);
 
 	// Accepts what people type on a phone: "12", "12.5", "$1,200.00".
 	let amount = $derived.by(() => {
@@ -175,30 +171,6 @@
 		}
 	}
 
-	async function onPhoto(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		input.value = '';
-		if (!file) return;
-		scanNotice = null;
-		saved = null;
-		try {
-			scanning = 'preparing';
-			const image = await downscale(file);
-			scanning = 'uploading';
-			const res = await uploadReceipt(image);
-			const names = (list: { id: number; name: string }[]) => new Map(list.map((x) => [x.id, x.name]));
-			scanNotice =
-				res.receipt.status === 'needs_review' && !res.duplicate
-					? { text: 'Read it, but it needs a look before it goes in.', tone: 'warn', review: true }
-					: describeUpload(res, names(accounts), names(categories));
-		} catch (e) {
-			scanNotice = { text: e instanceof Error ? e.message : 'Upload failed', tone: 'error' };
-		} finally {
-			scanning = null;
-		}
-	}
-
 	let savedAccount = $derived(accounts.find((a) => a.id === saved?.account_id));
 </script>
 
@@ -218,35 +190,15 @@
 			<a class="link-button" href="/accounts">Go to accounts</a>
 		</div>
 	{:else}
-		<div class="shortcuts">
-			<input
-				bind:this={fileInput}
-				class="hidden"
-				type="file"
-				accept="image/*"
-				capture="environment"
-				onchange={onPhoto}
-			/>
-			<button type="button" class="shortcut" onclick={() => fileInput?.click()} disabled={scanning !== null}>
-				<svg viewBox="0 0 24 24" aria-hidden="true"
-					><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg
-				>
-				{scanning === 'preparing' ? 'Preparing…' : scanning === 'uploading' ? 'Reading…' : 'Scan receipt'}
-			</button>
-			<a class="shortcut" href="/transfers?new">
-				<svg viewBox="0 0 24 24" aria-hidden="true"
-					><path d="M7 4 3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7" /></svg
-				>
-				Transfer
-			</a>
-		</div>
-
-		{#if scanNotice}
-			<p class="notice {scanNotice.tone}" role="status">
-				{scanNotice.text}
-				{#if scanNotice.review}<a href="/receipts">Review it</a>{/if}
-			</p>
-		{/if}
+		<button type="button" class="snap" onclick={openCamera} disabled={capture.stage !== null}>
+			<svg viewBox="0 0 24 24" aria-hidden="true"
+				><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg
+			>
+			<span class="snap-text">
+				<strong>{capture.stage ? 'Reading receipt…' : 'Snap a receipt'}</strong>
+				<span>It logs itself — or type it in below</span>
+			</span>
+		</button>
 
 		{#if saved}
 			<div class="toast" role="status">
@@ -338,6 +290,10 @@
 			</button>
 		</form>
 
+		<p class="aside muted">
+			Moving money between your own accounts? <a href="/transfers?new">Record a transfer</a>
+		</p>
+
 	{/if}
 </div>
 
@@ -355,74 +311,68 @@
 		padding: 2rem 0;
 	}
 
-	.hidden {
-		display: none;
-	}
-
-	.shortcuts {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.5rem;
-	}
-
-	.shortcut {
+	.snap {
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		min-height: 48px;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
+		gap: 0.875rem;
+		min-height: 64px;
+		padding: 0.75rem 1rem;
+		border: 2px solid var(--accent);
+		border-radius: var(--radius);
 		background: var(--surface);
 		font: inherit;
-		font-size: 0.9375rem;
-		font-weight: 600;
 		color: var(--ink);
-		text-decoration: none;
+		text-align: left;
 		cursor: pointer;
+		box-shadow: var(--shadow);
 	}
 
-	.shortcut:disabled {
-		opacity: 0.7;
+	.snap:active:not(:disabled) {
+		background: #e6f8f1;
+	}
+
+	.snap:disabled {
 		cursor: progress;
+		opacity: 0.75;
 	}
 
-	.shortcut svg {
-		width: 20px;
-		height: 20px;
+	.snap svg {
+		flex: none;
+		width: 40px;
+		height: 40px;
+		padding: 8px;
+		border-radius: 50%;
+		background: var(--accent);
 		fill: none;
-		stroke: currentColor;
+		stroke: var(--ink);
 		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
 
-	.notice {
-		margin: 0;
-		padding: 0.625rem 0.875rem;
-		border-radius: var(--radius-sm);
+	.snap-text {
+		display: flex;
+		flex-direction: column;
+		line-height: 1.3;
+	}
+
+	.snap-text strong {
+		font-size: 1.0625rem;
+	}
+
+	.snap-text span {
+		font-size: 0.8125rem;
+		color: var(--muted);
+	}
+
+	.aside {
+		text-align: center;
 		font-size: 0.875rem;
 	}
 
-	.notice.ok {
-		background: #e8f5e9;
-		color: #2e7d32;
-	}
-
-	.notice.warn {
-		background: #fff8e6;
-		color: #8a5a00;
-	}
-
-	.notice.error {
-		background: #fdecea;
-		color: #b3261e;
-	}
-
-	.notice a {
-		color: inherit;
+	.aside a {
+		color: var(--ink);
 		font-weight: 600;
-		margin-left: 0.25rem;
 	}
 
 	form {

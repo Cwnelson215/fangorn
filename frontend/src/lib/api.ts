@@ -7,6 +7,8 @@ import type {
 	Category,
 	CategoryInput,
 	Dashboard,
+	DeviceKey,
+	DeviceKeyCreated,
 	Goal,
 	GoalInput,
 	Holdings,
@@ -240,3 +242,24 @@ export const contributeToGoal = (id: number, amount: number, date: string, note?
 	send<Goal>('POST', `/api/goals/${id}/contribute`, { amount, date, note: note || null });
 export const achieveGoal = (id: number) => send<Goal>('POST', `/api/goals/${id}/achieve`);
 export const reopenGoal = (id: number) => send<Goal>('POST', `/api/goals/${id}/reopen`);
+
+// ---------------------------------------------------------------------------
+// iPhone Shortcut keys
+// ---------------------------------------------------------------------------
+
+export const getDeviceKeys = () => request<DeviceKey[]>('/api/device-keys');
+export const createDeviceKey = (name: string, account_id: number) =>
+	send<DeviceKeyCreated>('POST', '/api/device-keys', { name, account_id });
+export const deleteDeviceKey = (id: number) => send<void>('DELETE', `/api/device-keys/${id}`);
+
+/**
+ * Calls the Shortcut's own endpoint with a key, the way the phone will, so a
+ * new key can be checked before it goes into the Shortcut.
+ */
+export async function testDeviceKey(token: string): Promise<string[]> {
+	const res = await fetch(BASE + '/api/shortcut/categories', {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
+	return res.json();
+}

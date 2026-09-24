@@ -5,6 +5,7 @@
 	import { formatCurrency, formatDateShort } from '$lib/format';
 	import { startPolling } from '$lib/poll';
 	import { describeUpload, isWorking, reasonText, type UploadNotice } from '$lib/receipts';
+	import { RECEIPT_UPLOADED } from '$lib/capture.svelte';
 	import type { Account, Category, Receipt } from '$lib/types';
 	import ReceiptReviewModal from '$lib/components/ReceiptReviewModal.svelte';
 
@@ -52,6 +53,10 @@
 			})
 			.catch(() => {});
 		load();
+		// A photo taken with the top bar's camera while this page is open.
+		const refresh = () => load();
+		window.addEventListener(RECEIPT_UPLOADED, refresh);
+		return () => window.removeEventListener(RECEIPT_UPLOADED, refresh);
 	});
 
 	// Poll while anything is still being read, for a while. Keyed on a boolean

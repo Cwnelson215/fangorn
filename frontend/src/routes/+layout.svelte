@@ -3,13 +3,14 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { authStatus, logout } from '$lib/api';
+	import { capture, dismissNotice, openCamera, registerCameraInput, uploadPhoto } from '$lib/capture.svelte';
 
 	let { children }: { children: Snippet } = $props();
 	let authChecked = $state(false);
 	let showLogout = $state(false);
 	let isLoginPage = $derived(page.url.pathname === '/login');
 
-	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag';
+	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera';
 
 	const NAV: { href: string; label: string; icon: Icon }[] = [
 		{ href: '/', label: 'Dashboard', icon: 'home' },
@@ -20,7 +21,8 @@
 		{ href: '/transfers', label: 'Transfers', icon: 'swap' },
 		{ href: '/recurring', label: 'Recurring', icon: 'repeat' },
 		{ href: '/budgets', label: 'Budgets', icon: 'target' },
-		{ href: '/categories', label: 'Categories', icon: 'tag' }
+		{ href: '/categories', label: 'Categories', icon: 'tag' },
+		{ href: '/shortcut', label: 'iPhone Shortcut', icon: 'phone' }
 	];
 
 	// On a phone the bottom bar has room for four destinations and the add
@@ -75,6 +77,18 @@
 			});
 	});
 
+	function registerCamera(el: HTMLInputElement) {
+		registerCameraInput(el);
+		return { destroy: () => registerCameraInput(null) };
+	}
+
+	function onPhoto(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ''; // so the same photo can be picked again
+		if (file) uploadPhoto(file);
+	}
+
 	async function handleLogout() {
 		sheet = null;
 		try {
@@ -107,6 +121,10 @@
 			<path d="M7 4 3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7" />
 		{:else if name === 'repeat'}
 			<path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3" />
+		{:else if name === 'camera'}
+			<path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" />
+		{:else if name === 'phone'}
+			<rect x="6" y="2" width="12" height="20" rx="2.5" /><path d="M11 18h2" />
 		{:else if name === 'tag'}
 			<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 7.5h.01" />
 		{/if}
@@ -126,10 +144,45 @@
 					<a href={item.href} class:active={isActive(item.href)}>{item.label}</a>
 				{/each}
 			</div>
+			<!-- A receipt is one tap from every page, same as typing one in. -->
+			<button
+				class="camera"
+				onclick={openCamera}
+				disabled={capture.stage !== null}
+				aria-label="Snap a receipt"
+			>
+				{@render glyph('camera')}<span>{capture.stage ? 'Reading…' : 'Receipt'}</span>
+			</button>
 			{#if showLogout}
 				<button class="logout" onclick={handleLogout}>Sign out</button>
 			{/if}
 		</nav>
+
+		<input
+			use:registerCamera
+			class="camera-input"
+			type="file"
+			accept="image/*"
+			capture="environment"
+			tabindex="-1"
+			aria-hidden="true"
+			onchange={onPhoto}
+		/>
+
+		{#if capture.stage || capture.notice}
+			<div class="capture-banner {capture.notice?.tone ?? 'busy'}" role="status" aria-live="polite">
+				{#if capture.stage}
+					<span class="spinner" aria-hidden="true"></span>
+					<span>{capture.stage === 'preparing' ? 'Preparing photo…' : 'Reading receipt…'}</span>
+				{:else if capture.notice}
+					<span class="banner-text">{capture.notice.text}</span>
+					{#if capture.notice.review}
+						<a href="/receipts" onclick={dismissNotice}>Review</a>
+					{/if}
+					<button class="banner-close" onclick={dismissNotice} aria-label="Dismiss">×</button>
+				{/if}
+			</div>
+		{/if}
 
 		<main>
 			{@render children()}
@@ -379,8 +432,109 @@
 		color: var(--accent);
 	}
 
-	.logout {
+	.camera {
 		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		min-height: 36px;
+		padding: 0 0.75rem;
+		border: 1px solid rgba(255, 255, 255, 0.25);
+		border-radius: 999px;
+		background: none;
+		font: inherit;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: white;
+		cursor: pointer;
+	}
+
+	.camera svg {
+		width: 18px;
+		height: 18px;
+	}
+
+	.camera:hover:not(:disabled) {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+
+	.camera:disabled {
+		opacity: 0.7;
+		cursor: progress;
+	}
+
+	.camera-input {
+		display: none;
+	}
+
+	.capture-banner {
+		position: fixed;
+		right: 1.5rem;
+		bottom: 1.5rem;
+		z-index: 160;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		max-width: 420px;
+		padding: 0.75rem 0.75rem 0.75rem 1rem;
+		border-radius: var(--radius-sm);
+		background: var(--ink);
+		color: white;
+		font-size: 0.875rem;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+		animation: rise 0.18s ease-out;
+	}
+
+	.capture-banner.ok {
+		border-left: 4px solid var(--pos);
+	}
+
+	.capture-banner.warn {
+		border-left: 4px solid var(--warn);
+	}
+
+	.capture-banner.error {
+		border-left: 4px solid var(--neg);
+	}
+
+	.banner-text {
+		flex: 1;
+	}
+
+	.capture-banner a {
+		color: var(--accent);
+		font-weight: 600;
+	}
+
+	.banner-close {
+		width: 32px;
+		height: 32px;
+		border: none;
+		background: none;
+		font-size: 1.25rem;
+		line-height: 1;
+		color: rgba(255, 255, 255, 0.7);
+		cursor: pointer;
+	}
+
+	.spinner {
+		width: 16px;
+		height: 16px;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-top-color: var(--accent);
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.logout {
+		margin-left: 1rem;
 		background: none;
 		border: none;
 		color: rgba(255, 255, 255, 0.6);
@@ -444,6 +598,20 @@
 
 		.nav-brand {
 			font-size: 1.125rem;
+		}
+
+		.camera {
+			min-height: 36px;
+			background: var(--accent);
+			border-color: var(--accent);
+			color: var(--ink);
+		}
+
+		.capture-banner {
+			left: max(0.75rem, env(safe-area-inset-left));
+			right: max(0.75rem, env(safe-area-inset-right));
+			bottom: calc(64px + env(safe-area-inset-bottom) + 0.75rem);
+			max-width: none;
 		}
 
 		main {
@@ -605,8 +773,13 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.sheet {
+		.sheet,
+		.capture-banner {
 			animation: none;
+		}
+
+		.spinner {
+			animation-duration: 2s;
 		}
 	}
 </style>

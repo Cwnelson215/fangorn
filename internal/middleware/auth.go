@@ -23,13 +23,15 @@ func Auth(appPassword string) func(http.Handler) http.Handler {
 			// and icons are fetched without cookies when a phone adds the app to its
 			// home screen, so redirecting them to /login breaks the install; a
 			// service worker script that redirects fails to register at all. Like
-			// /_app/, these are the public app code, not data.
+			// /_app/, these are the public app code, not data. /api/shortcut/ is
+			// called by an iPhone Shortcut, which has no cookie; its handler
+			// requires a device key on every request instead.
 			path := r.URL.Path
 			if path == "/health" || path == "/ready" || path == "/api/login" ||
 				path == "/api/logout" || path == "/api/auth/status" ||
 				path == "/login" || strings.HasPrefix(path, "/_app/") ||
 				path == "/manifest.webmanifest" || strings.HasPrefix(path, "/icons/") ||
-				path == "/service-worker.js" {
+				path == "/service-worker.js" || strings.HasPrefix(path, "/api/shortcut/") {
 				next.ServeHTTP(w, r)
 				return
 			}

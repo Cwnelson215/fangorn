@@ -489,3 +489,18 @@ export interface GoalInput {
 	account_id: number | null;
 	notes: string | null;
 }
+
+/** A phone's key for the iPhone Shortcut. The key itself is only returned once. */
+export interface DeviceKey {
+	id: number;
+	name: string;
+	account_id: number;
+	account_name: string;
+	created_at: string;
+	last_used_at: string | null;
+}
+
+export interface DeviceKeyCreated {
+	key: DeviceKey;
+	token: string;
+}

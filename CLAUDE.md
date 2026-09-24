@@ -236,6 +236,7 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 `007_investments` adds securities, security_prices, trades, and the `trade` transaction kind.
 `008_refunds` adds the `refund` kind (positive, expense category required).
 `009_receipts` adds the `receipts` table and the `receipt` transaction source.
+`010_device_keys` adds `device_keys`, the per-phone keys the iPhone Shortcut uses.
 
 ## Conventions
 
@@ -258,8 +259,12 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 - **Logging is one screen.** `/add` is where the home-screen icon opens (`start_url`) and where the
   tab bar's **+** goes: amount, category chips sorted by recent use, Save, Undo. It fills in the
   description from the category, remembers the last account per device (`lib/remember.ts`), scans
-  receipts in place, and takes a prefill from `?amount=&kind=&category=&note=`. `/transfers?new`
+  receipts, and takes a prefill from `?amount=&kind=&category=&note=`. `/transfers?new`
   opens the transfer form. Android long-press shortcuts are in the manifest.
+- **A receipt is one tap from anywhere.** The top bar's camera button (every page, phone and
+  desktop) and `/add`'s "Snap a receipt" both call `openCamera()` from `lib/capture.svelte.ts`,
+  which drives the layout's single hidden file input and its result banner. It has to be called
+  from the tap's own handler — browsers only open a file picker on a direct user gesture.
 - **Service worker** (`src/service-worker.ts`) caches the build output and icons so the installed
   app launches without the network. Page loads are network-first with the cached page as an
   offline fallback; `/api/` is never cached. The manifest, `/icons/` and `/service-worker.js` are
@@ -278,6 +283,16 @@ and `GET /api/auth/status` — called on every page — re-issues it, so a phone
 out. Note what it is not: the cookie value is a constant, identical for every login forever, with no
 server-side revocation; a lost phone stays signed in until `APP_PASSWORD` changes. If
 `APP_PASSWORD` is unset, auth is disabled entirely.
+
+**The iPhone Shortcut uses device keys instead** (`/shortcut` page, `ledger/devicekeys.go`,
+`handlers/shortcut.go`). A Shortcut can't carry the cookie, so each phone gets its own `fgn_…` key,
+sent as `Authorization: Bearer`. Only its SHA-256 is stored; it's shown once and revoked by
+deleting the row. A key reaches exactly three endpoints — `GET /api/shortcut/categories` (names, most
+used first), `POST /api/shortcut/log` (`amount`, `category` by name, optional `note`/`refund`),
+which logs to the key's own account dated the household's today, and `POST /api/shortcut/receipt`
+(the raw JPEG as the body), which goes through the same `ReceiptHandler.ingest` as an app upload. The cookie middleware exempts
+`/api/shortcut/`, and the handler requires a key even when `APP_PASSWORD` is unset. The Shortcut
+endpoints answer in plain text, errors included, because iOS shows the body as a notification.
 
 Real accounts — email/password users, email invites, and passkey-or-PIN device unlock — are planned
 but not built. The schema is already shaped for it.

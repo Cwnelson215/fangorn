@@ -347,6 +347,18 @@ type Security struct {
 	FetchError *string `json:"fetch_error"`
 }
 
+// DeviceKey lets one phone's Shortcut log entries without the session cookie.
+// The key itself is only ever returned once, from CreateDeviceKey.
+type DeviceKey struct {
+	ID          int        `json:"id"`
+	HouseholdID int        `json:"-"`
+	Name        string     `json:"name"`
+	AccountID   int        `json:"account_id"`
+	AccountName string     `json:"account_name"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+}
+
 type NetWorthPoint struct {
 	Date             string  `json:"date"`
 	TotalAssets      float64 `json:"total_assets"`

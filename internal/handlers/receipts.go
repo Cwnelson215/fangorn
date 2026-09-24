@@ -73,26 +73,48 @@ func (h *ReceiptHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	mediaType := http.DetectContentType(img)
-	if !acceptedImageTypes[mediaType] {
+	res, err := h.ingest(r, h.householdID, img, start)
+	if errors.Is(err, errNotAnImage) {
 		writeError(w, http.StatusBadRequest, "That file isn't a JPEG, PNG or WebP image")
 		return
 	}
-	sum := sha256.Sum256(img)
-
-	rec, created, err := h.svc.CreateReceipt(r.Context(), h.householdID, ledger.NewReceipt{
-		Image: img, MediaType: mediaType, SHA256: sum[:],
-	})
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	status := http.StatusCreated
+	switch {
+	case res.Duplicate:
+		status = http.StatusOK
+	case res.Receipt.Status == models.ReceiptPending || res.Receipt.Status == models.ReceiptProcessing:
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, res)
+}
+
+var errNotAnImage = errors.New("not a JPEG, PNG or WebP image")
+
+// ingest stores a photo for a household and gives it until inlineBudget after
+// start to be read. The app's upload and the iPhone Shortcut both come through
+// here, so a receipt behaves the same whichever way it arrived.
+func (h *ReceiptHandler) ingest(r *http.Request, householdID int, img []byte, start time.Time) (uploadResponse, error) {
+	mediaType := http.DetectContentType(img)
+	if !acceptedImageTypes[mediaType] {
+		return uploadResponse{}, errNotAnImage
+	}
+	sum := sha256.Sum256(img)
+
+	rec, created, err := h.svc.CreateReceipt(r.Context(), householdID, ledger.NewReceipt{
+		Image: img, MediaType: mediaType, SHA256: sum[:],
+	})
+	if err != nil {
+		return uploadResponse{}, err
+	}
 	if !created {
-		writeJSON(w, http.StatusOK, uploadResponse{Receipt: rec, Duplicate: true, Enabled: h.proc.Enabled()})
-		return
+		return uploadResponse{Receipt: rec, Duplicate: true, Enabled: h.proc.Enabled()}, nil
 	}
 
-	if done := h.proc.Start(h.householdID, rec.ID); done != nil {
+	if done := h.proc.Start(householdID, rec.ID); done != nil {
 		wait := time.NewTimer(time.Until(start.Add(inlineBudget)))
 		select {
 		case <-done:
@@ -102,16 +124,11 @@ func (h *ReceiptHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		wait.Stop()
 	}
 
-	rec, err = h.svc.GetReceipt(r.Context(), h.householdID, rec.ID)
+	rec, err = h.svc.GetReceipt(r.Context(), householdID, rec.ID)
 	if err != nil {
-		fail(w, err)
-		return
+		return uploadResponse{}, err
 	}
-	status := http.StatusCreated
-	if rec.Status == models.ReceiptPending || rec.Status == models.ReceiptProcessing {
-		status = http.StatusAccepted
-	}
-	writeJSON(w, status, uploadResponse{Receipt: rec, Enabled: h.proc.Enabled()})
+	return uploadResponse{Receipt: rec, Enabled: h.proc.Enabled()}, nil
 }
 
 // readReceiptImage reads the single "image" part of a multipart upload into
