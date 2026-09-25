@@ -40,6 +40,10 @@
 	let amountText = $state('');
 	let categoryId = $state(0);
 	let accountId = $state(0);
+	// Set while the account was picked by the category ("gas goes on the Visa")
+	// rather than by hand: the account to go back to if the category is unpicked.
+	// A routed account isn't remembered as this phone's usual one.
+	let routedFrom = $state<number | null>(null);
 	let date = $state(today());
 	let note = $state('');
 
@@ -109,7 +113,7 @@
 		const name = q.get('category')?.trim().toLowerCase();
 		if (name) {
 			const match = categories.find((c) => c.name.toLowerCase() === name && c.kind === side);
-			if (match) categoryId = match.id;
+			if (match) chooseCategory(match.id);
 		}
 		if (q.get('note')) note = q.get('note') ?? '';
 		if ([...q.keys()].length > 0) goto('/add', { replaceState: true, noScroll: true, keepFocus: true });
@@ -118,8 +122,26 @@
 	function setKind(next: Kind) {
 		kind = next;
 		// Switching between money in and out strands a category from the other list.
-		if (!choices.some((c) => c.id === categoryId)) categoryId = 0;
+		if (!choices.some((c) => c.id === categoryId)) chooseCategory(0);
 	}
+
+	// Picks a category (0 for none) and follows its account, if it names one
+	// that is still open.
+	function chooseCategory(id: number) {
+		categoryId = id;
+		const target = categories.find((c) => c.id === id)?.default_account_id;
+		if (target && accounts.some((a) => a.id === target)) {
+			if (routedFrom === null) routedFrom = accountId;
+			accountId = target;
+		} else if (routedFrom !== null) {
+			accountId = routedFrom;
+			routedFrom = null;
+		}
+	}
+
+	let routedAccount = $derived(
+		routedFrom !== null ? accounts.find((a) => a.id === accountId) : undefined
+	);
 
 	async function save(event: Event) {
 		event.preventDefault();
@@ -139,10 +161,11 @@
 				category_id: categoryId || null,
 				notes: null
 			});
-			rememberId('transaction.account', accountId);
-			// Ready for the next one; account, kind and date carry over.
+			if (routedFrom === null) rememberId('transaction.account', accountId);
+			// Ready for the next one; account, kind and date carry over — except
+			// an account the category chose, which goes back.
 			amountText = '';
-			categoryId = 0;
+			chooseCategory(0);
 			note = '';
 			amountInput?.focus();
 		} catch (e) {
@@ -160,7 +183,7 @@
 			// Put it back in the form so a typo can be fixed and saved again.
 			kind = saved.kind as Kind;
 			amountText = String(Math.abs(saved.amount));
-			categoryId = saved.category_id ?? 0;
+			chooseCategory(saved.category_id ?? 0);
 			note = saved.description === category?.name ? '' : saved.description;
 			accountId = saved.account_id;
 			date = saved.date;
@@ -247,7 +270,7 @@
 						class="chip"
 						class:selected={categoryId === c.id}
 						style="--chip: {c.color ?? 'var(--accent)'}"
-						onclick={() => (categoryId = categoryId === c.id ? 0 : c.id)}
+						onclick={() => chooseCategory(categoryId === c.id ? 0 : c.id)}
 					>
 						<span class="dot"></span>{c.name}
 					</button>
@@ -270,7 +293,7 @@
 			<div class="meta">
 				<label class="pill">
 					<span class="pill-label">From</span>
-					<select bind:value={accountId} aria-label="Account">
+					<select bind:value={accountId} aria-label="Account" onchange={() => (routedFrom = null)}>
 						<AccountOptions {accounts} />
 					</select>
 				</label>
@@ -279,6 +302,10 @@
 					<input type="date" bind:value={date} aria-label="Date" />
 				</label>
 			</div>
+
+			{#if routedAccount && category}
+				<p class="routed">{category.name} always goes on {routedAccount.name}.</p>
+			{/if}
 
 			{#if error}
 				<p class="error-text">{error}</p>
@@ -297,6 +324,12 @@
 </div>
 
 <style>
+	.routed {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--muted);
+	}
+
 	.quick {
 		max-width: 480px;
 		margin: 0 auto;

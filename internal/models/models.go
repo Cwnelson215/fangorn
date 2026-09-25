@@ -187,7 +187,11 @@ type Category struct {
 	Kind     string  `json:"kind"`
 	Color    *string `json:"color"`
 	ParentID *int    `json:"parent_id"`
-	Archived bool    `json:"archived"`
+	// DefaultAccountID is the account this category's spending goes on. A
+	// receipt filed under it posts there whatever card it shows, and /add
+	// switches to it; the iPhone Shortcut ignores it.
+	DefaultAccountID *int `json:"default_account_id"`
+	Archived         bool `json:"archived"`
 }
 
 type Transaction struct {
@@ -268,6 +272,9 @@ type Receipt struct {
 	TransactionID *int    `json:"transaction_id"`
 	ExtractError  *string `json:"extract_error"`
 	CreatedAt     string  `json:"created_at"`
+	// ViaShortcut: uploaded by the iPhone Shortcut, so category accounts don't
+	// apply to it.
+	ViaShortcut bool `json:"via_shortcut"`
 }
 
 // Transfer is the paired view of two transactions sharing a transfer_group_id.

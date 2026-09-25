@@ -73,7 +73,7 @@ func (h *ReceiptHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	res, err := h.ingest(r, h.householdID, img, start)
+	res, err := h.ingest(r, h.householdID, img, start, false)
 	if errors.Is(err, errNotAnImage) {
 		writeError(w, http.StatusBadRequest, "That file isn't a JPEG, PNG or WebP image")
 		return
@@ -96,8 +96,9 @@ var errNotAnImage = errors.New("not a JPEG, PNG or WebP image")
 
 // ingest stores a photo for a household and gives it until inlineBudget after
 // start to be read. The app's upload and the iPhone Shortcut both come through
-// here, so a receipt behaves the same whichever way it arrived.
-func (h *ReceiptHandler) ingest(r *http.Request, householdID int, img []byte, start time.Time) (uploadResponse, error) {
+// here, so a receipt behaves the same whichever way it arrived — except that
+// viaShortcut uploads ignore category accounts and match by card or cash.
+func (h *ReceiptHandler) ingest(r *http.Request, householdID int, img []byte, start time.Time, viaShortcut bool) (uploadResponse, error) {
 	mediaType := http.DetectContentType(img)
 	if !acceptedImageTypes[mediaType] {
 		return uploadResponse{}, errNotAnImage
@@ -105,7 +106,7 @@ func (h *ReceiptHandler) ingest(r *http.Request, householdID int, img []byte, st
 	sum := sha256.Sum256(img)
 
 	rec, created, err := h.svc.CreateReceipt(r.Context(), householdID, ledger.NewReceipt{
-		Image: img, MediaType: mediaType, SHA256: sum[:],
+		Image: img, MediaType: mediaType, SHA256: sum[:], ViaShortcut: viaShortcut,
 	})
 	if err != nil {
 		return uploadResponse{}, err

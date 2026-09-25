@@ -51,6 +51,7 @@ func Decide(x vision.Extraction, rc ledger.ReceiptContext, today time.Time) Deci
 	var d Decision
 	f := &d.Fields
 	hold := func(reason string) { d.Reasons = append(d.Reasons, reason) }
+	var categoryAccount *int
 
 	f.Merchant = cleanPtr(x.Merchant, maxMerchant)
 	f.CategorySuggested = cleanPtr(x.Category, maxMerchant)
@@ -141,6 +142,7 @@ func Decide(x vision.Extraction, rc ledger.ReceiptContext, today time.Time) Deci
 			if strings.ToLower(strings.TrimSpace(c.Name)) == want {
 				id := c.ID
 				d.CategoryID = &id
+				categoryAccount = c.AccountID
 				break
 			}
 		}
@@ -149,7 +151,14 @@ func Decide(x vision.Extraction, rc ledger.ReceiptContext, today time.Time) Deci
 		hold(models.ReasonNoCategoryMatch)
 	}
 
-	d.AccountID = matchAccount(tender, f.CardLast4, rc.Accounts)
+	// A category that names its account wins over the card on the receipt:
+	// the household has said where that spending goes.
+	if categoryAccount != nil {
+		id := *categoryAccount
+		d.AccountID = &id
+	} else {
+		d.AccountID = matchAccount(tender, f.CardLast4, rc.Accounts)
+	}
 	if d.AccountID == nil {
 		hold(models.ReasonAccountUnresolved)
 	}

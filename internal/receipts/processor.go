@@ -91,6 +91,13 @@ func (p *Processor) Process(ctx context.Context, householdID, receiptID int) err
 	if err != nil {
 		return p.giveBack(ctx, householdID, claim, err)
 	}
+	if claim.ViaShortcut {
+		// The Shortcut's receipts go where the card or cash says, not where the
+		// category would route them.
+		for i := range rc.Categories {
+			rc.Categories[i].AccountID = nil
+		}
+	}
 	today := household.Today()
 	names := make([]string, len(rc.Categories))
 	for i, c := range rc.Categories {

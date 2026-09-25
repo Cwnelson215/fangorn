@@ -3,11 +3,13 @@
 	import {
 		createCategory,
 		deleteCategory,
+		getAccounts,
 		getCategories,
 		unarchiveCategory,
 		updateCategory
 	} from '$lib/api';
-	import type { Category, CategoryKind } from '$lib/types';
+	import type { Account, Category, CategoryKind } from '$lib/types';
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -15,6 +17,7 @@
 	const DEFAULT_COLOR = '#4ecca3';
 
 	let categories: Category[] = $state([]);
+	let accounts: Account[] = $state([]);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let notice = $state<string | null>(null);
@@ -30,6 +33,7 @@
 	let name = $state('');
 	let kind = $state<CategoryKind>('expense');
 	let color = $state(DEFAULT_COLOR);
+	let accountId = $state(0);
 
 	onMount(load);
 
@@ -37,7 +41,7 @@
 		loading = true;
 		loadError = null;
 		try {
-			categories = await getCategories(showArchived);
+			[categories, accounts] = await Promise.all([getCategories(showArchived), getAccounts()]);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Could not load categories';
 		} finally {
@@ -55,6 +59,7 @@
 		name = '';
 		kind = initialKind;
 		color = DEFAULT_COLOR;
+		accountId = 0;
 		formError = null;
 		modalOpen = true;
 	}
@@ -64,6 +69,7 @@
 		name = category.name;
 		kind = category.kind;
 		color = category.color ?? DEFAULT_COLOR;
+		accountId = category.default_account_id ?? 0;
 		formError = null;
 		modalOpen = true;
 	}
@@ -77,7 +83,13 @@
 		notice = null;
 		// parent_id has no editor yet; carry the existing value through an edit
 		// rather than silently clearing it.
-		const input = { name: name.trim(), kind, color, parent_id: editing?.parent_id ?? null };
+		const input = {
+			name: name.trim(),
+			kind,
+			color,
+			parent_id: editing?.parent_id ?? null,
+			default_account_id: accountId || null
+		};
 		try {
 			if (editing) {
 				await updateCategory(editing.id, input);
@@ -172,6 +184,10 @@
 										{#if category.archived}
 											<span class="chip">Archived</span>
 										{/if}
+										{#if category.default_account_id}
+											{@const routed = accounts.find((a) => a.id === category.default_account_id)}
+											{#if routed}<span class="chip">→ {routed.name}</span>{/if}
+										{/if}
 									</span>
 									<span class="item-actions">
 										{#if category.archived}
@@ -207,6 +223,17 @@
 				<input id="color" type="color" bind:value={color} disabled={saving} />
 			</Field>
 		</div>
+
+		<Field
+			label="Always goes on"
+			id="defaultAccount"
+			hint="Receipts filed here post to this account whatever card they show, and picking it on the log screen switches to it. The iPhone Shortcut ignores this."
+		>
+			<select id="defaultAccount" bind:value={accountId} disabled={saving}>
+				<option value={0}>Whichever account it was paid from</option>
+				<AccountOptions {accounts} />
+			</select>
+		</Field>
 
 		{#if formError}
 			<p class="error-text">{formError}</p>

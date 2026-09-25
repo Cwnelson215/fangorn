@@ -3,15 +3,31 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/cwnelson/fangorn/internal/models"
 )
 
+// categoryCols is what every category read returns, in scanCategory's order.
+const categoryCols = `id, name, kind, color, parent_id, default_account_id, archived_at IS NOT NULL`
+
+func scanCategory(row interface{ Scan(...any) error }) (models.Category, error) {
+	var c models.Category
+	var color sql.NullString
+	var parent, account sql.NullInt64
+	if err := row.Scan(&c.ID, &c.Name, &c.Kind, &color, &parent, &account, &c.Archived); err != nil {
+		return c, err
+	}
+	c.Color = strPtr(color)
+	c.ParentID = intPtr(parent)
+	c.DefaultAccountID = intPtr(account)
+	return c, nil
+}
+
 func (s *Service) ListCategories(ctx context.Context, householdID int, includeArchived bool) ([]models.Category, error) {
-	q := `SELECT id, name, kind, color, parent_id, archived_at IS NOT NULL
-	      FROM categories WHERE household_id = $1`
+	q := `SELECT ` + categoryCols + ` FROM categories WHERE household_id = $1`
 	if !includeArchived {
 		q += ` AND archived_at IS NULL`
 	}
@@ -25,14 +41,10 @@ func (s *Service) ListCategories(ctx context.Context, householdID int, includeAr
 
 	out := []models.Category{}
 	for rows.Next() {
-		var c models.Category
-		var color sql.NullString
-		var parent sql.NullInt64
-		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &color, &parent, &c.Archived); err != nil {
+		c, err := scanCategory(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning category: %w", err)
 		}
-		c.Color = strPtr(color)
-		c.ParentID = intPtr(parent)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -43,6 +55,8 @@ type CategoryInput struct {
 	Kind     string  `json:"kind"`
 	Color    *string `json:"color"`
 	ParentID *int    `json:"parent_id"`
+	// DefaultAccountID routes the category's spending to one account; nil for none.
+	DefaultAccountID *int `json:"default_account_id"`
 }
 
 func (in *CategoryInput) normalize() error {
@@ -56,28 +70,48 @@ func (in *CategoryInput) normalize() error {
 	return nil
 }
 
+// checkDefaultAccount keeps a category from routing spending to another
+// household's account, or to one that can't take new entries.
+func (s *Service) checkDefaultAccount(ctx context.Context, householdID int, in CategoryInput) error {
+	if in.DefaultAccountID == nil {
+		return nil
+	}
+	var archived bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT archived_at IS NOT NULL FROM accounts WHERE id = $1 AND household_id = $2`,
+		*in.DefaultAccountID, householdID).Scan(&archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return invalid("account %d does not exist", *in.DefaultAccountID)
+	}
+	if err != nil {
+		return fmt.Errorf("checking category account: %w", err)
+	}
+	if archived {
+		return invalid("that account is archived")
+	}
+	return nil
+}
+
 func (s *Service) CreateCategory(ctx context.Context, householdID int, in CategoryInput) (models.Category, error) {
 	if err := in.normalize(); err != nil {
 		return models.Category{}, err
 	}
+	if err := s.checkDefaultAccount(ctx, householdID, in); err != nil {
+		return models.Category{}, err
+	}
 
-	var c models.Category
-	var color sql.NullString
-	var parent sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO categories (household_id, name, kind, color, parent_id)
-		 VALUES ($1,$2,$3,$4,$5)
-		 RETURNING id, name, kind, color, parent_id, false`,
-		householdID, in.Name, in.Kind, nullStr(in.Color), nullInt(in.ParentID),
-	).Scan(&c.ID, &c.Name, &c.Kind, &color, &parent, &c.Archived)
+	c, err := scanCategory(s.db.QueryRowContext(ctx,
+		`INSERT INTO categories (household_id, name, kind, color, parent_id, default_account_id)
+		 VALUES ($1,$2,$3,$4,$5,$6)
+		 RETURNING `+categoryCols,
+		householdID, in.Name, in.Kind, nullStr(in.Color), nullInt(in.ParentID), nullInt(in.DefaultAccountID),
+	))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return c, invalid("a category named %q already exists", in.Name)
 		}
 		return c, fmt.Errorf("creating category: %w", err)
 	}
-	c.Color = strPtr(color)
-	c.ParentID = intPtr(parent)
 	return c, nil
 }
 
@@ -85,16 +119,16 @@ func (s *Service) UpdateCategory(ctx context.Context, householdID, id int, in Ca
 	if err := in.normalize(); err != nil {
 		return models.Category{}, err
 	}
+	if err := s.checkDefaultAccount(ctx, householdID, in); err != nil {
+		return models.Category{}, err
+	}
 
-	var c models.Category
-	var color sql.NullString
-	var parent sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
-		`UPDATE categories SET name = $1, kind = $2, color = $3, parent_id = $4
-		 WHERE household_id = $5 AND id = $6
-		 RETURNING id, name, kind, color, parent_id, archived_at IS NOT NULL`,
-		in.Name, in.Kind, nullStr(in.Color), nullInt(in.ParentID), householdID, id,
-	).Scan(&c.ID, &c.Name, &c.Kind, &color, &parent, &c.Archived)
+	c, err := scanCategory(s.db.QueryRowContext(ctx,
+		`UPDATE categories SET name = $1, kind = $2, color = $3, parent_id = $4, default_account_id = $5
+		 WHERE household_id = $6 AND id = $7
+		 RETURNING `+categoryCols,
+		in.Name, in.Kind, nullStr(in.Color), nullInt(in.ParentID), nullInt(in.DefaultAccountID), householdID, id,
+	))
 	if err == sql.ErrNoRows {
 		return c, ErrNotFound
 	}
@@ -104,8 +138,6 @@ func (s *Service) UpdateCategory(ctx context.Context, householdID, id int, in Ca
 		}
 		return c, fmt.Errorf("updating category: %w", err)
 	}
-	c.Color = strPtr(color)
-	c.ParentID = intPtr(parent)
 	return c, nil
 }
 
@@ -141,22 +173,17 @@ func (s *Service) DeleteCategory(ctx context.Context, householdID, id int) error
 // it an archived name is unusable for good: it is hidden from the pickers, yet
 // the unique index still rejects creating a new category with that name.
 func (s *Service) UnarchiveCategory(ctx context.Context, householdID, id int) (models.Category, error) {
-	var c models.Category
-	var color sql.NullString
-	var parent sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	c, err := scanCategory(s.db.QueryRowContext(ctx,
 		`UPDATE categories SET archived_at = NULL
 		 WHERE household_id = $1 AND id = $2
-		 RETURNING id, name, kind, color, parent_id, false`,
+		 RETURNING `+categoryCols,
 		householdID, id,
-	).Scan(&c.ID, &c.Name, &c.Kind, &color, &parent, &c.Archived)
+	))
 	if err == sql.ErrNoRows {
 		return c, ErrNotFound
 	}
 	if err != nil {
 		return c, fmt.Errorf("restoring category: %w", err)
 	}
-	c.Color = strPtr(color)
-	c.ParentID = intPtr(parent)
 	return c, nil
 }

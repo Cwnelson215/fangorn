@@ -32,7 +32,7 @@ const receiptSelect = `
 	SELECT id, status, review_reasons, media_type, byte_size,
 	       merchant, purchased_on, currency, txn_type, subtotal, tax, tip, total,
 	       tender, card_last4, category_suggested, line_items, model,
-	       account_id, category_id, transaction_id, extract_error, created_at
+	       account_id, category_id, transaction_id, extract_error, created_at, via_shortcut
 	FROM receipts`
 
 func scanReceipt(row interface{ Scan(...any) error }) (models.Receipt, error) {
@@ -48,7 +48,7 @@ func scanReceipt(row interface{ Scan(...any) error }) (models.Receipt, error) {
 		&r.ID, &r.Status, pq.Array(&r.ReviewReasons), &r.MediaType, &r.ByteSize,
 		&merchant, &purchasedOn, &currency, &txnType, &subtotal, &tax, &tip, &total,
 		&tender, &last4, &suggested, &lineItems, &model,
-		&accountID, &categoryID, &txnID, &extractErr, &createdAt,
+		&accountID, &categoryID, &txnID, &extractErr, &createdAt, &r.ViaShortcut,
 	)
 	if err != nil {
 		return r, err
@@ -84,6 +84,9 @@ type NewReceipt struct {
 	Image     []byte
 	MediaType string
 	SHA256    []byte
+	// ViaShortcut marks an upload from the iPhone Shortcut, which category
+	// accounts don't apply to.
+	ViaShortcut bool
 }
 
 // CreateReceipt stores a photo as a pending receipt. The same photo uploaded
@@ -93,11 +96,11 @@ type NewReceipt struct {
 func (s *Service) CreateReceipt(ctx context.Context, householdID int, in NewReceipt) (r models.Receipt, created bool, err error) {
 	var id int
 	err = s.db.QueryRowContext(ctx,
-		`INSERT INTO receipts (household_id, image, media_type, byte_size, image_sha256)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO receipts (household_id, image, media_type, byte_size, image_sha256, via_shortcut)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (household_id, image_sha256) DO NOTHING
 		 RETURNING id`,
-		householdID, in.Image, in.MediaType, len(in.Image), in.SHA256,
+		householdID, in.Image, in.MediaType, len(in.Image), in.SHA256, in.ViaShortcut,
 	).Scan(&id)
 	switch {
 	case err == nil:
@@ -181,6 +184,9 @@ type Claim struct {
 	Failures  int
 	Image     []byte
 	MediaType string
+	// ViaShortcut: uploaded by the iPhone Shortcut, so matched without
+	// category accounts.
+	ViaShortcut bool
 }
 
 // ClaimReceipt takes a receipt for processing, if it is claimable: pending and
@@ -198,9 +204,9 @@ func (s *Service) ClaimReceipt(ctx context.Context, householdID, id int, lease t
 		   (status = 'pending' AND (retry_after IS NULL OR retry_after <= NOW()))
 		   OR (status = 'processing' AND claimed_at < NOW() - make_interval(secs => $3))
 		 )
-		 RETURNING id, claim_seq, failures, image, media_type`,
+		 RETURNING id, claim_seq, failures, image, media_type, via_shortcut`,
 		householdID, id, lease.Seconds(),
-	).Scan(&c.ReceiptID, &c.Seq, &c.Failures, &c.Image, &c.MediaType)
+	).Scan(&c.ReceiptID, &c.Seq, &c.Failures, &c.Image, &c.MediaType, &c.ViaShortcut)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, false, nil
 	}
@@ -499,6 +505,8 @@ type ReceiptAccount struct {
 type ReceiptCategory struct {
 	ID   int
 	Name string
+	// AccountID is the open account this category's spending goes on, if any.
+	AccountID *int
 }
 
 // ReceiptContext is the household state a receipt is resolved against: its
@@ -530,8 +538,10 @@ func (s *Service) ReceiptContext(ctx context.Context, householdID int) (ReceiptC
 	}
 
 	rows, err = s.db.QueryContext(ctx,
-		`SELECT id, name FROM categories
-		 WHERE household_id = $1 AND kind = 'expense' AND archived_at IS NULL ORDER BY name`,
+		`SELECT c.id, c.name, a.id FROM categories c
+		 LEFT JOIN accounts a ON a.id = c.default_account_id AND a.household_id = c.household_id
+		   AND a.archived_at IS NULL
+		 WHERE c.household_id = $1 AND c.kind = 'expense' AND c.archived_at IS NULL ORDER BY c.name`,
 		householdID)
 	if err != nil {
 		return rc, fmt.Errorf("loading categories for receipt: %w", err)
@@ -539,9 +549,11 @@ func (s *Service) ReceiptContext(ctx context.Context, householdID int) (ReceiptC
 	defer rows.Close()
 	for rows.Next() {
 		var c ReceiptCategory
-		if err := rows.Scan(&c.ID, &c.Name); err != nil {
+		var account sql.NullInt64
+		if err := rows.Scan(&c.ID, &c.Name, &account); err != nil {
 			return rc, err
 		}
+		c.AccountID = intPtr(account)
 		rc.Categories = append(rc.Categories, c)
 	}
 	return rc, rows.Err()

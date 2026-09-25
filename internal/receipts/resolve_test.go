@@ -169,3 +169,30 @@ func TestDecideNoMerchant(t *testing.T) {
 		t.Errorf("want description Receipt and no merchant, got %+v", d.Post)
 	}
 }
+
+// A category that names its account wins over the card on the receipt, and
+// fills in an account the receipt couldn't resolve.
+func TestDecideCategoryAccountWins(t *testing.T) {
+	rc := household
+	visa := 2
+	rc.Categories = []ledger.ReceiptCategory{{ID: 12, Name: "Gas", AccountID: &visa}}
+
+	x := good()
+	x.Category = str("gas")
+	x.CardLast4 = str("1111") // the checking account's debit card
+	d := Decide(x, rc, today)
+	if d.Post == nil || d.Post.AccountID != visa {
+		t.Fatalf("want a post to the Visa, got %+v reasons %v", d.Post, d.Reasons)
+	}
+
+	x.CardLast4 = str("9999")
+	if d := Decide(x, rc, today); d.Post == nil || d.Post.AccountID != visa {
+		t.Errorf("unknown card: want a post to the Visa, got %+v reasons %v", d.Post, d.Reasons)
+	}
+
+	// Held for another reason, the review form still starts on the Visa.
+	x.PurchaseDate = nil
+	if d := Decide(x, rc, today); d.AccountID == nil || *d.AccountID != visa {
+		t.Errorf("held receipt account = %v, want the Visa", d.AccountID)
+	}
+}

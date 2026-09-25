@@ -285,7 +285,11 @@ transaction deletes the photo, and `DELETE /api/receipts/{id}` refuses a posted 
 date within 60 days and not in the future, USD, a purchase not a return, subtotal+tax+tip matching
 the total, the suggested category matching one of the household's non-archived expense categories
 exactly (case-insensitive), and exactly one account — card last-4 against `accounts.mask`, or
-tender cash with exactly one `cash` account. Then the processor holds it anyway if an expense of
+tender cash with exactly one `cash` account. **A category that names an account
+(`categories.default_account_id`, "Always goes on" on the Categories page) wins over both**: gas
+goes on the Visa whatever card the receipt shows. Receipts uploaded by the iPhone Shortcut
+(`receipts.via_shortcut`) skip that and match the ordinary way — the processor blanks the category
+accounts before `Decide`, and the review form doesn't follow them either. Then the processor holds it anyway if an expense of
 the same amount is already on that account within a day (`possible_duplicate`: the ledger is kept
 by hand, so a receipt is often photographed after being typed in). Reason codes are in
 `models.Reason*`; the frontend words them in `src/lib/receipts.ts`.
@@ -309,6 +313,7 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 `012_high_yield_savings` adds the `high_yield_savings` type, `savings_rates`, `interest_postings` and
 the `interest` transaction source.
 `013_cash_fund_yields` adds `accounts.cash_fund` / `cash_fund_since` and `security_yields`.
+`014_category_accounts` adds `categories.default_account_id` and `receipts.via_shortcut`.
 
 ## Conventions
 
@@ -337,7 +342,9 @@ the `interest` transaction source.
   `<select>` renders `<AccountOptions {accounts} />` and follows the same choice with `<optgroup>`s.
 - **Logging is one screen.** `/add` is where the home-screen icon opens (`start_url`) and where the
   tab bar's **+** goes: amount, category chips sorted by recent use, Save, Undo. It fills in the
-  description from the category, remembers the last account per device (`lib/remember.ts`), scans
+  description from the category, switches to the category's account when it names one (and back
+  when it's unpicked; a routed account isn't remembered), remembers the last account per device
+  (`lib/remember.ts`), scans
   receipts, and takes a prefill from `?amount=&kind=&category=&note=`. `/transfers?new`
   opens the transfer form. Android long-press shortcuts are in the manifest.
 - **A receipt is one tap from anywhere.** The top bar's camera button (every page, phone and

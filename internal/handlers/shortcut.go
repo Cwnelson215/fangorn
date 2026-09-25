@@ -216,7 +216,7 @@ func (h *ShortcutHandler) Receipt(w http.ResponseWriter, r *http.Request, key mo
 		return
 	}
 
-	res, err := h.receipts.ingest(r, key.HouseholdID, img, start)
+	res, err := h.receipts.ingest(r, key.HouseholdID, img, start, true)
 	if errors.Is(err, errNotAnImage) {
 		writeText(w, http.StatusBadRequest,
 			"That isn't a JPEG. Add a Convert Image step (to JPEG) before sending it.")

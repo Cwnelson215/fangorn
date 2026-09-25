@@ -53,6 +53,14 @@
 		formError = null;
 	});
 
+	// A category that names its account takes the receipt there, as it would
+	// have if the receipt had posted by itself — except one from the Shortcut.
+	function followCategory() {
+		if (receipt?.via_shortcut) return;
+		const target = categories.find((c) => c.id === categoryId)?.default_account_id;
+		if (target && accounts.some((a) => a.id === target)) accountId = target;
+	}
+
 	async function act(fn: () => Promise<unknown>, failure: string) {
 		busy = true;
 		formError = null;
@@ -162,7 +170,13 @@
 						</select>
 					</Field>
 					<Field label={kind === 'refund' ? 'Refund of' : 'Category'} id="rCategory">
-						<select id="rCategory" bind:value={categoryId} disabled={busy} required={kind === 'refund'}>
+						<select
+							id="rCategory"
+							bind:value={categoryId}
+							onchange={followCategory}
+							disabled={busy}
+							required={kind === 'refund'}
+						>
 							<option value={0}>{kind === 'refund' ? 'Pick a category' : 'Uncategorized'}</option>
 							{#each expenseCategories as category (category.id)}
 								<option value={category.id}>{category.name}</option>

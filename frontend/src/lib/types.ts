@@ -111,6 +111,11 @@ export interface Category {
 	kind: CategoryKind;
 	color: string | null;
 	parent_id: number | null;
+	/**
+	 * The account this category's spending goes on: receipts filed under it post
+	 * there and /add switches to it. The iPhone Shortcut ignores it.
+	 */
+	default_account_id: number | null;
 	archived: boolean;
 }
 
@@ -174,6 +179,8 @@ export interface Receipt {
 	transaction_id: number | null;
 	extract_error: string | null;
 	created_at: string;
+	/** Uploaded by the iPhone Shortcut, so category accounts don't apply. */
+	via_shortcut: boolean;
 }
 
 export interface ReceiptUpload {
@@ -545,6 +552,7 @@ export interface CategoryInput {
 	kind: CategoryKind;
 	color: string | null;
 	parent_id: number | null;
+	default_account_id: number | null;
 }
 
 export interface GoalInput {

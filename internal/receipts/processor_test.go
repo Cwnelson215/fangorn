@@ -425,3 +425,53 @@ func TestStartAndWait(t *testing.T) {
 		t.Errorf("status %s", r.Status)
 	}
 }
+
+// A category's account routes an app upload, but not one from the Shortcut.
+func TestCategoryAccountRoutesAppUploadsOnly(t *testing.T) {
+	f := newFixture(t)
+	gasCard, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
+		Name: "Gas card", Type: models.AccountCreditCard, StartingBalanceDate: "2026-01-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.UpdateCategory(f.ctx, f.hh, f.grocery.ID, ledger.CategoryInput{
+		Name: "Groceries", Kind: models.KindExpense, DefaultAccountID: &gasCard.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	accountOf := func(id int) int {
+		t.Helper()
+		r := f.receipt(id)
+		if r.Status != models.ReceiptPosted {
+			t.Fatalf("status = %s reasons = %v", r.Status, r.ReviewReasons)
+		}
+		txn, err := f.svc.GetTransaction(f.ctx, f.hh, *r.TransactionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return txn.AccountID
+	}
+
+	app := f.upload()
+	f.process(app)
+	if got := accountOf(app); got != gasCard.ID {
+		t.Errorf("app upload posted to %d, want the category's account %d", got, gasCard.ID)
+	}
+
+	// A different amount, so it isn't held as a duplicate of the first.
+	f.ext.result.Total = num(51.1)
+	img := []byte("photo from the shortcut " + t.Name())
+	sum := sha256.Sum256(img)
+	r, _, err := f.svc.CreateReceipt(f.ctx, f.hh, ledger.NewReceipt{
+		Image: img, MediaType: "image/jpeg", SHA256: sum[:], ViaShortcut: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.process(r.ID)
+	if got := accountOf(r.ID); got != f.card.ID {
+		t.Errorf("shortcut upload posted to %d, want the card on the receipt %d", got, f.card.ID)
+	}
+}
