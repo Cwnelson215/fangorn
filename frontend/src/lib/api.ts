@@ -247,6 +247,7 @@ export const getSettings = () => request<Settings>('/api/settings');
 export const updateSettings = (input: Settings) => send<Settings>('PUT', '/api/settings', input);
 
 export const getGoals = () => request<Goal[]>('/api/goals');
+export const getGoal = (id: number) => request<Goal>(`/api/goals/${id}`);
 export const createGoal = (input: GoalInput) => send<Goal>('POST', '/api/goals', input);
 export const updateGoal = (id: number, input: GoalInput) =>
 	send<Goal>('PATCH', `/api/goals/${id}`, input);

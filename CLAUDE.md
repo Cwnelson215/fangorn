@@ -195,8 +195,18 @@ income category names its own account. From there it's distributed to savings go
 target is how much to **add**, not a balance to reach: progress (`goalSelect`) is the money moved
 into its account since `started_on` (`goalMoney`) — transfers in less transfers out, plus income
 deposited there directly; interest and money market dividends (`source = 'interest'`) and market
-growth don't count. A goal with `monthly_amount` is a Savings line in the
-month's budget (`BudgetMonth.savings`, `moved` = that month's transfers in). "Add money" on the
+growth don't count.
+
+Goals come in **two kinds**. A **long-term** goal counts from `started_on`; its share of each
+month's budget is a plan versioned by month in `goal_plans` (`effective_from`, like budgets; a NULL
+amount stops it), set with `setGoalPlan`: saving what's already in force writes nothing, and a
+change applies "from here on", dropping later rows. A **monthly** goal has `goals.month` set: it
+applies to that month only, counts only money added inside it, closes with the month, and its
+target is the month's amount. `ListGoals` (the Long-term Goals card and the dashboard) returns
+long-term goals only; monthly goals are created and edited from the month's Savings section
+(`GET /api/goals/{id}` fetches one). A goal can't switch kinds. Each month's Savings lines
+(`BudgetMonth.savings`, `moved` = that month's money added) are the long-term goals whose plan in
+force has an amount plus the monthly goals for that month. "Add money" on the
 line is a real transfer from the income account, so one action fills the month and the goal; a
 transfer made anywhere else counts the same way. A goal with no account still takes hand-logged
 `goal_contributions`.
@@ -357,6 +367,9 @@ the `interest` transaction source.
 `014_category_accounts` adds `categories.default_account_id` and `receipts.via_shortcut`.
 `015_savings_plan` adds `households.income_account_id` and `goals.started_on` / `monthly_amount`
 (existing goals start from their creation date).
+`016_goal_kinds` adds `goals.month` (monthly goals) and `goal_plans` (long-term monthly shares by
+month), replacing `goals.monthly_amount`: a goal whose monthly amount equalled its target became a
+monthly goal for the month after it was created; any other became a plan starting that month.
 
 ## Conventions
 

@@ -83,27 +83,39 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 	}, nil
 }
 
-// savingsLines is each open goal with a monthly amount, and what went toward it
-// in the month: money added to its account (goalMoney, from the day the goal
-// started), or
+// savingsLines is the month's savings: each open long-term goal whose plan in
+// force that month (goal_plans, newest row on or before it) has an amount, and
+// each monthly goal belonging to the month, whose amount is its whole target.
+// Moved is what went toward it inside the month — money added to its account
+// (goalMoney; for a long-term goal only from the day it started), or
 // contributions for a goal with no account. A transfer counts toward the month
 // and the goal alike, so "Add money" on the budgets page is one transfer.
 func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart string) ([]models.SavingsLine, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`WITH g AS (`+goalSelect+` WHERE g.household_id = $1
-		              AND g.monthly_amount IS NOT NULL AND g.achieved_at IS NULL)
-		 SELECT g.id, g.name, g.account_id, g.account_name, g.monthly_amount, g.target_amount, g.saved,
+		              AND (g.month = $2::date OR (g.month IS NULL AND g.achieved_at IS NULL))),
+		 plan AS (
+		   SELECT DISTINCT ON (goal_id) goal_id, amount FROM goal_plans
+		   WHERE effective_from <= $2::date
+		   ORDER BY goal_id, effective_from DESC
+		 )
+		 SELECT g.id, g.name, g.month, g.account_id, g.account_name,
+		        CASE WHEN g.month IS NOT NULL THEN g.target_amount ELSE plan.amount END,
+		        g.target_amount, g.saved,
 		        CASE WHEN g.account_id IS NOT NULL THEN COALESCE((
 		               SELECT SUM(t.amount) FROM transactions t
 		               WHERE t.household_id = $1 AND t.account_id = g.account_id AND `+goalMoney+`
-		                 AND t.date >= GREATEST(g.started_on, $2::date)
+		                 AND t.date >= CASE WHEN g.month IS NULL
+		                                    THEN GREATEST(g.started_on, $2::date) ELSE $2::date END
 		                 AND t.date < ($2::date + INTERVAL '1 month')), 0)
 		             ELSE COALESCE((
 		               SELECT SUM(gc.amount) FROM goal_contributions gc
 		               WHERE gc.goal_id = g.id
 		                 AND gc.date >= $2::date AND gc.date < ($2::date + INTERVAL '1 month')), 0)
 		        END
-		 FROM g ORDER BY g.name`,
+		 FROM g LEFT JOIN plan ON plan.goal_id = g.id
+		 WHERE g.month IS NOT NULL OR plan.amount IS NOT NULL
+		 ORDER BY g.month IS NULL, g.name`,
 		householdID, monthStart)
 	if err != nil {
 		return nil, fmt.Errorf("loading savings lines: %w", err)
@@ -114,10 +126,12 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 		var l models.SavingsLine
 		var accountID sql.NullInt64
 		var accountName sql.NullString
-		if err := rows.Scan(&l.GoalID, &l.Name, &accountID, &accountName, &l.Monthly, &l.Target,
+		var month sql.NullTime
+		if err := rows.Scan(&l.GoalID, &l.Name, &month, &accountID, &accountName, &l.Monthly, &l.Target,
 			&l.Saved, &l.Moved); err != nil {
 			return nil, fmt.Errorf("scanning savings line: %w", err)
 		}
+		l.GoalMonth = dateStrPtr(month)
 		l.AccountID = intPtr(accountID)
 		l.AccountName = strPtr(accountName)
 		out = append(out, l)

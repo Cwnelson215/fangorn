@@ -10,6 +10,7 @@
 		getAccounts,
 		getBudgets,
 		getCategories,
+		getGoal,
 		getGoals,
 		getSettings,
 		reopenGoal,
@@ -70,6 +71,10 @@
 	let goalAccountId = $state(0);
 	let goalNotes = $state('');
 	let goalMonthly = $state('');
+	// "YYYY-MM": the month a long-term goal's monthly share applies from.
+	let goalMonthlyFrom = $state('');
+	// Set when the form is for a monthly goal: the first of its month.
+	let goalMonth = $state<string | null>(null);
 
 	// "Add money" to a goal: a transfer into its account, or a contribution
 	// logged by hand when it has none.
@@ -212,8 +217,10 @@
 		}
 	}
 
-	function openGoalCreate() {
+	function openGoalCreate(forMonth: string | null = null) {
 		editingGoal = null;
+		goalMonth = forMonth;
+		goalMonthlyFrom = month.slice(0, 7);
 		goalName = '';
 		goalTarget = '';
 		goalDate = '';
@@ -226,6 +233,11 @@
 
 	function openGoalEdit(goal: Goal) {
 		editingGoal = goal;
+		goalMonth = goal.month;
+		// Starting where the plan in force starts, if that's later than the month
+		// in view, so saving without touching it changes nothing.
+		const from = goal.monthly_from?.slice(0, 7) ?? '';
+		goalMonthlyFrom = from > month.slice(0, 7) ? from : month.slice(0, 7);
 		goalName = goal.name;
 		goalTarget = String(goal.target_amount);
 		goalDate = goal.target_date ?? '';
@@ -243,8 +255,21 @@
 			target_date: goalDate || null,
 			account_id: goalAccountId || null,
 			notes: goalNotes.trim() || null,
-			monthly_amount: parseFloat(goalMonthly) > 0 ? Math.abs(parseFloat(goalMonthly)) : null
+			month: goalMonth ? goalMonth.slice(0, 7) : null,
+			monthly_amount:
+				!goalMonth && parseFloat(goalMonthly) > 0 ? Math.abs(parseFloat(goalMonthly)) : null,
+			monthly_from: goalMonth ? null : goalMonthlyFrom || null
 		};
+	}
+
+	// A monthly goal is edited from its line; the line doesn't carry the whole
+	// goal (its notes), so fetch it first.
+	async function editMonthlyGoal(goalId: number) {
+		try {
+			openGoalEdit(await getGoal(goalId));
+		} catch (e) {
+			loadError = e instanceof Error ? e.message : 'Could not load the goal';
+		}
 	}
 
 	async function saveGoal(event: Event) {
@@ -335,6 +360,10 @@
 			loadError = e instanceof Error ? e.message : 'Could not update the goal';
 		}
 	}
+
+	// "Oct" for a month's first day, for the "Oct only" tag on a monthly goal.
+	const monthShort = (m: string) =>
+		new Date(m + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' });
 
 	const pct = (a: number, b: number) => (b <= 0 ? 0 : Math.min(100, Math.max(0, (a / b) * 100)));
 </script>
@@ -469,8 +498,19 @@
 				{/if}
 			{/if}
 
-			{#if savings.length > 0}
+			<div class="sub-row">
 				<h3 class="sub-head">Savings</h3>
+				<Button variant="ghost" size="sm" onclick={() => openGoalCreate(month)}>
+					+ Add a monthly goal
+				</Button>
+			</div>
+			{#if savings.length === 0}
+				<p class="muted small">
+					Nothing set aside for {formatMonth(month)} yet. Add a goal just for this month, or give a
+					long-term goal a monthly amount.
+				</p>
+			{/if}
+			{#if savings.length > 0}
 				{#if shortfall > 0.005}
 					<p class="muted small shortfall">
 						More went out of {accounts.find((a) => a.id === incomeAccountId)?.name ?? 'the income account'}
@@ -486,9 +526,15 @@
 							<div class="item-head">
 								<span class="item-name">
 									{line.name}
+									{#if line.month}<span class="chip">{monthShort(line.month)} only</span>{/if}
 									{#if line.account_name}<span class="muted small">→ {line.account_name}</span>{/if}
 								</span>
 								<span class="item-actions">
+									{#if line.month}
+										<Button variant="ghost" size="sm" onclick={() => editMonthlyGoal(line.goal_id)}>
+											Edit
+										</Button>
+									{/if}
 									<Button
 										variant="ghost"
 										size="sm"
@@ -515,14 +561,16 @@
 									{#if line.moved > 0.005}= {formatCurrency(Math.max(0, line.moved - line.overspent))} saved{/if}
 								{/if}
 								{#if toGo > 0.005}· {formatCurrency(toGo)} to go{/if}
-								· {formatCurrency(line.saved)} of {formatCurrency(line.target_amount)} overall
+								{#if !line.month}
+									· {formatCurrency(line.saved)} of {formatCurrency(line.target_amount)} overall
+								{/if}
 							</div>
 						</div>
 					{/each}
 				</div>
 			{/if}
 
-			{#if (incomeBudgets.length > 0 || savings.length > 0) && spendBudgets.length > 0}
+			{#if spendBudgets.length > 0}
 				<h3 class="sub-head">Spending</h3>
 			{/if}
 
@@ -614,14 +662,15 @@
 
 		<section class="card">
 			<div class="section-head">
-				<h2>Savings Goals</h2>
-				<Button size="sm" onclick={openGoalCreate}>Add a Goal</Button>
+				<h2>Long-term Goals</h2>
+				<Button size="sm" onclick={() => openGoalCreate()}>Add a Goal</Button>
 			</div>
 
 			{#if goals.length === 0}
 				<p class="muted small">
-					No goals yet. A goal is how much you want to add to an account; money moved into that
-					account counts toward it.
+					No long-term goals yet. One is how much you want to add to an account over time, with an
+					optional share of each month's budget. Goals for a single month live in that month's
+					Savings above.
 				</p>
 			{:else}
 				<div class="list">
@@ -654,7 +703,10 @@
 								{formatCurrency(goal.saved)} of {formatCurrency(goal.target_amount)} added
 								{#if goal.account_name}to {goal.account_name}{/if}
 								since {formatDate(goal.started_on)}
-								{#if goal.monthly_amount}· {formatCurrency(goal.monthly_amount)}/mo{/if}
+								{#if goal.monthly_amount}
+									· {formatCurrency(goal.monthly_amount)}/mo{#if goal.monthly_from && goal.monthly_from > month}
+										from {formatMonth(goal.monthly_from)}{/if}
+								{/if}
 								{#if goal.target_date}· by {formatDate(goal.target_date)}{/if}
 							</div>
 						</div>
@@ -709,20 +761,31 @@
 	</form>
 </Modal>
 
-<Modal bind:open={goalModalOpen} title={editingGoal ? 'Edit Goal' : 'Add Goal'}>
+<Modal
+	bind:open={goalModalOpen}
+	title={goalMonth
+		? `${editingGoal ? 'Edit' : 'Add'} Goal for ${formatMonth(goalMonth)}`
+		: editingGoal
+			? 'Edit Goal'
+			: 'Add a Long-term Goal'}
+>
 	<form onsubmit={saveGoal}>
 		<Field label="Goal name" id="goalName">
 			<input
 				id="goalName"
 				bind:value={goalName}
-				placeholder="Emergency fund"
+				placeholder={goalMonth ? "Refill Zion's" : 'Emergency fund'}
 				disabled={goalSaving}
 				required
 			/>
 		</Field>
 
 		<div class="form-row">
-			<Field label="Amount to add" id="goalTarget" hint="On top of what's there today">
+			<Field
+				label={goalMonth ? 'Amount this month' : 'Amount to add'}
+				id="goalTarget"
+				hint={goalMonth ? `Only ${formatMonth(goalMonth)} counts` : "On top of what's there today"}
+			>
 				<input
 					id="goalTarget"
 					type="number"
@@ -735,28 +798,39 @@
 					required
 				/>
 			</Field>
-			<Field label="Target date" id="goalDate" hint="Optional">
-				<input id="goalDate" type="date" bind:value={goalDate} disabled={goalSaving} />
-			</Field>
+			{#if !goalMonth}
+				<Field label="Target date" id="goalDate" hint="Optional">
+					<input id="goalDate" type="date" bind:value={goalDate} disabled={goalSaving} />
+				</Field>
+			{/if}
 		</div>
 
-		<Field label="Each month" id="goalMonthly" hint="Optional — puts it in the monthly budget">
-			<input
-				id="goalMonthly"
-				type="number"
-				inputmode="decimal"
-				step="0.01"
-				min="0"
-				placeholder="0.00"
-				bind:value={goalMonthly}
-				disabled={goalSaving}
-			/>
-		</Field>
+		{#if !goalMonth}
+			<div class="form-row">
+				<Field label="Each month" id="goalMonthly" hint="Optional — its share of the monthly budget">
+					<input
+						id="goalMonthly"
+						type="number"
+						inputmode="decimal"
+						step="0.01"
+						min="0"
+						placeholder="0.00"
+						bind:value={goalMonthly}
+						disabled={goalSaving}
+					/>
+				</Field>
+				<Field label="Starting" id="goalMonthlyFrom" hint="Applies from this month until you change it">
+					<input id="goalMonthlyFrom" type="month" bind:value={goalMonthlyFrom} disabled={goalSaving} />
+				</Field>
+			</div>
+		{/if}
 
 		<Field
 			label="Saving into"
 			id="goalAccount"
-			hint="Money moved into this account counts toward the goal. Leave unset to log it by hand."
+			hint={goalMonth
+				? `Money added to this account in ${formatMonth(goalMonth)} counts toward it. Leave unset to log it by hand.`
+				: 'Money added to this account counts toward the goal. Leave unset to log it by hand.'}
 		>
 			<select id="goalAccount" bind:value={goalAccountId} disabled={goalSaving}>
 				<option value={0}>Track manually</option>
@@ -920,6 +994,18 @@
 
 	.shortfall {
 		margin: 0 0 0.5rem;
+	}
+
+	.sub-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 1.25rem;
+	}
+
+	.sub-row .sub-head {
+		margin: 0;
 	}
 
 	.sub-head {

@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/cwnelson/fangorn/internal/ledger"
 	"github.com/cwnelson/fangorn/internal/models"
@@ -169,4 +170,150 @@ func TestSavingsShortfallFromIncomeAccount(t *testing.T) {
 	// isn't read as overspending.
 	f.setBudget(pay.ID, 6000, day[:7])
 	money(t, "shortfall with more income expected", month().Total, 0)
+}
+
+// A long-term goal's monthly share applies from the month it's set for until
+// changed, and a change leaves earlier months as they were.
+func TestLongTermGoalPlanByMonth(t *testing.T) {
+	f := newFixture(t)
+	savings := f.account("Savings", models.AccountSavings, 0)
+	today := ledger.Household{Timezone: "America/Denver"}.Today()
+	thisMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	ym := func(n int) string { return thisMonth.AddDate(0, n, 0).Format("2006-01") }
+	lines := func(n int) map[string]float64 {
+		t.Helper()
+		bm, err := f.svc.BudgetMonth(f.ctx, f.hh, ym(n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]float64{}
+		for _, l := range bm.Savings {
+			out[l.Name] = l.Monthly
+		}
+		return out
+	}
+	planRows := func(goalID int) int {
+		t.Helper()
+		var n int
+		if err := f.svc.DB().QueryRow(`SELECT COUNT(*) FROM goal_plans WHERE goal_id = $1`, goalID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	input := func(amount *float64, from string) ledger.GoalInput {
+		return ledger.GoalInput{Name: "House", TargetAmount: 20000, AccountID: &savings.ID,
+			MonthlyAmount: amount, MonthlyFrom: &from}
+	}
+	amt := func(v float64) *float64 { return &v }
+
+	g, err := f.svc.CreateGoal(f.ctx, f.hh, input(amt(300), ym(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lines(0)["House"]; ok {
+		t.Error("a plan starting next month shows this month")
+	}
+	money(t, "next month", lines(1)["House"], 300)
+
+	if _, err := f.svc.UpdateGoal(f.ctx, f.hh, g.ID, input(amt(400), ym(2))); err != nil {
+		t.Fatal(err)
+	}
+	money(t, "next month keeps 300", lines(1)["House"], 300)
+	money(t, "the month after is 400", lines(2)["House"], 400)
+
+	// Saving it again with what's already in force writes nothing.
+	if _, err := f.svc.UpdateGoal(f.ctx, f.hh, g.ID, input(amt(300), ym(1))); err != nil {
+		t.Fatal(err)
+	}
+	if n := planRows(g.ID); n != 2 {
+		t.Errorf("plan rows after a no-op save = %d, want 2", n)
+	}
+	money(t, "later change survives a no-op save", lines(2)["House"], 400)
+
+	// Clearing it stops the share from that month on.
+	if _, err := f.svc.UpdateGoal(f.ctx, f.hh, g.ID, input(nil, ym(3))); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lines(3)["House"]; ok {
+		t.Error("a stopped plan still shows")
+	}
+	money(t, "before the stop", lines(2)["House"], 400)
+
+	got, err := f.svc.GetGoal(f.ctx, f.hh, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MonthlyAmount != nil {
+		t.Errorf("stopped goal still reports a monthly amount: %v", *got.MonthlyAmount)
+	}
+}
+
+// A monthly goal belongs to its month: it shows only there, counts only money
+// added inside it, and isn't one of the long-term goals.
+func TestMonthlyGoal(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 5000)
+	savings := f.account("Savings", models.AccountSavings, 0)
+	today := ledger.Household{Timezone: "America/Denver"}.Today()
+	thisMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	next := thisMonth.AddDate(0, 1, 0)
+	nextYM := next.Format("2006-01")
+
+	g, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
+		Name: "Refill", TargetAmount: 1000, AccountID: &savings.ID, Month: &nextYM,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Month == nil || *g.Month != next.Format(models.DateOnly) {
+		t.Fatalf("month = %v, want %s", g.Month, next.Format(models.DateOnly))
+	}
+
+	f.transfer(checking.ID, savings.ID, 200, today.Format(models.DateOnly)) // before its month
+	f.transfer(checking.ID, savings.ID, 600, next.Format(models.DateOnly))
+	f.transfer(checking.ID, savings.ID, 50, next.AddDate(0, 1, 0).Format(models.DateOnly)) // after it
+
+	g, err = f.svc.GetGoal(f.ctx, f.hh, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	money(t, "counts only inside its month", g.Saved, 600)
+
+	for n, want := range map[int]bool{0: false, 1: true, 2: false} {
+		bm, err := f.svc.BudgetMonth(f.ctx, f.hh, thisMonth.AddDate(0, n, 0).Format("2006-01"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, l := range bm.Savings {
+			if l.GoalID == g.ID {
+				found = true
+				money(t, "line amount is the target", l.Monthly, 1000)
+				money(t, "moved in its month", l.Moved, 600)
+				if l.GoalMonth == nil {
+					t.Error("a monthly goal's line carries no month")
+				}
+			}
+		}
+		if found != want {
+			t.Errorf("month +%d: line present = %v, want %v", n, found, want)
+		}
+	}
+
+	goals, err := f.svc.ListGoals(f.ctx, f.hh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(goals) != 0 {
+		t.Errorf("long-term list includes the monthly goal: %+v", goals)
+	}
+
+	// Its kind is fixed, and it can't also take a monthly share.
+	_, err = f.svc.UpdateGoal(f.ctx, f.hh, g.ID, ledger.GoalInput{Name: "Refill", TargetAmount: 1000})
+	wantInvalid(t, err)
+	amount := 100.0
+	_, err = f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
+		Name: "Both", TargetAmount: 1000, Month: &nextYM, MonthlyAmount: &amount,
+	})
+	wantInvalid(t, err)
 }

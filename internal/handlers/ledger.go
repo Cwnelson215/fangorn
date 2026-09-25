@@ -82,6 +82,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/goals", h.ListGoals)
 	mux.HandleFunc("POST /api/goals", h.CreateGoal)
+	mux.HandleFunc("GET /api/goals/{id}", h.GetGoal)
 	mux.HandleFunc("PATCH /api/goals/{id}", h.UpdateGoal)
 	mux.HandleFunc("DELETE /api/goals/{id}", h.DeleteGoal)
 	mux.HandleFunc("POST /api/goals/{id}/contribute", h.ContributeToGoal)
@@ -618,6 +619,20 @@ func (h *LedgerHandler) CreateGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, goal)
+}
+
+// GetGoal returns one goal of either kind; the list only has long-term goals.
+func (h *LedgerHandler) GetGoal(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	goal, err := h.svc.GetGoal(r.Context(), h.householdID, id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, goal)
 }
 
 func (h *LedgerHandler) UpdateGoal(w http.ResponseWriter, r *http.Request) {

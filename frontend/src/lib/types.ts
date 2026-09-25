@@ -296,14 +296,22 @@ export interface Goal {
 	 */
 	saved: number;
 	started_on: string;
-	/** The goal's line in the monthly budget; null for none. */
+	/**
+	 * Set on a monthly goal: the first of the one month it applies to (it counts
+	 * only money added inside it). Null on a long-term goal.
+	 */
+	month: string | null;
+	/** A long-term goal's ongoing monthly share of the budget, from monthly_from; null for none. */
 	monthly_amount: number | null;
+	monthly_from: string | null;
 }
 
 /** One goal's share of a month's budget. */
 export interface SavingsLine {
 	goal_id: number;
 	name: string;
+	/** Set on a monthly goal's line: the month it belongs to. Null for a long-term goal. */
+	month: string | null;
 	account_id: number | null;
 	account_name: string | null;
 	monthly_amount: number;
@@ -605,7 +613,11 @@ export interface GoalInput {
 	target_date: string | null;
 	account_id: number | null;
 	notes: string | null;
+	/** "YYYY-MM" makes a one-month goal; null for long-term. A goal's kind can't change. */
+	month: string | null;
+	/** A long-term goal's monthly share, applying from monthly_from ("YYYY-MM") until changed. */
 	monthly_amount: number | null;
+	monthly_from: string | null;
 }
 
 /** A phone's key for the iPhone Shortcut. The key itself is only returned once. */

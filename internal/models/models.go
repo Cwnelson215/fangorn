@@ -421,15 +421,24 @@ type Goal struct {
 	Saved float64 `json:"saved"`
 	// StartedOn is when the goal began counting.
 	StartedOn string `json:"started_on"`
-	// MonthlyAmount is the goal's line in the monthly budget; nil for none.
+	// Month, the first of it, makes this a monthly goal: it applies to that month
+	// only, counting what's added inside it. Nil for a long-term goal.
+	Month *string `json:"month"`
+	// MonthlyAmount is a long-term goal's ongoing monthly share (its latest plan),
+	// from MonthlyFrom; nil when it has none. Always nil on a monthly goal.
 	MonthlyAmount *float64 `json:"monthly_amount"`
+	MonthlyFrom   *string  `json:"monthly_from"`
 }
 
 // SavingsLine is one goal's share of a month's budget: what was planned and
-// what has been put toward it that month.
+// what has been put toward it that month. For a long-term goal Monthly is its
+// plan in force that month; for a monthly goal it's the goal's whole target.
 type SavingsLine struct {
-	GoalID      int     `json:"goal_id"`
-	Name        string  `json:"name"`
+	GoalID int    `json:"goal_id"`
+	Name   string `json:"name"`
+	// GoalMonth is set on a monthly goal's line (the month it belongs to) and
+	// nil on a long-term goal's.
+	GoalMonth   *string `json:"month"`
 	AccountID   *int    `json:"account_id"`
 	AccountName *string `json:"account_name"`
 	Monthly     float64 `json:"monthly_amount"`
