@@ -20,10 +20,14 @@ const maxHistoryDays = 3650
 // long holiday.
 const closeLookback = 14
 
-// ValueHistory returns the combined daily value (cash + holdings) of investment
-// accounts over the last `days` days, ending today in the household's timezone.
-// accountIDs must all be investment accounts in the household; nil means every
-// non-archived one. days <= 0 means all history.
+// ValueHistory returns the combined daily value (cash + holdings) of accounts
+// over the last `days` days, ending today in the household's timezone.
+// accountIDs must all be in the household; nil means every non-archived account
+// that holds securities. days <= 0 means all history.
+//
+// An account named explicitly may be of any type: one with no trades replays to
+// its balance alone, which is how a savings account, a card or a loan gets its
+// balance-over-time chart (a liability's values are negative, like its balance).
 //
 // Unlike net worth, this is not read from snapshots: it is rebuilt from the
 // trade log and stored daily closes, so it covers the time before the app was
@@ -83,9 +87,11 @@ func (s *Service) ValueHistory(ctx context.Context, householdID int, accountIDs 
 	return portfolio.SumSeries(series...), nil
 }
 
-// investmentLedgers loads the cash and trade history of investment accounts.
+// investmentLedgers loads the cash and trade history of accounts: every
+// non-archived one holding securities when accountIDs is nil, otherwise exactly
+// the ones named, whatever their type.
 func (s *Service) investmentLedgers(ctx context.Context, householdID int, accountIDs []int) ([]portfolio.Ledger, error) {
-	q := `SELECT id, type, starting_balance, starting_balance_date FROM accounts WHERE household_id = $1`
+	q := `SELECT id, starting_balance, starting_balance_date FROM accounts WHERE household_id = $1`
 	args := []any{householdID}
 	if accountIDs == nil {
 		q += ` AND type IN ('` + models.AccountInvestment + `','` + models.AccountRetirement + `') AND archived_at IS NULL`
@@ -103,13 +109,9 @@ func (s *Service) investmentLedgers(ctx context.Context, householdID int, accoun
 	var ids []int
 	for rows.Next() {
 		var id int
-		var typ string
 		var l portfolio.Ledger
-		if err := rows.Scan(&id, &typ, &l.StartingCash, &l.StartingDate); err != nil {
+		if err := rows.Scan(&id, &l.StartingCash, &l.StartingDate); err != nil {
 			return nil, fmt.Errorf("scanning account: %w", err)
-		}
-		if !models.HoldsSecurities(typ) {
-			return nil, invalid("value history is only kept for investment and retirement accounts")
 		}
 		byID[id] = &l
 		ids = append(ids, id)

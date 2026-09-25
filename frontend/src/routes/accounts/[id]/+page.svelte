@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { getAccount, getAccountValueHistory, getHoldings, getTrades } from '$lib/api';
-	import type { AccountDetail, Holdings, Trade } from '$lib/types';
+	import { getAccount, getAccountValueHistory, getHoldings, getRules, getTrades } from '$lib/api';
+	import type { AccountDetail, Holdings, Slice, Trade } from '$lib/types';
 	import { TRADE_SIDE_LABELS, accountKindLabel, holdsSecurities } from '$lib/types';
 	import {
 		formatCurrency,
@@ -22,7 +22,11 @@
 	import TradeModal from '$lib/components/TradeModal.svelte';
 	import ValueHistoryCard from '$lib/components/ValueHistoryCard.svelte';
 	import SavingsRateCard from '$lib/components/SavingsRateCard.svelte';
+	import GrowthProjectionCard from '$lib/components/GrowthProjectionCard.svelte';
+	import PayoffCard from '$lib/components/PayoffCard.svelte';
+	import DonutChart from '$lib/components/DonutChart.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import { monthlyInflow } from '$lib/projection';
 
 	// Prices are refreshed server-side at most once a minute during market hours,
 	// so polling faster than that would only re-read the same numbers.
@@ -34,6 +38,9 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let holdingsError = $state<string | null>(null);
+	// What the recurring rules put into this account each month, which the
+	// projections start from. Null until loaded; zero if they can't be.
+	let inflow = $state<number | null>(null);
 
 	let tradeModalOpen = $state(false);
 	let editingTrade = $state<Trade | null>(null);
@@ -53,6 +60,11 @@
 			detail = await getAccount(accountId);
 			if (holdsSecurities(detail.account.type)) {
 				[holdings, trades] = await Promise.all([getHoldings(accountId), getTrades(accountId)]);
+			}
+			if (projects(detail.account.type)) {
+				getRules()
+					.then((rules) => (inflow = monthlyInflow(rules, accountId)))
+					.catch(() => (inflow = 0));
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load this account';
@@ -83,7 +95,27 @@
 		tradeModalOpen = true;
 	}
 
+	// Checking, savings and cash just hold money; every other type grows or
+	// shrinks by itself and gets a history chart and a projection.
+	function projects(type: string): boolean {
+		return type !== 'checking' && type !== 'savings' && type !== 'cash';
+	}
+
+	const history = (days: number) => getAccountValueHistory(accountId, days);
+
 	let isLiability = $derived(detail?.account.class === 'liability');
+	// Positions largest first, then the cash beside them. Cash goes last rather
+	// than sorted in so it doesn't take a palette slot from a position.
+	let allocation = $derived<Slice[]>(
+		holdings
+			? [
+					...holdings.positions
+						.map((p) => ({ label: p.symbol, value: p.market_value }))
+						.sort((a, b) => b.value - a.value),
+					{ label: 'Cash', value: holdings.cash, color: '#b8bcc4' }
+				]
+			: []
+	);
 	let registerDays = $derived(groupByDate(detail?.transactions ?? [], (t) => t.date));
 	let hasFunds = $derived(holdings?.positions.some((p) => p.quote_type === 'MUTUALFUND') ?? false);
 </script>
@@ -139,6 +171,30 @@
 
 		{#if account.type === 'high_yield_savings'}
 			<SavingsRateCard accountId={account.id} />
+			<ValueHistoryCard id="account-balance" title="Balance over time" load={history} initialDays={365} />
+			{#if inflow != null}
+				<GrowthProjectionCard
+					id="account-{account.id}"
+					kind="savings"
+					start={account.balance}
+					defaultMonthly={inflow}
+					defaultRate={account.apy ?? undefined}
+					loadHistory={() => history(365)}
+				/>
+			{/if}
+		{/if}
+
+		{#if isLiability}
+			<ValueHistoryCard id="account-owed" title="Owed over time" liability load={history} initialDays={365} />
+			{#if inflow != null}
+				<PayoffCard
+					id="account-{account.id}"
+					kind={account.type === 'loan' ? 'loan' : 'credit_card'}
+					owed={Math.max(0, -account.balance)}
+					defaultPayment={inflow}
+					loadHistory={() => history(365)}
+				/>
+			{/if}
 		{/if}
 
 		{#if isInvestment && holdings}
@@ -180,10 +236,32 @@
 				{/if}
 			</div>
 
+			{#if holdings.positions.length > 0}
+				<div class="card">
+					<h2>Allocation</h2>
+					<DonutChart
+						slices={allocation}
+						legendValue={(s, total) => `${formatCurrency(s.value)} · ${formatPercent(s.value / total)}`}
+					/>
+				</div>
+			{/if}
+
 			{#if trades.length > 0}
 				<!-- load() unmounts the page while it reloads, so this re-fetches after a trade. -->
-				<ValueHistoryCard id="account-value" load={(days) => getAccountValueHistory(accountId, days)} />
+				<ValueHistoryCard id="account-value" load={history} />
+			{/if}
 
+			{#if inflow != null}
+				<GrowthProjectionCard
+					id="account-{account.id}"
+					kind={account.type === 'retirement' ? 'retirement' : 'investment'}
+					start={holdings.total_value}
+					defaultMonthly={inflow}
+					loadHistory={trades.length > 0 ? () => history(0) : undefined}
+				/>
+			{/if}
+
+			{#if trades.length > 0}
 				<div class="card">
 					<h2>Trades</h2>
 					<div class="table-scroll">

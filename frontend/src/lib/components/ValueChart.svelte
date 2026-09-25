@@ -1,13 +1,26 @@
 <script lang="ts">
 	import * as d3 from 'd3';
-	import { formatCurrencyWhole, parseDate } from '$lib/format';
+	import { formatCurrency, formatCurrencyWhole, formatDate, parseDate } from '$lib/format';
+	import { addCrosshair, moneyTicks, styleAxis, type TipRow } from '$lib/chart';
 
-	// A dated line of dollar values: net worth snapshots, an account's value.
+	// A dated line of dollar values: net worth snapshots, an account's value, what
+	// a card owes. Hovering (or scrubbing with a finger) reads off any day; an
+	// investment account's points also carry the cash / invested split, which the
+	// tooltip shows beneath the total.
 	//
 	// The gradient id must be unique per instance: two charts on one page would
 	// otherwise both reference the same <linearGradient> and the second would
 	// silently restyle the first.
-	let { points, id }: { points: { date: string; value: number }[]; id: string } = $props();
+	let {
+		points,
+		id,
+		label = 'Value'
+	}: {
+		points: { date: string; value: number; cash?: number; holdings?: number }[];
+		id: string;
+		/** What the line is, in the tooltip: "Net worth", "Owed". */
+		label?: string;
+	} = $props();
 	let container: HTMLDivElement;
 	// Redrawn whenever the box changes size: a phone rotating, a window resizing.
 	let boxWidth = $state(0);
@@ -19,6 +32,8 @@
 		if (points.length < 2) return;
 
 		const parsed = points.map((d) => ({ date: parseDate(d.date), value: d.value }));
+		// Only split the value when there's something invested to split it from.
+		const split = points.some((p) => (p.holdings ?? 0) !== 0);
 
 		const margin = { top: 20, right: 20, bottom: 40, left: 70 };
 		const width = container.clientWidth - margin.left - margin.right;
@@ -57,15 +72,9 @@
 		// is narrow — an investment account moving a few hundred dollars — so
 		// show whole dollars there.
 		const [lo, hi] = y.domain();
-		const yFormat = hi - lo < 5000
-			? (d: d3.NumberValue) => formatCurrencyWhole(d as number)
-			: (d: d3.NumberValue) => `$${d3.format('.3s')(d as number)}`;
-
 		svg.append('g')
-			.call(d3.axisLeft(y).ticks(5).tickFormat(yFormat))
-			.selectAll('text')
-			.attr('fill', '#999')
-			.attr('font-size', '0.7rem');
+			.call(d3.axisLeft(y).ticks(5).tickFormat(moneyTicks(lo, hi, formatCurrencyWhole)))
+			.call(styleAxis);
 
 		// Zero line if range spans 0
 		if (yMin < 0 && yMax > 0) {
@@ -124,6 +133,25 @@
 			.attr('font-weight', '600')
 			.attr('fill', '#45b7d1')
 			.text(formatCurrencyWhole(latest.value));
+
+		addCrosshair(svg, container, {
+			dates: parsed.map((d) => d.date),
+			x,
+			width,
+			height,
+			margin,
+			title: (i) => formatDate(points[i].date),
+			rows: (i) => {
+				const p = points[i];
+				const rows: TipRow[] = [{ label, value: formatCurrency(p.value), color: '#45b7d1' }];
+				if (split) {
+					rows.push({ label: 'invested', value: formatCurrency(p.holdings ?? 0) });
+					rows.push({ label: 'cash', value: formatCurrency(p.cash ?? 0) });
+				}
+				return rows;
+			},
+			dots: (i) => [{ y: y(parsed[i].value), color: '#45b7d1' }]
+		});
 	}
 
 	$effect(() => { points; boxWidth; render(); });
@@ -133,6 +161,7 @@
 
 <style>
 	.chart {
+		position: relative;
 		width: 100%;
 		min-height: 280px;
 	}

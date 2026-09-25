@@ -237,6 +237,28 @@ Yahoo quirks: the full Chrome User-Agent got 429s while `Mozilla/5.0` didn't; da
 from `regularMarketChangePercent` because a fund's latest NAV is often dated the next morning, and
 `chartPreviousClose` is the close before the *range*, not before today.
 
+## Charts and Projections
+
+Every account type except checking, savings and cash gets a history chart and a projection on its
+page. History comes from `GET /api/accounts/{id}/value-history`, which serves **any** account named
+explicitly — one with no trades replays to its balance alone (a liability's values are negative;
+`ValueHistoryCard liability` flips them to "owed"). The unfiltered form still means every
+securities-holding account.
+
+Projections are **frontend-only and pure**: `src/lib/projection.ts` (`projectGrowth`,
+`projectPayoff`, `monthlyInflow`) with vitest tests. `GrowthProjectionCard` covers investment,
+retirement (also combined on `/investments`) and high-yield savings; `PayoffCard` covers credit
+cards and loans. Their starting contribution/payment is what the household's recurring rules put
+into the account each month (`monthlyInflow`: transfers in + income there). APR isn't stored on
+accounts — it's an assumption like the rest. Assumptions are remembered per device and account
+(`recallValues` in `lib/remember.ts`), but only once they differ from the defaults, so untouched
+values keep following the recurring rules.
+
+Every line chart shares one hover layer, `addCrosshair` in `src/lib/chart.ts`: a snapping
+hairline and one tooltip for all series, pointer events for touch, arrow keys when focused. Tooltip
+text goes through `textContent`. Series colours are `SERIES` there (validated together for
+colour-blind separation); always pair them with a legend.
+
 ## Receipts
 
 `POST /api/receipts` takes one multipart `image` (jpeg/png/webp by sniffing, 5 MB cap, read in

@@ -544,9 +544,15 @@ func TestValueHistorySumsAccounts(t *testing.T) {
 
 func TestValueHistoryScoping(t *testing.T) {
 	f := newFixture(t)
+	// An account with no trades replays to its balance alone.
 	checking := f.account("Checking", models.AccountChecking, 100)
-	_, err := f.svc.ValueHistory(f.ctx, f.hh, []int{checking.ID}, 0)
-	wantInvalid(t, err)
+	pts := f.valueHistory([]int{checking.ID}, 0)
+	if len(pts) == 0 {
+		t.Fatal("a checking account should have a balance history")
+	}
+	last := pts[len(pts)-1]
+	money(t, "checking holdings", last.Holdings, 0)
+	money(t, "checking value", last.Value, 100)
 
 	other := newFixture(t)
 	theirs := other.account("Brokerage", models.AccountInvestment, 100)

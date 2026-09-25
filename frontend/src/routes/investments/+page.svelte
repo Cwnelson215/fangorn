@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getInvestments, getInvestmentsHistory } from '$lib/api';
+	import { getInvestments, getInvestmentsHistory, getRules } from '$lib/api';
+	import { monthlyInflow } from '$lib/projection';
+	import GrowthProjectionCard from '$lib/components/GrowthProjectionCard.svelte';
 	import type { InvestmentsSummary, Slice } from '$lib/types';
 	import { formatCurrency, formatMarketTime, formatPercent, formatSigned } from '$lib/format';
 	import { startPolling } from '$lib/poll';
@@ -16,6 +18,8 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let refreshError = $state<string | null>(null);
+	// What recurring rules put into all these accounts each month; null until loaded.
+	let inflow = $state<number | null>(null);
 
 	onMount(() => {
 		load();
@@ -27,6 +31,10 @@
 		error = null;
 		try {
 			summary = await getInvestments();
+			const ids = summary.accounts.map((a) => a.id);
+			getRules()
+				.then((rules) => (inflow = ids.reduce((sum, id) => sum + monthlyInflow(rules, id), 0)))
+				.catch(() => (inflow = 0));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load your investments';
 		} finally {
@@ -120,6 +128,16 @@
 		</div>
 
 		<ValueHistoryCard id="investments-value" load={getInvestmentsHistory} />
+
+		{#if inflow != null}
+			<GrowthProjectionCard
+				id="investments-all"
+				kind="investment"
+				start={summary.total_value}
+				defaultMonthly={inflow}
+				loadHistory={() => getInvestmentsHistory(0)}
+			/>
+		{/if}
 
 		<div class="card">
 			<h2>Holdings</h2>
