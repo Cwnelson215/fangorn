@@ -3,12 +3,16 @@ package quotes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,21 +28,35 @@ import (
 type Yahoo struct {
 	client  *http.Client
 	baseURL string
+
+	// Fund yields come from quoteSummary, which — unlike chart — wants a session
+	// cookie and a "crumb" token issued against it. Both are fetched on first use
+	// and kept until Yahoo rejects the crumb.
+	cookieURL string
+	crumbMu   sync.Mutex
+	crumb     string
 }
 
 const (
 	yahooBaseURL   = "https://query1.finance.yahoo.com"
+	yahooCookieURL = "https://fc.yahoo.com"
 	yahooUserAgent = "Mozilla/5.0"
 )
 
 func NewYahoo() *Yahoo {
-	return &Yahoo{client: &http.Client{Timeout: 10 * time.Second}, baseURL: yahooBaseURL}
+	jar, _ := cookiejar.New(nil) // never fails without options
+	return &Yahoo{
+		client:    &http.Client{Timeout: 10 * time.Second, Jar: jar},
+		baseURL:   yahooBaseURL,
+		cookieURL: yahooCookieURL,
+	}
 }
 
 // newYahooAt points the client at a test server.
 func newYahooAt(baseURL string) *Yahoo {
 	y := NewYahoo()
 	y.baseURL = baseURL
+	y.cookieURL = baseURL + "/cookie"
 	return y
 }
 
@@ -267,4 +285,112 @@ func snippet(b []byte) string {
 		s = s[:200] + "…"
 	}
 	return s
+}
+
+// errBadCrumb is quoteSummary refusing the crumb: the session expired, so the
+// crumb is fetched again once.
+var errBadCrumb = errors.New("yahoo: crumb rejected")
+
+// Yield returns a fund's published yield in percent — SPAXX's 7-day yield, for
+// example. A symbol Yahoo has no yield for is ErrNotFound.
+func (y *Yahoo) Yield(ctx context.Context, symbol string) (float64, error) {
+	pct, err := y.yield(ctx, symbol)
+	if errors.Is(err, errBadCrumb) {
+		y.crumbMu.Lock()
+		y.crumb = ""
+		y.crumbMu.Unlock()
+		pct, err = y.yield(ctx, symbol)
+	}
+	return pct, err
+}
+
+type quoteSummaryResponse struct {
+	QuoteSummary struct {
+		Result []struct {
+			SummaryDetail struct {
+				Yield struct {
+					Raw *float64 `json:"raw"`
+				} `json:"yield"`
+			} `json:"summaryDetail"`
+		} `json:"result"`
+		Error *struct {
+			Code        string `json:"code"`
+			Description string `json:"description"`
+		} `json:"error"`
+	} `json:"quoteSummary"`
+	Finance struct {
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	} `json:"finance"`
+}
+
+func (y *Yahoo) yield(ctx context.Context, symbol string) (float64, error) {
+	crumb, err := y.sessionCrumb(ctx)
+	if err != nil {
+		return 0, err
+	}
+	q := url.Values{"modules": {"summaryDetail"}, "crumb": {crumb}}
+	var res quoteSummaryResponse
+	status, err := y.get(ctx, "/v10/finance/quoteSummary/"+url.PathEscape(strings.ToUpper(symbol)), q, &res)
+	if status == http.StatusUnauthorized ||
+		(res.Finance.Error != nil && res.Finance.Error.Code == "Unauthorized") {
+		return 0, errBadCrumb
+	}
+	if status == http.StatusNotFound {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(res.QuoteSummary.Result) == 0 {
+		return 0, ErrNotFound
+	}
+	raw := res.QuoteSummary.Result[0].SummaryDetail.Yield.Raw
+	if raw == nil || *raw <= 0 || *raw >= 1 {
+		return 0, fmt.Errorf("%w: yahoo publishes no yield for %s", ErrNotFound, symbol)
+	}
+	// Yahoo gives a fraction (0.0333); keep the three decimals a fund quotes.
+	return math.Round(*raw*100*1000) / 1000, nil
+}
+
+// sessionCrumb returns the cached crumb, or starts a session for one: the
+// cookie endpoint sets the session cookie (its own status doesn't matter), and
+// getcrumb issues a crumb bound to that cookie.
+func (y *Yahoo) sessionCrumb(ctx context.Context) (string, error) {
+	y.crumbMu.Lock()
+	defer y.crumbMu.Unlock()
+	if y.crumb != "" {
+		return y.crumb, nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, y.cookieURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", yahooUserAgent)
+	resp, err := y.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: yahoo: starting a session: %v", ErrUnavailable, err)
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, y.baseURL+"/v1/test/getcrumb", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", yahooUserAgent)
+	resp, err = y.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: yahoo: fetching a crumb: %v", ErrUnavailable, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
+	crumb := strings.TrimSpace(string(body))
+	if resp.StatusCode >= 400 || crumb == "" || strings.ContainsAny(crumb, "{<") {
+		return "", fmt.Errorf("%w: yahoo: no crumb (status %d)", ErrUnavailable, resp.StatusCode)
+	}
+	y.crumb = crumb
+	return crumb, nil
 }

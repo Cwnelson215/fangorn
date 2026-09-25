@@ -3,6 +3,7 @@ package quotes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -192,5 +193,65 @@ func TestSearchKeepsMoneyMarketFunds(t *testing.T) {
 	}
 	if len(matches) != 1 || matches[0].Symbol != "SPAXX" || matches[0].QuoteType != "MONEYMARKET" {
 		t.Fatalf("matches = %+v", matches)
+	}
+}
+
+// quoteSummary wants a session: a cookie from the cookie endpoint and a crumb
+// issued against it. A crumb that stops working is replaced once.
+func yieldServer(t *testing.T, fixture string) (*Yahoo, *int) {
+	t.Helper()
+	crumbs := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/cookie":
+			http.SetCookie(w, &http.Cookie{Name: "A3", Value: "session", Path: "/"})
+			w.WriteHeader(http.StatusNotFound) // fc.yahoo.com 404s; only the cookie matters
+		case r.URL.Path == "/v1/test/getcrumb":
+			if c, err := r.Cookie("A3"); err != nil || c.Value != "session" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			crumbs++
+			fmt.Fprintf(w, "crumb%d", crumbs)
+		case strings.HasPrefix(r.URL.Path, "/v10/finance/quoteSummary/"):
+			// The first crumb has "expired"; the second works.
+			if r.URL.Query().Get("crumb") != "crumb2" {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"finance":{"result":null,"error":{"code":"Unauthorized","description":"Invalid Crumb"}}}`))
+				return
+			}
+			body, err := os.ReadFile(filepath.Join("testdata", fixture))
+			if err != nil {
+				t.Error(err)
+			}
+			w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return newYahooAt(srv.URL), &crumbs
+}
+
+func TestYieldRenewsCrumb(t *testing.T) {
+	y, crumbs := yieldServer(t, "summary_spaxx.json")
+	got, err := y.Yield(context.Background(), "spaxx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approx(t, "SPAXX yield", got, 3.33, 1e-9)
+	if *crumbs != 2 {
+		t.Errorf("fetched %d crumbs, want 2 (the first was rejected)", *crumbs)
+	}
+	// The working crumb is kept.
+	if _, err := y.Yield(context.Background(), "SPAXX"); err != nil || *crumbs != 2 {
+		t.Errorf("second call: err %v, crumbs %d", err, *crumbs)
+	}
+}
+
+func TestYieldMissing(t *testing.T) {
+	y, _ := yieldServer(t, "summary_noyield.json")
+	if _, err := y.Yield(context.Background(), "FXAIX"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("want ErrNotFound for a fund with no published yield, got %v", err)
 	}
 }

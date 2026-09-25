@@ -37,6 +37,11 @@ type Refresher struct {
 	// historySem does the same for history backfills, separately, so a long
 	// backfill never holds up a holdings poll waiting on current prices.
 	historySem chan struct{}
+
+	// yieldTried is when each cash fund's yield was last asked for, so a failing
+	// lookup is retried every yieldRetry rather than every tick.
+	yieldMu    sync.Mutex
+	yieldTried map[string]time.Time
 }
 
 // New builds a refresher. A nil provider disables fetching: trades still work,
@@ -48,6 +53,7 @@ func New(svc *ledger.Service, provider quotes.Provider, marketTTL time.Duration)
 	return &Refresher{
 		svc: svc, provider: provider, marketTTL: marketTTL,
 		now: time.Now, sem: make(chan struct{}, 1), historySem: make(chan struct{}, 1),
+		yieldTried: map[string]time.Time{},
 	}
 }
 

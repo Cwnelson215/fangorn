@@ -23,6 +23,29 @@ type fakeProvider struct {
 	calls  int
 	// historyFrom records each History call as "SYMBOL YYYY-MM-DD".
 	historyFrom []string
+	// yields are published fund yields in percent; yieldCalls counts lookups.
+	yields     map[string]float64
+	yieldCalls int
+}
+
+func (p *fakeProvider) Yield(_ context.Context, symbol string) (float64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.yieldCalls++
+	if err := p.fail[symbol]; err != nil {
+		return 0, err
+	}
+	y, ok := p.yields[symbol]
+	if !ok {
+		return 0, quotes.ErrNotFound
+	}
+	return y, nil
+}
+
+func (p *fakeProvider) yieldCallCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.yieldCalls
 }
 
 func (p *fakeProvider) Quote(ctx context.Context, symbol string) (quotes.Quote, error) {
@@ -77,7 +100,7 @@ func newFixture(t *testing.T) *fixture {
 	svc := ledger.New(db)
 	f := &fixture{
 		t: t, ctx: context.Background(), svc: svc, hh: testdb.Household(t, db, "America/Denver"),
-		provider: &fakeProvider{prices: map[string]float64{}, fail: map[string]error{}},
+		provider: &fakeProvider{prices: map[string]float64{}, fail: map[string]error{}, yields: map[string]float64{}},
 		// Saturday: nothing is open, so only quietTTL applies.
 		now: et("2026-09-12 12:00"),
 	}

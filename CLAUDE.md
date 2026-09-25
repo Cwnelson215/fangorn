@@ -124,6 +124,14 @@ included, so holdings never earn the cash rate), described "Money market dividen
 **Dividends**. `models.EarnsOnCash` decides which types can keep rates; a high-yield savings account
 must keep at least one, an investment account may remove its last to turn the dividend off.
 
+Better than typing it: link the account to its fund (`accounts.cash_fund`, e.g. `SPAXX`, via
+`PUT /api/accounts/{id}/cash-fund`). The scheduler then looks the fund's yield up at most every 12h
+(`prices.Refresher.RefreshYields`, retrying a failure after 30m) into `security_yields` — shared
+market data like `security_prices`, one row per day. The fund governs from `cash_fund_since`, the
+day it was linked, so linking never back-posts; hand-entered rates still cover the time before, and
+can't be added while linked. A money market yield is a simple annual rate, so `fundYields` converts
+it to the APY whose monthly rate is exactly yield ÷ 12. The dividend is described "SPAXX dividend".
+
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
 don't recompute a balance anywhere else.
@@ -215,6 +223,11 @@ re-fetched until a trade is back-dated earlier than that. Sold-out symbols still
 page and summing the results (not merging shares first), so the totals match the account pages to the
 cent. The dashboard's `investments` line uses stored prices only and never calls the provider.
 
+A fund's yield comes from `quoteSummary` (`summaryDetail.yield`), which unlike `chart` needs a
+session: a cookie from `fc.yahoo.com` plus a crumb from `/v1/test/getcrumb`, kept in the client's
+cookie jar and re-fetched once when Yahoo answers `Invalid Crumb`. `chart` carries no dividend events
+for money market funds, so the yield can't be derived from payouts.
+
 Yahoo quirks: the full Chrome User-Agent got 429s while `Mozilla/5.0` didn't; day change is derived
 from `regularMarketChangePercent` because a fund's latest NAV is often dated the next morning, and
 `chartPreviousClose` is the close before the *range*, not before today.
@@ -268,6 +281,7 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 `011_retirement_accounts` adds the `retirement` account type and `accounts.tax_treatment`.
 `012_high_yield_savings` adds the `high_yield_savings` type, `savings_rates`, `interest_postings` and
 the `interest` transaction source.
+`013_cash_fund_yields` adds `accounts.cash_fund` / `cash_fund_since` and `security_yields`.
 
 ## Conventions
 

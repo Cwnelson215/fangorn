@@ -472,6 +472,13 @@ export interface SavingsOutlook {
 	projected_date: string;
 	/** This month's interest if the balance stays where it is. */
 	projected_amount: number;
+	/** The money market fund an investment account's yield is looked up from. */
+	cash_fund: string | null;
+	/** When the fund took over; hand-entered rates cover the time before. */
+	cash_fund_since: string | null;
+	/** The fund's latest published yield (a simple annual rate, percent). */
+	fund_yield: number | null;
+	fund_yield_as_of: string | null;
 }
 
 /** Amount is a positive magnitude; the server applies the sign from `kind`. */

@@ -56,6 +56,13 @@ type Match struct {
 	Exchange  string `json:"exchange"`
 }
 
+// YieldProvider publishes a fund's current yield, in percent. For a money
+// market fund that is its 7-day yield, a simple annual rate. It is separate from
+// Provider because not every price source has it.
+type YieldProvider interface {
+	Yield(ctx context.Context, symbol string) (float64, error)
+}
+
 type Provider interface {
 	Quote(ctx context.Context, symbol string) (Quote, error)
 	// History returns daily closes from `from` to today, oldest first.

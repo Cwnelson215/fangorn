@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -301,4 +302,102 @@ func TestCashYieldOnRetirementAccount(t *testing.T) {
 	if txns := f.interestTxns(roth.ID); len(txns) != 1 || txns[0].Amount <= 0 {
 		t.Errorf("Roth dividends = %+v", txns)
 	}
+}
+
+// A linked cash fund takes over the account's yield from the day it's linked:
+// hand-entered rates still cover the months before, the fund's daily published
+// yields everything after, each a simple annual rate that earns yield ÷ 12.
+func TestCashFundYieldTakesOverFromLink(t *testing.T) {
+	f := newFixture(t)
+	brokerage, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
+		Name: "Fidelity", Type: models.AccountInvestment, StartingBalance: 1000, StartingBalanceDate: "2026-06-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{
+		APY: 4.0, EffectiveFrom: "2026-06-01",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fund := f.sym("SPAXX")
+	f.price(fund, 1, 1) // the fund is a known security
+	if err := f.svc.SetCashFund(f.ctx, f.hh, brokerage.ID, fund, day("2026-08-10")); err != nil {
+		t.Fatalf("linking: %v", err)
+	}
+	for asOf, y := range map[string]float64{"2026-08-10": 3.3, "2026-08-20": 3.6} {
+		if err := f.svc.SaveFundYield(f.ctx, fund, day(asOf), y); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err = f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{APY: 5, EffectiveFrom: "2026-09-01"})
+	wantInvalid(t, err) // the fund owns the yield now
+
+	if n := f.postInterest("2026-09-02"); n != 3 {
+		t.Fatalf("posted %d, want June, July and August", n)
+	}
+	txns := f.interestTxns(brokerage.ID)
+	if len(txns) != 3 {
+		t.Fatalf("dividends = %+v", txns)
+	}
+	if want := fund + " dividend"; txns[2].Description != want {
+		t.Errorf("description = %q, want %q", txns[2].Description, want)
+	}
+
+	simple := func(y float64) float64 { return (math.Pow(1+y/100/12, 12) - 1) * 100 }
+	rates := []interest.Rate{
+		{From: day("2026-06-01"), APY: 4.0},
+		{From: day("2026-08-10"), APY: simple(3.3)},
+		{From: day("2026-08-20"), APY: simple(3.6)},
+	}
+	balance := 1000 + txns[0].Amount + txns[1].Amount
+	money(t, "July still at the manual 4%", txns[1].Amount,
+		interest.ForMonth(day("2026-07-01"), 1000+txns[0].Amount, rates[:1], day("2026-06-01")))
+	money(t, "August: manual to the 9th, then the fund's yields", txns[2].Amount,
+		interest.ForMonth(day("2026-08-01"), balance, rates, day("2026-06-01")))
+	// A 3.6% simple yield earns exactly 0.3% a month.
+	near := interest.MonthlyRate(simple(3.6))
+	if math.Abs(near-0.003) > 1e-12 {
+		t.Errorf("3.6%% simple yield earns %.6f a month, want 0.003", near)
+	}
+
+	out, err := f.svc.SavingsOutlookFor(f.ctx, f.hh, brokerage.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.CashFund == nil || *out.CashFund != fund || out.FundYield == nil || *out.FundYield != 3.6 {
+		t.Errorf("outlook = %+v", out)
+	}
+
+	due, err := f.svc.CashFundsDue(f.ctx, f.hh, time.Now().Add(time.Hour))
+	if err != nil || len(due) != 1 || due[0] != fund {
+		t.Errorf("due after an hour = %v, %v", due, err)
+	}
+	if due, _ = f.svc.CashFundsDue(f.ctx, f.hh, time.Now().Add(-time.Hour)); len(due) != 0 {
+		t.Errorf("fetched just now but due: %v", due)
+	}
+
+	_, err = f.svc.UpdateAccount(f.ctx, f.hh, brokerage.ID, ledger.AccountInput{
+		Name: "Fidelity", Type: models.AccountChecking, StartingBalance: 1000, StartingBalanceDate: "2026-06-01",
+	})
+	wantInvalid(t, err)
+
+	if err := f.svc.SetCashFund(f.ctx, f.hh, brokerage.ID, "", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{APY: 3.4, EffectiveFrom: "2026-09-01"}); err != nil {
+		t.Errorf("manual rate after unlinking: %v", err)
+	}
+}
+
+func TestCashFundRules(t *testing.T) {
+	f := newFixture(t)
+	savings := f.account("Savings", models.AccountSavings, 100)
+	wantInvalid(t, f.svc.SetCashFund(f.ctx, f.hh, savings.ID, "SPAXX", day("2026-09-01")))
+
+	brokerage := f.account("Brokerage", models.AccountInvestment, 100)
+	// A symbol that was never looked up can't be linked.
+	wantInvalid(t, f.svc.SetCashFund(f.ctx, f.hh, brokerage.ID, f.sym("NOPE"), day("2026-09-01")))
 }

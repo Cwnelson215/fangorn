@@ -3,12 +3,19 @@
 	// earn, and the rate history. The scheduler posts it once a month ends; this
 	// is where the rate it uses is kept.
 	//
-	// 'interest' is a high-yield savings account: its whole balance earns an APY,
-	// and it always has a rate. 'cash' is an investment or retirement account:
-	// only its uninvested cash earns — the yield of the money market fund it sits
-	// in, such as SPAXX — and setting one is optional.
+	// 'interest' is a high-yield savings account: its whole balance earns an APY
+	// you enter, and it always has a rate. 'cash' is an investment or retirement
+	// account: only its uninvested cash earns, at the yield of the money market
+	// fund it sits in (SPAXX at Fidelity). Linking the fund lets the server look
+	// that yield up every day; entering one by hand is the fallback.
 	import { onMount } from 'svelte';
-	import { addSavingsRate, deleteSavingsRate, getSavingsOutlook } from '$lib/api';
+	import {
+		addSavingsRate,
+		deleteSavingsRate,
+		getSavingsOutlook,
+		setCashFund,
+		unlinkCashFund
+	} from '$lib/api';
 	import type { SavingsOutlook } from '$lib/types';
 	import { formatCurrency, formatDate, today } from '$lib/format';
 	import Modal from './Modal.svelte';
@@ -23,11 +30,18 @@
 	let outlook = $state<SavingsOutlook | null>(null);
 	let error = $state<string | null>(null);
 
-	let modalOpen = $state(false);
+	// The hand-entered rate form.
+	let rateOpen = $state(false);
 	let apy = $state<string | number>('');
 	let effectiveFrom = $state(today());
 	let saving = $state(false);
 	let formError = $state<string | null>(null);
+
+	// The link-a-fund form.
+	let fundOpen = $state(false);
+	let fundSymbol = $state('SPAXX');
+	let linking = $state(false);
+	let fundError = $state<string | null>(null);
 
 	onMount(load);
 
@@ -40,23 +54,25 @@
 		}
 	}
 
+	let linked = $derived(outlook?.cash_fund != null);
 	// Newest first; the current rate is the newest that has already started.
 	let current = $derived(outlook?.rates.find((r) => r.effective_from <= today()) ?? null);
+	let hasRates = $derived((outlook?.rates.length ?? 0) > 0);
 
-	function openChange() {
+	function openRate() {
 		apy = current?.apy ?? '';
 		effectiveFrom = today();
 		formError = null;
-		modalOpen = true;
+		rateOpen = true;
 	}
 
-	async function save(event: Event) {
+	async function saveRate(event: Event) {
 		event.preventDefault();
 		saving = true;
 		formError = null;
 		try {
 			await addSavingsRate(accountId, { apy: Number(apy), effective_from: effectiveFrom });
-			modalOpen = false;
+			rateOpen = false;
 			await load();
 		} catch (e) {
 			formError = e instanceof Error ? e.message : 'Could not save the rate';
@@ -73,31 +89,79 @@
 			error = e instanceof Error ? e.message : 'Could not remove the rate';
 		}
 	}
+
+	function openFund() {
+		fundSymbol = 'SPAXX';
+		fundError = null;
+		fundOpen = true;
+	}
+
+	async function linkFund(event: Event) {
+		event.preventDefault();
+		linking = true;
+		fundError = null;
+		try {
+			outlook = await setCashFund(accountId, fundSymbol.trim());
+			fundOpen = false;
+		} catch (e) {
+			fundError = e instanceof Error ? e.message : 'Could not link the fund';
+		} finally {
+			linking = false;
+		}
+	}
+
+	async function unlink() {
+		try {
+			outlook = await unlinkCashFund(accountId);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not unlink the fund';
+		}
+	}
 </script>
 
 <div class="card">
 	<div class="head">
 		<h2>{isCash ? 'Cash yield' : 'Interest'}</h2>
-		<Button size="sm" onclick={openChange}>
-			{isCash && outlook?.rates.length === 0 ? 'Set yield' : 'Change rate'}
-		</Button>
+		<div class="head-actions">
+			{#if isCash && linked}
+				<Button variant="ghost" size="sm" onclick={unlink}>Unlink</Button>
+			{:else if isCash}
+				<Button variant="ghost" size="sm" onclick={openRate}>
+					{hasRates ? 'Change yield' : 'Enter by hand'}
+				</Button>
+				<Button size="sm" onclick={openFund}>Look up fund</Button>
+			{:else}
+				<Button size="sm" onclick={openRate}>Change rate</Button>
+			{/if}
+		</div>
 	</div>
 
 	{#if error}
 		<p class="error-text">{error}</p>
 	{/if}
 
-	{#if outlook && isCash && outlook.rates.length === 0}
+	{#if outlook && isCash && !linked && !hasRates}
 		<p class="muted note">
 			The account's uninvested cash usually sits in a money market fund (SPAXX at Fidelity) that
-			pays a dividend each month. Set its yield — Fidelity shows the 7-day yield on the fund's page —
-			and Fangorn adds that dividend when each month ends. Holdings don't count, only the cash.
+			pays a dividend each month. <strong>Look up fund</strong> links it: Fangorn checks the fund's
+			published yield every day and adds the dividend when each month ends. Only the cash counts, not
+			the holdings.
 		</p>
 	{:else if outlook}
 		<div class="summary">
 			<div>
-				<span class="label">{isCash ? 'Yield' : 'Rate'}</span>
-				<span class="value">{current ? `${current.apy}% ${unit}` : 'Not started yet'}</span>
+				{#if linked}
+					<span class="label">{outlook.cash_fund} yield</span>
+					<span class="value">
+						{outlook.fund_yield != null ? `${outlook.fund_yield}%` : 'Looking up…'}
+					</span>
+					{#if outlook.fund_yield_as_of}
+						<span class="muted note">looked up {formatDate(outlook.fund_yield_as_of)}</span>
+					{/if}
+				{:else}
+					<span class="label">{isCash ? 'Yield' : 'Rate'}</span>
+					<span class="value">{current ? `${current.apy}% ${unit}` : 'Not started yet'}</span>
+				{/if}
 			</div>
 			<div>
 				<span class="label">This month</span>
@@ -109,7 +173,13 @@
 		</div>
 
 		<p class="muted note">
-			{#if isCash}
+			{#if linked}
+				Checked against {outlook.cash_fund}'s published yield every day since
+				{formatDate(outlook.cash_fund_since ?? '')}. When a month ends, an
+				<strong>{outlook.cash_fund} dividend</strong> is added under <strong>Dividends</strong>: the
+				month-end cash × the month's average yield ÷ 12. It lands close to the statement; edit it if
+				it's off.
+			{:else if isCash}
 				Once a month ends, a <strong>Money market dividend</strong> is added under
 				<strong>Dividends</strong>: the month-end cash × the month's yield. Money market yields move a
 				little every day, so check it against the statement and edit it if it's off.
@@ -119,24 +189,26 @@
 			{/if}
 		</p>
 
-		<h3>Rate history</h3>
-		<ul class="rates">
-			{#each outlook.rates as r (r.id)}
-				<li>
-					<span class="apy">{r.apy}%</span>
-					<span class="muted">from {formatDate(r.effective_from)}</span>
-					{#if r.effective_from > today()}<span class="badge">upcoming</span>{/if}
-					{#if isCash || outlook.rates.length > 1}
-						<Button variant="ghost" size="sm" onclick={() => remove(r.id)}>Remove</Button>
-					{/if}
-				</li>
-			{/each}
-		</ul>
+		{#if hasRates}
+			<h3>{linked ? 'Entered by hand, before linking' : 'Rate history'}</h3>
+			<ul class="rates">
+				{#each outlook.rates as r (r.id)}
+					<li>
+						<span class="apy">{r.apy}%</span>
+						<span class="muted">from {formatDate(r.effective_from)}</span>
+						{#if r.effective_from > today()}<span class="badge">upcoming</span>{/if}
+						{#if !linked && (isCash || outlook.rates.length > 1)}
+							<Button variant="ghost" size="sm" onclick={() => remove(r.id)}>Remove</Button>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	{/if}
 </div>
 
-<Modal bind:open={modalOpen} title={isCash ? 'Cash yield' : 'Change interest rate'}>
-	<form onsubmit={save}>
+<Modal bind:open={rateOpen} title={isCash ? 'Cash yield' : 'Change interest rate'}>
+	<form onsubmit={saveRate}>
 		<div class="form-row">
 			<Field label={isCash ? 'Yield (%)' : 'New APY (%)'} id="newApy">
 				<input
@@ -146,7 +218,7 @@
 					step="0.001"
 					min="0"
 					max="99.999"
-					placeholder={isCash ? '4.02' : '4.35'}
+					placeholder={isCash ? '3.40' : '4.35'}
 					bind:value={apy}
 					disabled={saving}
 					required
@@ -168,8 +240,39 @@
 			<p class="error-text">{formError}</p>
 		{/if}
 		<div class="form-actions">
-			<Button variant="secondary" onclick={() => (modalOpen = false)}>Cancel</Button>
+			<Button variant="secondary" onclick={() => (rateOpen = false)}>Cancel</Button>
 			<Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save rate'}</Button>
+		</div>
+	</form>
+</Modal>
+
+<Modal bind:open={fundOpen} title="Look up the cash fund">
+	<form onsubmit={linkFund}>
+		<Field
+			label="Money market fund"
+			id="cashFund"
+			hint="Where this account's uninvested cash sits — SPAXX is Fidelity's usual core position."
+		>
+			<input
+				id="cashFund"
+				bind:value={fundSymbol}
+				autocapitalize="characters"
+				autocomplete="off"
+				disabled={linking}
+				required
+			/>
+		</Field>
+		<p class="muted note">
+			The fund's yield counts from today. Anything entered by hand still covers the months before.
+		</p>
+		{#if fundError}
+			<p class="error-text">{fundError}</p>
+		{/if}
+		<div class="form-actions">
+			<Button variant="secondary" onclick={() => (fundOpen = false)}>Cancel</Button>
+			<Button type="submit" disabled={linking || !fundSymbol.trim()}>
+				{linking ? 'Looking up…' : 'Link fund'}
+			</Button>
 		</div>
 	</form>
 </Modal>
@@ -179,12 +282,20 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		gap: 0.5rem;
 		margin-bottom: 1rem;
 	}
 
 	.head h2 {
 		margin: 0;
 		font-size: 1.125rem;
+	}
+
+	.head-actions {
+		display: flex;
+		gap: 0.25rem;
+		flex-wrap: wrap;
+		justify-content: flex-end;
 	}
 
 	.summary {

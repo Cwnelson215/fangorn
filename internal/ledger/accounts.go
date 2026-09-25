@@ -229,6 +229,20 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		}
 	}
 
+	// A linked cash fund likewise only belongs on an account that holds securities.
+	if !models.HoldsSecurities(in.Type) {
+		var linked bool
+		err := s.db.QueryRowContext(ctx,
+			`SELECT cash_fund IS NOT NULL FROM accounts WHERE household_id = $1 AND id = $2`,
+			householdID, id).Scan(&linked)
+		if err != nil && err != sql.ErrNoRows {
+			return models.Account{}, fmt.Errorf("checking the cash fund: %w", err)
+		}
+		if linked {
+			return models.Account{}, invalid("this account's cash is linked to a money market fund; unlink it before changing to a type that doesn't hold securities")
+		}
+	}
+
 	// Trades only make sense on an account that holds securities, so one that
 	// has any cannot be turned into something else out from under them. Moving
 	// between investment and retirement is fine: both keep the trade log.

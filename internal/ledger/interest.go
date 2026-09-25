@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -91,6 +92,13 @@ func (s *Service) AddSavingsRate(ctx context.Context, householdID, accountID int
 	if _, _, err := s.assertEarnsOnCash(ctx, s.db, householdID, accountID); err != nil {
 		return models.SavingsRate{}, err
 	}
+	var fund sql.NullString
+	if err := s.db.QueryRowContext(ctx, `SELECT cash_fund FROM accounts WHERE id = $1`, accountID).Scan(&fund); err != nil {
+		return models.SavingsRate{}, fmt.Errorf("checking the cash fund: %w", err)
+	}
+	if fund.Valid {
+		return models.SavingsRate{}, invalid("this account's yield is looked up from %s; unlink it to enter one by hand", fund.String)
+	}
 	r := models.SavingsRate{AccountID: accountID, APY: in.APY, EffectiveFrom: in.EffectiveFrom}
 	err := s.db.QueryRowContext(ctx,
 		`INSERT INTO savings_rates (household_id, account_id, apy, effective_from)
@@ -137,22 +145,177 @@ func (s *Service) DeleteSavingsRate(ctx context.Context, householdID, accountID,
 	})
 }
 
+// interestRates is the rate history the month's earnings are worked out from.
+// Usually that is the account's own savings_rates. An account linked to a cash
+// fund switches to the fund's published yields on the day it was linked:
+// hand-entered rates still cover the time before, the fund everything after.
 func (s *Service) interestRates(ctx context.Context, accountID int) ([]interest.Rate, error) {
+	var fund sql.NullString
+	var since sql.NullTime
+	err := s.db.QueryRowContext(ctx,
+		`SELECT cash_fund, cash_fund_since FROM accounts WHERE id = $1`, accountID).Scan(&fund, &since)
+	if err != nil {
+		return nil, fmt.Errorf("loading the cash fund: %w", err)
+	}
+
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT effective_from, apy FROM savings_rates WHERE account_id = $1`, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("loading rates: %w", err)
 	}
-	defer rows.Close()
 	var rates []interest.Rate
 	for rows.Next() {
 		var r interest.Rate
 		if err := rows.Scan(&r.From, &r.APY); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scanning rate: %w", err)
 		}
-		rates = append(rates, r)
+		if !fund.Valid || r.From.Before(since.Time) {
+			rates = append(rates, r)
+		}
 	}
-	return rates, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil || !fund.Valid {
+		return rates, err
+	}
+
+	yields, err := s.fundYields(ctx, fund.String)
+	if err != nil {
+		return nil, err
+	}
+	// The fund's rate on the day it was linked: the latest yield on or before
+	// it, or — if the first lookup came after — the first one there is.
+	var atLink *float64
+	for _, y := range yields {
+		if !y.From.After(since.Time) {
+			v := y.APY
+			atLink = &v
+		}
+	}
+	if atLink == nil && len(yields) > 0 {
+		atLink = &yields[0].APY
+	}
+	if atLink != nil {
+		rates = append(rates, interest.Rate{From: since.Time, APY: *atLink})
+	}
+	for _, y := range yields {
+		if y.From.After(since.Time) {
+			rates = append(rates, y)
+		}
+	}
+	return rates, nil
+}
+
+// fundYields is a fund's yield history, oldest first, as rates. A money market
+// fund quotes its 7-day yield as a simple annual rate that accrues daily and is
+// paid monthly, so a month earns yield ÷ 12. The rate engine takes an APY and
+// earns (1+APY)^(1/12) − 1 a month; (1 + yield/12)^12 − 1 is the APY that makes
+// the two agree.
+func (s *Service) fundYields(ctx context.Context, symbol string) ([]interest.Rate, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT as_of, yield FROM security_yields WHERE symbol = $1 ORDER BY as_of`, symbol)
+	if err != nil {
+		return nil, fmt.Errorf("loading %s yields: %w", symbol, err)
+	}
+	defer rows.Close()
+	var out []interest.Rate
+	for rows.Next() {
+		var r interest.Rate
+		var yield float64
+		if err := rows.Scan(&r.From, &yield); err != nil {
+			return nil, fmt.Errorf("scanning yield: %w", err)
+		}
+		r.APY = (math.Pow(1+yield/100/12, 12) - 1) * 100
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SetCashFund links an investment or retirement account's cash to the money
+// market fund it sits in, so its yield is looked up rather than typed in. An
+// empty symbol unlinks it. Relinking the same fund keeps the original date.
+// The fund must already be a known security (the handler fetches its first
+// quote); today is the household's, and is when the fund takes over.
+func (s *Service) SetCashFund(ctx context.Context, householdID, accountID int, symbol string, today time.Time) error {
+	var typ string
+	var current sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT type, cash_fund FROM accounts WHERE household_id = $1 AND id = $2`,
+		householdID, accountID).Scan(&typ, &current)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("fetching account: %w", err)
+	}
+	if !models.HoldsSecurities(typ) {
+		return invalid("only investment and retirement accounts have a cash fund")
+	}
+
+	if symbol == "" {
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE accounts SET cash_fund = NULL, cash_fund_since = NULL, updated_at = NOW()
+			 WHERE household_id = $1 AND id = $2`, householdID, accountID)
+		if err != nil {
+			return fmt.Errorf("unlinking cash fund: %w", err)
+		}
+		return nil
+	}
+
+	symbol = NormalizeSymbol(symbol)
+	if current.Valid && current.String == symbol {
+		return nil
+	}
+	if _, err := s.GetSecurity(ctx, symbol); errors.Is(err, ErrNotFound) {
+		return invalid("couldn't look up %s right now; try again in a minute", symbol)
+	} else if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE accounts SET cash_fund = $1, cash_fund_since = $2, updated_at = NOW()
+		 WHERE household_id = $3 AND id = $4`,
+		symbol, dateStr(today), householdID, accountID)
+	if err != nil {
+		return fmt.Errorf("linking cash fund: %w", err)
+	}
+	return nil
+}
+
+// SaveFundYield records a fund's yield for a day; a later lookup the same day
+// replaces it.
+func (s *Service) SaveFundYield(ctx context.Context, symbol string, asOf time.Time, yield float64) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO security_yields (symbol, as_of, yield, fetched_at) VALUES ($1,$2,$3,NOW())
+		 ON CONFLICT (symbol, as_of) DO UPDATE SET yield = EXCLUDED.yield, fetched_at = NOW()`,
+		NormalizeSymbol(symbol), dateStr(asOf), yield)
+	if err != nil {
+		return fmt.Errorf("saving %s yield: %w", symbol, err)
+	}
+	return nil
+}
+
+// CashFundsDue lists the cash funds the household's open accounts are linked
+// to whose yield hasn't been looked up since staleBefore.
+func (s *Service) CashFundsDue(ctx context.Context, householdID int, staleBefore time.Time) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT a.cash_fund FROM accounts a
+		 WHERE a.household_id = $1 AND a.archived_at IS NULL AND a.cash_fund IS NOT NULL
+		   AND NOT EXISTS (SELECT 1 FROM security_yields y
+		                   WHERE y.symbol = a.cash_fund AND y.fetched_at >= $2)`,
+		householdID, staleBefore)
+	if err != nil {
+		return nil, fmt.Errorf("listing cash funds: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sym string
+		if err := rows.Scan(&sym); err != nil {
+			return nil, err
+		}
+		out = append(out, sym)
+	}
+	return out, rows.Err()
 }
 
 // cashBalanceOn is starting_balance plus every transaction dated on or before d.
@@ -177,9 +340,10 @@ func cashBalanceOn(ctx context.Context, q interface {
 // interest transactions it wrote.
 func (s *Service) PostInterest(ctx context.Context, householdID int, today time.Time) (int, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT a.id, a.type, a.starting_balance_date FROM accounts a
+		`SELECT a.id, a.type, a.starting_balance_date, a.cash_fund FROM accounts a
 		 WHERE a.household_id = $1 AND a.archived_at IS NULL
-		   AND EXISTS (SELECT 1 FROM savings_rates r WHERE r.account_id = a.id)`,
+		   AND (a.cash_fund IS NOT NULL
+		        OR EXISTS (SELECT 1 FROM savings_rates r WHERE r.account_id = a.id))`,
 		householdID)
 	if err != nil {
 		return 0, fmt.Errorf("listing accounts with a rate: %w", err)
@@ -188,11 +352,12 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 		id    int
 		typ   string
 		start time.Time
+		fund  sql.NullString
 	}
 	var accounts []account
 	for rows.Next() {
 		var a account
-		if err := rows.Scan(&a.id, &a.typ, &a.start); err != nil {
+		if err := rows.Scan(&a.id, &a.typ, &a.start, &a.fund); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("scanning account: %w", err)
 		}
@@ -208,7 +373,8 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 		if !models.EarnsOnCash(a.typ) {
 			continue // rates left from an older type; the update guard prevents new ones
 		}
-		n, err := s.postAccountInterest(ctx, householdID, a.id, a.typ, a.start, today)
+		description, category := earningLabel(a.typ, a.fund.String)
+		n, err := s.postAccountInterest(ctx, householdID, a.id, earning{description, category}, a.start, today)
 		posted += n
 		if err != nil {
 			return posted, fmt.Errorf("account %d: %w", a.id, err)
@@ -217,7 +383,10 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 	return posted, nil
 }
 
-func (s *Service) postAccountInterest(ctx context.Context, householdID, accountID int, typ string, start, today time.Time) (int, error) {
+// earning is how an account's monthly earnings are described and filed.
+type earning struct{ description, category string }
+
+func (s *Service) postAccountInterest(ctx context.Context, householdID, accountID int, label earning, start, today time.Time) (int, error) {
 	rates, err := s.interestRates(ctx, accountID)
 	if err != nil || len(rates) == 0 {
 		return 0, err
@@ -258,7 +427,7 @@ func (s *Service) postAccountInterest(ctx context.Context, householdID, accountI
 		if done[dateStr(m)] {
 			continue
 		}
-		wrote, err := s.postInterestMonth(ctx, householdID, accountID, typ, m, rates, start)
+		wrote, err := s.postInterestMonth(ctx, householdID, accountID, label, m, rates, start)
 		if err != nil {
 			return posted, fmt.Errorf("%s: %w", m.Format("2006-01"), err)
 		}
@@ -271,10 +440,14 @@ func (s *Service) postAccountInterest(ctx context.Context, householdID, accountI
 
 // earningLabel is how a month's earnings are described and filed. Savings pay
 // interest; the money market fund an investment account's cash sits in pays a
-// dividend, and keeping those apart lets a report tell them apart.
-func earningLabel(accountType string) (description, category string) {
+// dividend, and keeping those apart lets a report tell them apart. A linked
+// fund is named, the way a statement names it.
+func earningLabel(accountType, fund string) (description, category string) {
 	if accountType == models.AccountHighYieldSavings {
 		return "Interest", "Interest"
+	}
+	if fund != "" {
+		return fund + " dividend", "Dividends"
 	}
 	return "Money market dividend", "Dividends"
 }
@@ -283,7 +456,7 @@ func earningLabel(accountType string) (description, category string) {
 // the transaction go in together; a row that already exists means another pass
 // got there first, and nothing is written. The balance is the cash balance, so
 // an investment account's holdings don't earn the cash rate.
-func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, typ string, month time.Time, rates []interest.Rate, start time.Time) (bool, error) {
+func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, label earning, month time.Time, rates []interest.Rate, start time.Time) (bool, error) {
 	end := interest.MonthEnd(month)
 	wrote := false
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -310,8 +483,7 @@ func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID 
 			return nil // handled, but nothing earned: no zero-dollar transaction
 		}
 
-		description, categoryName := earningLabel(typ)
-		categoryID, err := incomeCategory(ctx, tx, householdID, categoryName)
+		categoryID, err := incomeCategory(ctx, tx, householdID, label.category)
 		if err != nil {
 			return err
 		}
@@ -321,7 +493,7 @@ func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID 
 			   (household_id, account_id, date, amount, kind, description, category_id, source)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 			 RETURNING id`,
-			householdID, accountID, dateStr(end), amount, models.KindIncome, description,
+			householdID, accountID, dateStr(end), amount, models.KindIncome, label.description,
 			categoryID, models.SourceInterest).Scan(&txnID)
 		if err != nil {
 			return fmt.Errorf("posting interest: %w", err)
@@ -369,6 +541,13 @@ type SavingsOutlook struct {
 	// ProjectedDate is the last day of this month, when the interest posts.
 	ProjectedDate   string  `json:"projected_date"`
 	ProjectedAmount float64 `json:"projected_amount"`
+
+	// CashFund is the money market fund an investment account's yield is looked
+	// up from, with its latest published yield (a simple annual rate, percent).
+	CashFund      *string  `json:"cash_fund"`
+	CashFundSince *string  `json:"cash_fund_since"`
+	FundYield     *float64 `json:"fund_yield"`
+	FundYieldAsOf *string  `json:"fund_yield_as_of"`
 }
 
 func (s *Service) SavingsOutlookFor(ctx context.Context, householdID, accountID int) (SavingsOutlook, error) {
@@ -399,5 +578,28 @@ func (s *Service) SavingsOutlookFor(ctx context.Context, householdID, accountID 
 		return out, err
 	}
 	out.ProjectedAmount = interest.ForMonth(month, balance, calc, start)
+
+	var fund sql.NullString
+	var since sql.NullTime
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT cash_fund, cash_fund_since FROM accounts WHERE id = $1`, accountID).Scan(&fund, &since); err != nil {
+		return out, fmt.Errorf("loading the cash fund: %w", err)
+	}
+	if fund.Valid {
+		out.CashFund = &fund.String
+		d := dateStr(since.Time)
+		out.CashFundSince = &d
+		var yield float64
+		var asOf time.Time
+		err := s.db.QueryRowContext(ctx,
+			`SELECT yield, as_of FROM security_yields WHERE symbol = $1 ORDER BY as_of DESC LIMIT 1`,
+			fund.String).Scan(&yield, &asOf)
+		if err == nil {
+			a := dateStr(asOf)
+			out.FundYield, out.FundYieldAsOf = &yield, &a
+		} else if err != sql.ErrNoRows {
+			return out, fmt.Errorf("loading %s yield: %w", fund.String, err)
+		}
+	}
 	return out, nil
 }

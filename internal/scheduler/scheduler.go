@@ -163,6 +163,12 @@ func (s *Scheduler) runHousehold(ctx context.Context, household ledger.Household
 		log.Printf("Scheduler: posted %d recurring transaction(s) for household %d", posted, household.ID)
 	}
 
+	// Cash fund yields before interest, so a month ending today posts at the
+	// latest figure.
+	if err := s.prices.RefreshYields(ctx, household.ID, today); err != nil {
+		log.Printf("Scheduler: cash fund yields for household %d: %v", household.ID, err)
+	}
+
 	// A finished month's interest before the snapshot, so the 1st's net worth
 	// includes what the savings earned. Months that were missed while the
 	// process was down are picked up here too.

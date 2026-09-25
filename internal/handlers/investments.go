@@ -46,6 +46,9 @@ func (h *InvestmentHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/investments", h.Summary)
 	mux.HandleFunc("GET /api/investments/value-history", h.SummaryValueHistory)
 	mux.HandleFunc("GET /api/accounts/{id}/value-history", h.AccountValueHistory)
+
+	mux.HandleFunc("PUT /api/accounts/{id}/cash-fund", h.SetCashFund)
+	mux.HandleFunc("DELETE /api/accounts/{id}/cash-fund", h.UnlinkCashFund)
 }
 
 // Summary is every investment account combined. Like Holdings, it refreshes
@@ -233,4 +236,67 @@ func (h *InvestmentHandler) ensureSecurity(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	return true
+}
+
+// SetCashFund links an account's cash to its money market fund, fetching the
+// fund's first quote and yield so the account page has something to show at
+// once. It answers with the account's savings outlook.
+func (h *InvestmentHandler) SetCashFund(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	var in struct {
+		Symbol string `json:"symbol"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	symbol := ledger.NormalizeSymbol(in.Symbol)
+	if symbol == "" {
+		fail(w, ledger.ErrInvalid{Msg: "symbol is required"})
+		return
+	}
+	household, err := h.svc.GetHousehold(r.Context(), h.householdID)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), lookupBudget)
+	defer cancel()
+	if err := h.prices.EnsureSecurity(ctx, symbol); err != nil {
+		fail(w, err)
+		return
+	}
+	if err := h.svc.SetCashFund(r.Context(), h.householdID, id, symbol, household.Today()); err != nil {
+		fail(w, err)
+		return
+	}
+	// Best effort: if the lookup fails, the scheduler tries again shortly.
+	_ = h.prices.FetchYield(ctx, symbol, household.Today())
+
+	out, err := h.svc.SavingsOutlookFor(r.Context(), h.householdID, id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *InvestmentHandler) UnlinkCashFund(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	if err := h.svc.SetCashFund(r.Context(), h.householdID, id, "", time.Time{}); err != nil {
+		fail(w, err)
+		return
+	}
+	out, err := h.svc.SavingsOutlookFor(r.Context(), h.householdID, id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
