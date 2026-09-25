@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -183,7 +184,7 @@ func Decide(x vision.Extraction, rc ledger.ReceiptContext, today time.Time) Deci
 }
 
 // matchAccount finds the one account a receipt was paid from, or nil. A card
-// matches on its last four digits; cash matches the household's cash account.
+// matches on its last four digits, against any of the cards an account lists; cash matches the household's cash account.
 // Anything short of exactly one candidate is nil — posting to the wrong account
 // is worse than asking.
 func matchAccount(tender string, last4 *string, accounts []ledger.ReceiptAccount) *int {
@@ -191,7 +192,7 @@ func matchAccount(tender string, last4 *string, accounts []ledger.ReceiptAccount
 	switch {
 	case tender == "card" && last4 != nil:
 		for _, a := range accounts {
-			if m := strings.TrimSpace(a.Mask); last4Pattern.MatchString(m) && m == *last4 {
+			if slices.Contains(models.CardDigits(a.Mask), *last4) {
 				found = append(found, a.ID)
 			}
 		}

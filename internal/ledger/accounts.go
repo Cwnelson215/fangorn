@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -132,6 +133,33 @@ func trimmedOrNil(s *string) *string {
 	return &t
 }
 
+// normalizeMask accepts the last 4 digits of one or more cards, separated by
+// commas or spaces, and stores them one way: "1234, 5678". A typo is refused
+// rather than kept, since a mask that isn't four digits can never match a
+// receipt and nothing would say why.
+func (in *AccountInput) normalizeMask() error {
+	in.Mask = trimmedOrNil(in.Mask)
+	if in.Mask == nil {
+		return nil
+	}
+	var cards []string
+	for _, p := range models.SplitCards(*in.Mask) {
+		if !models.IsCardDigits(p) {
+			return invalid("card numbers are the last 4 digits of each card, like 1234, 5678")
+		}
+		if !slices.Contains(cards, p) {
+			cards = append(cards, p)
+		}
+	}
+	if len(cards) == 0 {
+		in.Mask = nil
+		return nil
+	}
+	joined := strings.Join(cards, ", ")
+	in.Mask = &joined
+	return nil
+}
+
 func (in *AccountInput) normalize() error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
@@ -139,7 +167,9 @@ func (in *AccountInput) normalize() error {
 	}
 	// Accounts are grouped by institution, so "Gesa" and "Gesa " must be one.
 	in.InstitutionName = trimmedOrNil(in.InstitutionName)
-	in.Mask = trimmedOrNil(in.Mask)
+	if err := in.normalizeMask(); err != nil {
+		return err
+	}
 	if !models.ValidAccountType(in.Type) {
 		return invalid("unknown account type %q", in.Type)
 	}

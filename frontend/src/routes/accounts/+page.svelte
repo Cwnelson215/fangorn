@@ -363,8 +363,12 @@
 		</div>
 
 		<div class="form-row">
-			<Field label="Last 4 digits" id="mask">
-				<input id="mask" bind:value={mask} placeholder="1234" maxlength="4" disabled={saving} />
+			<Field
+				label="Cards (last 4 digits)"
+				id="mask"
+				hint="More than one card on this account? Separate them with commas. Receipts match any of them."
+			>
+				<input id="mask" bind:value={mask} placeholder="1234, 5678" disabled={saving} />
 			</Field>
 		</div>
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDayHeading, groupByDate } from './format';
+import { formatCards, formatDayHeading, groupByDate } from './format';
 
 describe('formatDayHeading', () => {
 	it('names today and yesterday', () => {
@@ -35,5 +35,13 @@ describe('groupByDate', () => {
 
 	it('returns nothing for nothing', () => {
 		expect(groupByDate([], () => '')).toEqual([]);
+	});
+});
+
+describe('formatCards', () => {
+	it('shows each card masked', () => {
+		expect(formatCards('1234')).toBe('····1234');
+		expect(formatCards('1234, 5678')).toBe('····1234, ····5678');
+		expect(formatCards(null)).toBe('');
 	});
 });

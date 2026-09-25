@@ -7,10 +7,11 @@
 	import type { Account } from '$lib/types';
 	import { groupAccounts } from '$lib/grouping';
 	import { grouping } from '$lib/grouping.svelte';
+	import { formatCards } from '$lib/format';
 
 	let { accounts, showMask = false }: { accounts: Account[]; showMask?: boolean } = $props();
 
-	const text = (a: Account) => a.name + (showMask && a.mask ? ` ····${a.mask}` : '');
+	const text = (a: Account) => a.name + (showMask && a.mask ? ` ${formatCards(a.mask)}` : '');
 
 	let groups = $derived(groupAccounts(accounts, grouping.by));
 </script>

@@ -14,15 +14,15 @@ func TestAccountInputNormalizeTrimsInstitution(t *testing.T) {
 		{str("   "), nil},
 		{str(" Gesa "), str("Gesa")},
 	} {
+		// The mask is normalized as a list of cards; TestAccountCardsAreNormalized
+		// covers it.
 		in := AccountInput{Name: "Checking", Type: "checking", StartingBalanceDate: "2026-01-01",
-			InstitutionName: tc.in, Mask: tc.in}
+			InstitutionName: tc.in}
 		if err := in.normalize(); err != nil {
 			t.Fatalf("normalize: %v", err)
 		}
-		for field, got := range map[string]*string{"institution_name": in.InstitutionName, "mask": in.Mask} {
-			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
-				t.Errorf("%s from %v = %v; want %v", field, deref(tc.in), deref(got), deref(tc.want))
-			}
+		if got := in.InstitutionName; (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+			t.Errorf("institution_name from %v = %v; want %v", deref(tc.in), deref(got), deref(tc.want))
 		}
 	}
 }

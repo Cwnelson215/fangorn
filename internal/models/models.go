@@ -12,6 +12,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -137,6 +138,33 @@ func ClassForType(accountType string) string {
 	}
 }
 
+// SplitCards splits an account's mask into its parts. An account can list
+// several cards — one debit card per person on a checking account — stored as
+// "1234, 5678"; commas, semicolons, slashes and spaces all separate.
+func SplitCards(mask string) []string {
+	return strings.FieldsFunc(mask, func(r rune) bool {
+		return r == ',' || r == ';' || r == '/' || r == ' ' || r == '\t'
+	})
+}
+
+// IsCardDigits reports whether s is the last 4 digits of a card.
+func IsCardDigits(s string) bool {
+	return len(s) == 4 && strings.Trim(s, "0123456789") == ""
+}
+
+// CardDigits is the last-4 digits of each card on an account. Anything that
+// isn't four digits is left out, so an old free-form mask simply matches
+// nothing.
+func CardDigits(mask string) []string {
+	var out []string
+	for _, part := range SplitCards(mask) {
+		if IsCardDigits(part) {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 // ValidAccountType reports whether t is one of the supported account types.
 func ValidAccountType(t string) bool {
 	switch t {
@@ -148,12 +176,14 @@ func ValidAccountType(t string) bool {
 }
 
 type Account struct {
-	ID                  int     `json:"id"`
-	HouseholdID         int     `json:"household_id"`
-	Name                string  `json:"name"`
-	InstitutionName     *string `json:"institution_name"`
-	Type                string  `json:"type"`
-	Class               string  `json:"class"`
+	ID              int     `json:"id"`
+	HouseholdID     int     `json:"household_id"`
+	Name            string  `json:"name"`
+	InstitutionName *string `json:"institution_name"`
+	Type            string  `json:"type"`
+	Class           string  `json:"class"`
+	// Mask is the last 4 digits of each card on the account, "1234, 5678";
+	// receipts match a card against any of them (CardDigits).
 	Mask                *string `json:"mask"`
 	StartingBalance     float64 `json:"starting_balance"`
 	StartingBalanceDate string  `json:"starting_balance_date"`

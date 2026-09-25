@@ -284,7 +284,7 @@ transaction deletes the photo, and `DELETE /api/receipts/{id}` refuses a posted 
 **It posts by itself only when `receipts.Decide` finds nothing to hold for:** total and date read,
 date within 60 days and not in the future, USD, a purchase not a return, subtotal+tax+tip matching
 the total, the suggested category matching one of the household's non-archived expense categories
-exactly (case-insensitive), and exactly one account — card last-4 against `accounts.mask`, or
+exactly (case-insensitive), and exactly one account — card last-4 against any of the cards in `accounts.mask` (a list, "1234, 5678" — one debit card per person; `models.CardDigits`), or
 tender cash with exactly one `cash` account. **A category that names an account
 (`categories.default_account_id`, "Always goes on" on the Categories page) wins over both**: gas
 goes on the Visa whatever card the receipt shows. Receipts uploaded by the iPhone Shortcut

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Account } from '$lib/types';
 	import { accountKindLabel, holdsSecurities } from '$lib/types';
-	import { formatCurrency, formatDate } from '$lib/format';
+	import { formatCards, formatCurrency, formatDate } from '$lib/format';
 
 	let { account }: { account: Account } = $props();
 
@@ -17,7 +17,7 @@
 		<div class="account-info">
 			<div class="account-name">{account.name}</div>
 			<div class="institution">
-				{account.institution_name || ''}{account.mask ? ` ····${account.mask}` : ''}
+				{account.institution_name || ''}{account.mask ? ` ${formatCards(account.mask)}` : ''}
 			</div>
 		</div>
 		<div class="account-type">{accountKindLabel(account)}</div>

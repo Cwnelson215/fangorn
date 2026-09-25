@@ -196,3 +196,26 @@ func TestDecideCategoryAccountWins(t *testing.T) {
 		t.Errorf("held receipt account = %v, want the Visa", d.AccountID)
 	}
 }
+
+// A checking account with two debit cards matches a receipt from either.
+func TestDecideMatchesAnyCardOnAnAccount(t *testing.T) {
+	rc := household
+	rc.Accounts = []ledger.ReceiptAccount{
+		{ID: 1, Type: models.AccountChecking, Mask: "1111, 2222"},
+		{ID: 2, Type: models.AccountCreditCard, Mask: "4821"},
+		{ID: 4, Type: models.AccountSavings, Mask: "12a4, 3333x"},
+	}
+	for _, last4 := range []string{"1111", "2222"} {
+		x := good()
+		x.CardLast4 = str(last4)
+		if d := Decide(x, rc, today); d.Post == nil || d.Post.AccountID != 1 {
+			t.Errorf("card %s: want checking, got %+v reasons %v", last4, d.Post, d.Reasons)
+		}
+	}
+	// A mangled mask matches nothing rather than a piece of itself.
+	x := good()
+	x.CardLast4 = str("3333")
+	if d := Decide(x, rc, today); d.Post != nil {
+		t.Errorf("malformed mask matched: %+v", d.Post)
+	}
+}

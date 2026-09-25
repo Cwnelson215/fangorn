@@ -170,3 +170,17 @@ export function groupByDate<T>(items: T[], dateOf: (item: T) => string): { date:
 	}
 	return groups;
 }
+
+/**
+ * The cards on an account for display: "····1234" or "····1234, ····5678". The
+ * server stores them as "1234, 5678" (a checking account can have a debit card
+ * per person).
+ */
+export function formatCards(mask: string | null | undefined): string {
+	if (!mask) return '';
+	return mask
+		.split(/[,;/\s]+/)
+		.filter(Boolean)
+		.map((d) => `····${d}`)
+		.join(', ');
+}

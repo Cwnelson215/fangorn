@@ -5,6 +5,7 @@
 	import type { AccountDetail, Holdings, Slice, Trade } from '$lib/types';
 	import { TRADE_SIDE_LABELS, accountKindLabel, holdsSecurities } from '$lib/types';
 	import {
+		formatCards,
 		formatCurrency,
 		formatDate,
 		formatDateShort,
@@ -135,7 +136,7 @@
 				<p class="muted">
 					{accountKindLabel(account)}
 					{#if account.institution_name}· {account.institution_name}{/if}
-					{#if account.mask}· ····{account.mask}{/if}
+					{#if account.mask}· {formatCards(account.mask)}{/if}
 				</p>
 			</div>
 			<div class="balance-block">
