@@ -2,6 +2,7 @@
 	import * as d3 from 'd3';
 	import type { Slice } from '$lib/types';
 	import { formatCurrencyWhole } from '$lib/format';
+	import { AXIS_TEXT, CATEGORICAL, INK, SURFACE } from '$lib/chart';
 
 	// A share-of-total donut with a legend: spending by category, portfolio
 	// allocation. Slices of zero or less are left out — a pie can't draw them.
@@ -17,18 +18,7 @@
 	let container = $state<HTMLDivElement>();
 
 	// Fallback palette for categories with no colour of their own.
-	const COLORS = [
-		'#4ecca3',
-		'#ff6b6b',
-		'#4ecdc4',
-		'#45b7d1',
-		'#96ceb4',
-		'#ffeaa7',
-		'#dfe6e9',
-		'#fd79a8',
-		'#a29bfe',
-		'#55a3f0'
-	];
+	const COLORS = CATEGORICAL;
 
 	const colorFor = (d: Slice, i: number) => d.color || COLORS[i % COLORS.length];
 
@@ -71,21 +61,22 @@
 			.append('path')
 			.attr('d', arc)
 			.attr('fill', (d, i) => colorFor(d.data, i))
-			.attr('stroke', 'white')
+			.attr('stroke', SURFACE)
 			.attr('stroke-width', 2);
 
 		g.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '-0.2em')
 			.attr('font-size', '0.8rem')
-			.attr('fill', '#999')
+			.attr('fill', AXIS_TEXT)
 			.text(centerLabel);
 		g.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '1em')
 			.attr('font-size', '1.1rem')
-			.attr('font-weight', '700')
-			.attr('fill', '#1a1a2e')
+			.attr('font-weight', '600')
+			.attr('font-family', 'var(--font-display)')
+			.attr('fill', INK)
 			.text(formatCurrencyWhole(total));
 	}
 

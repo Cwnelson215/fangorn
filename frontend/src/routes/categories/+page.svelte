@@ -14,7 +14,7 @@
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
 
-	const DEFAULT_COLOR = '#4ecca3';
+	const DEFAULT_COLOR = '#3987e5';
 
 	let categories: Category[] = $state([]);
 	let accounts: Account[] = $state([]);

@@ -228,7 +228,7 @@
 		font: inherit;
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #fff;
+		color: var(--on-accent);
 		background: var(--accent);
 		border: none;
 		border-radius: var(--radius);
@@ -258,18 +258,18 @@
 	}
 
 	.notice.ok {
-		background: #e8f5e9;
-		color: #2e7d32;
+		background: var(--pos-soft);
+		color: var(--pos);
 	}
 
 	.notice.warn {
-		background: #fff8e6;
-		color: #8a5a00;
+		background: var(--warn-soft);
+		color: var(--warn-text);
 	}
 
 	.notice.error {
-		background: #fdecea;
-		color: #b3261e;
+		background: var(--neg-soft);
+		color: var(--neg);
 	}
 
 	section {
@@ -318,7 +318,7 @@
 
 	button.item:hover,
 	a.item:hover {
-		background: #fafafa;
+		background: var(--surface-2);
 	}
 
 	.thumb {

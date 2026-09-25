@@ -48,7 +48,7 @@
 
 	.primary {
 		background: var(--accent);
-		color: var(--ink);
+		color: var(--on-accent);
 	}
 
 	.primary:hover:not(:disabled) {
@@ -81,7 +81,7 @@
 	}
 
 	.danger:hover:not(:disabled) {
-		background: #fef2f2;
+		background: var(--neg-soft);
 	}
 
 	@media (pointer: coarse) {

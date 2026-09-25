@@ -320,7 +320,7 @@
 		margin-top: 1rem;
 		padding: 0.875rem;
 		border-radius: var(--radius-sm);
-		background: #fff8e6;
+		background: var(--warn-soft);
 		font-size: 0.875rem;
 		display: flex;
 		flex-direction: column;

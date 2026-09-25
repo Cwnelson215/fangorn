@@ -374,7 +374,7 @@
 	}
 
 	.snap:active:not(:disabled) {
-		background: #e6f8f1;
+		background: var(--surface-2);
 	}
 
 	.snap:disabled {
@@ -390,7 +390,7 @@
 		border-radius: 50%;
 		background: var(--accent);
 		fill: none;
-		stroke: var(--ink);
+		stroke: var(--on-accent);
 		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
@@ -544,9 +544,9 @@
 	}
 
 	.chip.selected {
-		border-color: var(--ink);
-		background: var(--ink);
-		color: white;
+		border-color: var(--accent);
+		background: var(--accent);
+		color: var(--on-accent);
 	}
 
 	.note {
@@ -624,7 +624,7 @@
 	.save {
 		position: sticky;
 		bottom: calc(64px + env(safe-area-inset-bottom) + 0.75rem);
-		box-shadow: 0 4px 16px rgba(78, 204, 163, 0.35);
+		box-shadow: 0 4px 16px rgba(224, 184, 96, 0.25);
 		min-height: 52px;
 		border: none;
 		border-radius: var(--radius-sm);
@@ -632,12 +632,12 @@
 		font: inherit;
 		font-size: 1.0625rem;
 		font-weight: 700;
-		color: var(--ink);
+		color: var(--on-accent);
 		cursor: pointer;
 	}
 
 	.save:disabled {
-		background: #bfeedd;
+		opacity: 0.45;
 		box-shadow: none;
 		cursor: not-allowed;
 	}
@@ -655,8 +655,9 @@
 		gap: 0.75rem;
 		padding: 0.75rem 1rem;
 		border-radius: var(--radius-sm);
-		background: var(--ink);
-		color: white;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		color: var(--ink);
 		font-size: 0.875rem;
 		animation: pop 0.2s ease-out;
 	}
@@ -669,12 +670,12 @@
 	.toast button {
 		min-height: 36px;
 		padding: 0 0.75rem;
-		border: 1px solid rgba(255, 255, 255, 0.3);
+		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
 		background: none;
 		font: inherit;
 		font-weight: 600;
-		color: white;
+		color: var(--ink);
 		cursor: pointer;
 	}
 
@@ -684,7 +685,7 @@
 		padding: 0.625rem 1.25rem;
 		border-radius: var(--radius-sm);
 		background: var(--accent);
-		color: var(--ink);
+		color: var(--on-accent);
 		font-weight: 600;
 		text-decoration: none;
 	}

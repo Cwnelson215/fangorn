@@ -8,9 +8,22 @@
 
 import * as d3 from 'd3';
 
-export const INK = '#1a1a2e';
-export const GRID = '#eee';
-export const AXIS_TEXT = '#999';
+// Chart colours are literals because SVG presentation attributes can't take
+// var(); they mirror the tokens in +layout.svelte.
+export const INK = '#eef3ee';
+export const GRID = '#22362d';
+export const AXIS_LINE = '#2c4338';
+export const AXIS_TEXT = '#a9bcb1';
+export const SURFACE = '#13211b';
+/** The brass accent, for single-series charts like net worth. */
+export const ACCENT = '#e0b860';
+
+/**
+ * Fallback colours for categorical charts (the donut), in this fixed order.
+ * Validated as a set on SURFACE: adjacent-pair colour-blind separation, and
+ * each at least 3:1 against the card.
+ */
+export const CATEGORICAL = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 
 /**
  * Series colours for the account charts, validated together for colour-blind
@@ -18,9 +31,9 @@ export const AXIS_TEXT = '#999';
  * them also names them in a legend and the tooltip, never by colour alone.
  */
 export const SERIES = {
-	blue: '#3b7dd8',
-	green: '#1e9e6f',
-	orange: '#d9822b'
+	blue: '#3987e5',
+	green: '#199e70',
+	orange: '#d95926'
 } as const;
 
 export interface TipRow {
@@ -68,10 +81,10 @@ export function addCrosshair(
 		top: `${margin.top}px`,
 		pointerEvents: 'none',
 		display: 'none',
-		background: 'var(--surface, #fff)',
-		border: '1px solid var(--border, #ddd)',
-		borderRadius: '8px',
-		boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+		background: 'var(--surface-2)',
+		border: '1px solid var(--border)',
+		borderRadius: '10px',
+		boxShadow: 'var(--shadow-lg)',
 		padding: '0.5rem 0.625rem',
 		fontSize: '0.75rem',
 		lineHeight: '1.4',
@@ -97,13 +110,13 @@ export function addCrosshair(
 			.attr('cy', (d) => d.y)
 			.attr('r', 4)
 			.attr('fill', (d) => d.color)
-			.attr('stroke', '#fff')
+			.attr('stroke', SURFACE)
 			.attr('stroke-width', 2);
 
 		tip.replaceChildren();
 		const title = document.createElement('div');
 		title.textContent = opts.title(i);
-		Object.assign(title.style, { color: 'var(--muted, #666)', marginBottom: '0.25rem' });
+		Object.assign(title.style, { color: 'var(--muted)', marginBottom: '0.25rem' });
 		tip.appendChild(title);
 		for (const r of opts.rows(i)) {
 			const row = document.createElement('div');
@@ -117,10 +130,10 @@ export function addCrosshair(
 			});
 			const value = document.createElement('strong');
 			value.textContent = r.value;
-			Object.assign(value.style, { fontVariantNumeric: 'tabular-nums', color: 'var(--ink, #1a1a2e)' });
+			Object.assign(value.style, { fontVariantNumeric: 'tabular-nums', color: 'var(--ink)' });
 			const label = document.createElement('span');
 			label.textContent = r.label;
-			label.style.color = 'var(--muted, #666)';
+			label.style.color = 'var(--muted)';
 			row.append(key, value, label);
 			tip.appendChild(row);
 		}
@@ -180,6 +193,6 @@ export function moneyTicks(lo: number, hi: number, whole: (n: number) => string)
 /** Recessive axis styling, shared so every chart reads the same. */
 export function styleAxis(sel: d3.Selection<SVGGElement, unknown, null, undefined>): void {
 	sel.selectAll('text').attr('fill', AXIS_TEXT).attr('font-size', '0.7rem');
-	sel.selectAll('.domain').attr('stroke', '#ddd');
-	sel.selectAll('.tick line').attr('stroke', '#ddd');
+	sel.selectAll('.domain').attr('stroke', AXIS_LINE);
+	sel.selectAll('.tick line').attr('stroke', AXIS_LINE);
 }

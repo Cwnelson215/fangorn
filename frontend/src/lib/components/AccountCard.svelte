@@ -60,7 +60,8 @@
 	}
 
 	.account-card:hover {
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+		border-color: var(--border);
+		box-shadow: var(--shadow-lg);
 	}
 
 	.archived {
@@ -88,7 +89,7 @@
 
 	.account-type {
 		font-size: 0.75rem;
-		background: #f0f0f0;
+		background: var(--surface-2);
 		padding: 0.2rem 0.6rem;
 		border-radius: 4px;
 		color: var(--muted);

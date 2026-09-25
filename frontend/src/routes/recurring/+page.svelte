@@ -570,23 +570,23 @@
 	}
 
 	.chip.expense {
-		background: #fef2f2;
-		color: #991b1b;
+		background: var(--neg-soft);
+		color: var(--neg);
 	}
 
 	.chip.income {
-		background: #dcfce7;
-		color: #166534;
+		background: var(--pos-soft);
+		color: var(--pos);
 	}
 
 	.chip.transfer {
-		background: #e3f2fd;
-		color: #1565c0;
+		background: var(--info-soft);
+		color: var(--info);
 	}
 
 	.chip.manual {
-		background: #fef3c7;
-		color: #92400e;
+		background: var(--warn-soft);
+		color: var(--warn-text);
 	}
 
 	.rule-meta,
@@ -708,7 +708,7 @@
 	.cta {
 		display: inline-block;
 		background: var(--accent);
-		color: var(--ink);
+		color: var(--on-accent);
 		padding: 0.625rem 1.25rem;
 		border-radius: var(--radius-sm);
 		font-weight: 600;

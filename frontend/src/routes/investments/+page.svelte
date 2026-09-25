@@ -318,7 +318,7 @@
 	.cta {
 		display: inline-block;
 		background: var(--accent);
-		color: var(--ink);
+		color: var(--on-accent);
 		padding: 0.625rem 1.25rem;
 		border-radius: var(--radius-sm);
 		font-weight: 600;

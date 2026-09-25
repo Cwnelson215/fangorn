@@ -113,7 +113,7 @@
 					...holdings.positions
 						.map((p) => ({ label: p.symbol, value: p.market_value }))
 						.sort((a, b) => b.value - a.value),
-					{ label: 'Cash', value: holdings.cash, color: '#b8bcc4' }
+					{ label: 'Cash', value: holdings.cash, color: '#8fa398' }
 				]
 			: []
 	);
@@ -438,7 +438,7 @@
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
 		border: none;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--line);
 		align-items: center;
 		width: 100%;
 		background: none;
@@ -470,7 +470,7 @@
 
 	.clickable:hover,
 	.clickable:focus-visible {
-		background: #fafafa;
+		background: var(--surface-2);
 		outline: none;
 	}
 

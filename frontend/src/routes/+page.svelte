@@ -279,13 +279,14 @@
 	}
 
 	.link {
-		font-size: 0.8125rem;
-		color: var(--muted);
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: var(--accent);
 		text-decoration: none;
 	}
 
 	.link:hover {
-		color: var(--ink);
+		color: var(--accent-hover);
 	}
 
 	.stats {
@@ -301,15 +302,25 @@
 	}
 
 	.stat-label {
-		font-size: 0.8125rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 		color: var(--muted);
-		font-weight: 500;
 	}
 
 	.stat-value {
-		font-size: 1.75rem;
-		font-weight: 700;
-		font-variant-numeric: tabular-nums;
+		font-family: var(--font-display);
+		font-size: 1.875rem;
+		font-weight: 600;
+		letter-spacing: -0.02em;
+		font-variant-numeric: lining-nums tabular-nums;
+	}
+
+	/* Net worth leads. */
+	.stat:first-child .stat-value {
+		font-size: 2.5rem;
+		line-height: 1.1;
 	}
 
 	.investments-line {
@@ -346,7 +357,7 @@
 		font-size: 0.75rem;
 		font-weight: 600;
 		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.08em;
 		color: var(--muted);
 	}
 
@@ -358,7 +369,7 @@
 		display: flex;
 		justify-content: space-between;
 		padding: 0.625rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--line);
 		text-decoration: none;
 		color: inherit;
 	}
@@ -368,7 +379,7 @@
 	}
 
 	.account-line:hover .account-name {
-		color: var(--accent-hover);
+		color: var(--accent);
 	}
 
 	.account-balance {
@@ -382,7 +393,7 @@
 		gap: 1rem;
 		align-items: center;
 		padding: 0.625rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--line);
 	}
 
 	.upcoming-row:last-child {
@@ -447,7 +458,7 @@
 	.cta {
 		display: inline-block;
 		background: var(--accent);
-		color: var(--ink);
+		color: var(--on-accent);
 		padding: 0.625rem 1.25rem;
 		border-radius: var(--radius-sm);
 		font-weight: 600;
@@ -478,7 +489,7 @@
 		}
 
 		.stats .stat:not(:first-child) .stat-value {
-			font-size: 1rem;
+			font-size: 1.125rem;
 		}
 
 		.stats .stat:not(:first-child) .stat-label,

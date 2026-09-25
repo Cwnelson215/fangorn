@@ -11,7 +11,7 @@
 	let authChecked = $state(false);
 	let isLoginPage = $derived(page.url.pathname === '/login');
 
-	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear' | 'chevron' | 'trend';
+	type Icon = 'leaf' | 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear' | 'chevron' | 'trend';
 
 	const NAV: { href: string; label: string; icon: Icon }[] = [
 		{ href: '/', label: 'Dashboard', icon: 'home' },
@@ -185,7 +185,9 @@
 
 {#snippet glyph(name: Icon)}
 	<svg viewBox="0 0 24 24" aria-hidden="true">
-		{#if name === 'home'}
+		{#if name === 'leaf'}
+			<path d="M5 19c0-8 6-14 15-14 0 9-6 15-14 15M5 19l8-8" />
+		{:else if name === 'home'}
 			<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />
 		{:else if name === 'list'}
 			<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
@@ -230,7 +232,7 @@
 {:else if authChecked}
 	<div class="app">
 		<nav class="topbar">
-			<a class="nav-brand" href="/">Fangorn</a>
+			<a class="nav-brand" href="/">{@render glyph('leaf')}Fangorn</a>
 			<div class="nav-links">
 				<a href="/" class:active={isActive('/')}>Dashboard</a>
 				{#each GROUPS as group (group.id)}
@@ -393,38 +395,98 @@
 		box-sizing: border-box;
 	}
 
-	/* Design tokens. Every colour in the app resolves through these — before the
-	   pivot the same hex values were copy-pasted across a dozen components. */
+	/* Design tokens ("Canopy": dark evergreen, brass accent). Every colour in the
+	   app resolves through these — before the pivot the same hex values were
+	   copy-pasted across a dozen components. Text tokens all clear 4.5:1 on both
+	   --bg and --surface; the old greys didn't, which is why text blended in. */
 	:global(:root) {
-		--accent: #4ecca3;
-		--accent-hover: #3db88f;
-		--ink: #1a1a2e;
-		--bg: #f8f9fa;
-		--surface: #ffffff;
-		--muted: #666;
-		--muted-light: #999;
-		--border: #ddd;
-		--divider: #e5e7eb;
-		--pos: #22c55e;
-		--neg: #ef4444;
-		--info: #3b82f6;
-		--warn: #f59e0b;
+		color-scheme: dark;
 
-		--radius: 12px;
-		--radius-sm: 8px;
-		--shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+		--bg: #0c1612;
+		--chrome: #101d17; /* top and tab bars */
+		--surface: #13211b;
+		--surface-2: #1a2c24; /* hover, inset fields, chips */
+		--ink: #eef3ee;
+		--muted: #a9bcb1;
+		--muted-light: #8fa398;
+		--border: #2c4338;
+		--divider: #22362d;
+		--line: #1d3027; /* rules between rows */
+
+		--accent: #e0b860;
+		--accent-hover: #f0cd7c;
+		--on-accent: #1a1405; /* text and icons sitting on --accent */
+
+		--pos: #7ee0a6;
+		--neg: #ff9c8c;
+		--info: #8ab8f0;
+		--warn: #f2b85b;
+		--warn-text: #f2c46e;
+		--violet: #c3b4f5;
+		/* Tinted backgrounds for badges and notices; text on them uses the
+		   matching colour above. */
+		--pos-soft: #1e3a2b;
+		--neg-soft: #3d211d;
+		--warn-soft: #3a2e15;
+		--info-soft: #1a2d42;
+		--violet-soft: #2b2442;
+
+		--overlay: rgba(3, 8, 6, 0.65);
+		--radius: 16px;
+		--radius-sm: 10px;
+		--shadow: none;
+		--shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+		--font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+		--font-body: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	}
 
 	:global(body) {
-		font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+		font-family: var(--font-body);
 		background: var(--bg);
 		color: var(--ink);
 		line-height: 1.6;
 	}
 
+	:global(h1) {
+		font-family: var(--font-display);
+		font-weight: 600;
+		letter-spacing: -0.01em;
+	}
+
+	/* Headline figures — net worth, balances — are set in the display serif. */
+	:global(.figure) {
+		font-family: var(--font-display);
+		font-variant-numeric: lining-nums tabular-nums;
+		letter-spacing: -0.02em;
+	}
+
+	/* Form controls follow the palette unless a component styles its own. */
+	:global(input),
+	:global(select),
+	:global(textarea) {
+		background-color: var(--surface-2);
+		color: var(--ink);
+		accent-color: var(--accent);
+	}
+
+	:global(::placeholder) {
+		color: var(--muted-light);
+	}
+
+	:global(a) {
+		color: var(--accent);
+	}
+
+	:global(:focus-visible) {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
 	/* Shared primitives, defined once so pages stop redeclaring them. */
 	:global(.card) {
 		background: var(--surface);
+		border: 1px solid var(--divider);
 		border-radius: var(--radius);
 		padding: 1.5rem;
 		box-shadow: var(--shadow);
@@ -472,9 +534,8 @@
 		color: var(--neg);
 	}
 
-	/* --warn itself is too light to read as text on white. */
 	:global(.warn-text) {
-		color: #b45309;
+		color: var(--warn-text);
 	}
 
 	/* Phone-first global adjustments. 16px is the size below which iOS Safari
@@ -549,8 +610,9 @@
 	}
 
 	.topbar {
-		background: var(--ink);
-		color: white;
+		background: var(--chrome);
+		border-bottom: 1px solid var(--divider);
+		color: var(--ink);
 		padding: 0 2rem;
 		padding-top: env(safe-area-inset-top);
 		height: calc(60px + env(safe-area-inset-top));
@@ -563,10 +625,22 @@
 	}
 
 	.nav-brand {
-		font-size: 1.25rem;
-		font-weight: 700;
-		color: var(--accent);
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-family: var(--font-display);
+		font-size: 1.375rem;
+		font-weight: 600;
+		letter-spacing: -0.01em;
+		color: var(--ink);
 		text-decoration: none;
+	}
+
+	.nav-brand svg {
+		width: 24px;
+		height: 24px;
+		stroke: var(--accent);
+		stroke-width: 1.8;
 	}
 
 	.nav-links {
@@ -586,9 +660,9 @@
 		border-radius: var(--radius-sm);
 		background: none;
 		font: inherit;
-		font-size: 0.9rem;
-		font-weight: 500;
-		color: rgba(255, 255, 255, 0.7);
+		font-size: 0.9375rem;
+		font-weight: 600;
+		color: var(--muted);
 		text-decoration: none;
 		cursor: pointer;
 		transition:
@@ -599,13 +673,15 @@
 	.nav-links > a:hover,
 	.menu-trigger:hover,
 	.menu-trigger[aria-expanded='true'] {
-		color: white;
-		background: rgba(255, 255, 255, 0.08);
+		color: var(--ink);
+		background: var(--surface-2);
 	}
 
 	.nav-links > a.active,
 	.menu-trigger.active {
-		color: var(--accent);
+		color: var(--ink);
+		background: var(--surface-2);
+		box-shadow: inset 0 -2px 0 var(--accent);
 	}
 
 	.menu-trigger :global(svg),
@@ -635,9 +711,8 @@
 		padding: 0.375rem;
 		border-radius: var(--radius);
 		background: var(--surface);
-		box-shadow:
-			0 10px 30px rgba(0, 0, 0, 0.18),
-			0 0 0 1px rgba(0, 0, 0, 0.04);
+		border: 1px solid var(--border);
+		box-shadow: var(--shadow-lg);
 		animation: drop 0.12s ease-out;
 	}
 
@@ -667,21 +742,18 @@
 	.menu [role='menuitem'] :global(svg) {
 		width: 18px;
 		height: 18px;
-		color: var(--muted-light);
+		color: var(--muted);
 	}
 
 	.menu [role='menuitem']:hover,
 	.menu [role='menuitem']:focus-visible {
-		background: var(--bg);
+		background: var(--surface-2);
 		outline: none;
 	}
 
-	.menu [role='menuitem'].active {
-		color: var(--accent-hover);
-	}
-
+	.menu [role='menuitem'].active,
 	.menu [role='menuitem'].active :global(svg) {
-		color: var(--accent-hover);
+		color: var(--accent);
 	}
 
 	.menu [role='menuitem']:disabled {
@@ -700,12 +772,12 @@
 		height: 36px;
 		padding: 0 0.75rem 0 0.625rem;
 		border: none;
-		border-radius: 999px;
+		border-radius: var(--radius-sm);
 		background: var(--accent);
 		font: inherit;
-		font-size: 0.875rem;
+		font-size: 0.9375rem;
 		font-weight: 700;
-		color: var(--ink);
+		color: var(--on-accent);
 		cursor: pointer;
 	}
 
@@ -734,13 +806,13 @@
 		gap: 0.375rem;
 		min-height: 36px;
 		padding: 0 0.75rem;
-		border: 1px solid rgba(255, 255, 255, 0.25);
-		border-radius: 999px;
-		background: none;
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		background: var(--surface);
 		font: inherit;
-		font-size: 0.85rem;
+		font-size: 0.875rem;
 		font-weight: 600;
-		color: white;
+		color: var(--ink);
 		cursor: pointer;
 	}
 
@@ -773,11 +845,12 @@
 		gap: 0.75rem;
 		max-width: 420px;
 		padding: 0.75rem 0.75rem 0.75rem 1rem;
+		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
-		background: var(--ink);
-		color: white;
+		background: var(--surface-2);
+		color: var(--ink);
 		font-size: 0.875rem;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+		box-shadow: var(--shadow-lg);
 		animation: rise 0.18s ease-out;
 	}
 
@@ -809,14 +882,14 @@
 		background: none;
 		font-size: 1.25rem;
 		line-height: 1;
-		color: rgba(255, 255, 255, 0.7);
+		color: var(--muted);
 		cursor: pointer;
 	}
 
 	.spinner {
 		width: 16px;
 		height: 16px;
-		border: 2px solid rgba(255, 255, 255, 0.3);
+		border: 2px solid var(--border);
 		border-top-color: var(--accent);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
@@ -835,7 +908,7 @@
 		height: 36px;
 		margin-left: 0.5rem;
 		border-radius: 50%;
-		color: rgba(255, 255, 255, 0.7);
+		color: var(--muted);
 	}
 
 	.settings svg {
@@ -905,10 +978,7 @@
 
 		.camera {
 			display: inline-flex;
-			min-height: 36px;
-			background: var(--accent);
-			border-color: var(--accent);
-			color: var(--ink);
+			min-height: 40px;
 		}
 
 		.capture-banner {
@@ -937,7 +1007,7 @@
 			z-index: 150;
 			height: calc(64px + env(safe-area-inset-bottom));
 			padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-			background: var(--surface);
+			background: var(--chrome);
 			border-top: 1px solid var(--divider);
 		}
 
@@ -954,27 +1024,23 @@
 			font: inherit;
 			font-size: 0.6875rem;
 			font-weight: 600;
-			color: var(--muted-light);
+			color: var(--muted);
 			text-decoration: none;
 			cursor: pointer;
 		}
 
 		.tabbar .active:not(.add) {
-			color: var(--ink);
-		}
-
-		.tabbar .active:not(.add) svg {
-			stroke: var(--accent-hover);
+			color: var(--accent);
 		}
 
 		.tabbar .add {
-			width: 52px;
-			height: 52px;
+			width: 54px;
+			height: 54px;
 			margin: 0 auto;
-			border-radius: 50%;
+			border-radius: 18px;
 			background: var(--accent);
-			color: var(--ink);
-			box-shadow: 0 4px 12px rgba(78, 204, 163, 0.45);
+			color: var(--on-accent);
+			box-shadow: 0 4px 14px rgba(224, 184, 96, 0.25);
 		}
 
 		.tabbar .add svg {
@@ -989,7 +1055,7 @@
 			position: fixed;
 			inset: 0;
 			z-index: 140;
-			background: rgba(26, 26, 46, 0.45);
+			background: var(--overlay);
 		}
 
 		.sheet {
@@ -1004,8 +1070,10 @@
 			overflow-y: auto;
 			padding: 0.5rem max(0.5rem, env(safe-area-inset-right)) 0.5rem max(0.5rem, env(safe-area-inset-left));
 			background: var(--surface);
+			border: 1px solid var(--border);
+			border-bottom: none;
 			border-radius: var(--radius) var(--radius) 0 0;
-			box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
+			box-shadow: var(--shadow-lg);
 			animation: rise 0.18s ease-out;
 		}
 
@@ -1028,11 +1096,11 @@
 		}
 
 		.sheet-item:active {
-			background: var(--bg);
+			background: var(--surface-2);
 		}
 
 		.sheet-item.active {
-			color: var(--accent-hover);
+			color: var(--accent);
 		}
 
 		.sheet-icon {
@@ -1041,7 +1109,7 @@
 			width: 36px;
 			height: 36px;
 			border-radius: 10px;
-			background: var(--bg);
+			background: var(--surface-2);
 			color: var(--muted);
 			flex-shrink: 0;
 		}
@@ -1052,7 +1120,7 @@
 		}
 
 		.sheet-item.active .sheet-icon {
-			color: var(--accent-hover);
+			color: var(--accent);
 		}
 
 		.sheet-text {

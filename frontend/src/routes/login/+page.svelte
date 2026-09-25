@@ -59,28 +59,29 @@
 		min-height: 100dvh;
 		padding: 1rem;
 		padding-top: max(1rem, env(safe-area-inset-top));
-		background: #f8f9fa;
+		background: var(--bg);
 	}
 
 	.login-card {
-		background: white;
-		border-radius: 16px;
+		background: var(--surface);
+		border: 1px solid var(--divider);
+		border-radius: var(--radius);
 		padding: 3rem;
 		max-width: 400px;
 		width: 100%;
 		text-align: center;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+		box-shadow: var(--shadow-lg);
 	}
 
 	h1 {
-		font-size: 1.75rem;
-		font-weight: 700;
-		color: #4ecca3;
+		font-size: 2rem;
+		font-weight: 600;
+		color: var(--ink);
 		margin-bottom: 0.5rem;
 	}
 
 	p {
-		color: #666;
+		color: var(--muted);
 		margin-bottom: 1.5rem;
 	}
 
@@ -92,7 +93,7 @@
 
 	input {
 		padding: 0.75rem 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border);
 		border-radius: 10px;
 		font-size: 1rem;
 		outline: none;
@@ -100,12 +101,12 @@
 	}
 
 	input:focus {
-		border-color: #4ecca3;
+		border-color: var(--accent);
 	}
 
 	button {
-		background: #4ecca3;
-		color: #1a1a2e;
+		background: var(--accent);
+		color: var(--on-accent);
 		border: none;
 		padding: 0.75rem;
 		border-radius: 10px;
@@ -116,7 +117,7 @@
 	}
 
 	button:hover {
-		background: #3db88f;
+		background: var(--accent-hover);
 	}
 
 	button:disabled {
@@ -136,7 +137,7 @@
 	}
 
 	.error {
-		color: #ef4444;
+		color: var(--neg);
 		margin-top: 1rem;
 		margin-bottom: 0;
 	}

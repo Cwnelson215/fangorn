@@ -73,7 +73,7 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(26, 26, 46, 0.45);
+		background: var(--overlay);
 		display: flex;
 		align-items: flex-start;
 		justify-content: center;
@@ -86,7 +86,8 @@
 	.dialog {
 		background: var(--surface);
 		border-radius: var(--radius);
-		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+		border: 1px solid var(--border);
+		box-shadow: var(--shadow-lg);
 		width: 100%;
 		max-width: 520px;
 		margin: auto;

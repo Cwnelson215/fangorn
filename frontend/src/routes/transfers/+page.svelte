@@ -286,7 +286,7 @@
 		gap: 1rem;
 		align-items: center;
 		padding: 0.75rem 1rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--line);
 		background: none;
 		border-left: none;
 		border-right: none;
@@ -302,7 +302,7 @@
 	}
 
 	.row:hover {
-		background: #fafafa;
+		background: var(--surface-2);
 	}
 
 	.date {
@@ -391,7 +391,7 @@
 	.cta {
 		display: inline-block;
 		background: var(--accent);
-		color: var(--ink);
+		color: var(--on-accent);
 		padding: 0.625rem 1.25rem;
 		border-radius: var(--radius-sm);
 		font-weight: 600;

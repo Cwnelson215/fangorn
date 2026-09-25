@@ -600,6 +600,7 @@
 			padding: 0 0.3rem;
 			border-radius: 999px;
 			background: var(--accent);
+			color: var(--on-accent);
 			font-size: 0.75rem;
 			line-height: 1.25rem;
 			text-align: center;
@@ -614,7 +615,7 @@
 	.cta {
 		display: inline-block;
 		background: var(--accent);
-		color: var(--ink);
+		color: var(--on-accent);
 		padding: 0.625rem 1.25rem;
 		border-radius: var(--radius-sm);
 		font-weight: 600;

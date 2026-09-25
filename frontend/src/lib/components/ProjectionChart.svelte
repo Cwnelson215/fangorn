@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as d3 from 'd3';
 	import { formatCurrency, formatCurrencyWhole, formatDate, parseDate } from '$lib/format';
-	import { INK, addCrosshair, moneyTicks, styleAxis, type TipRow } from '$lib/chart';
+	import { AXIS_LINE, AXIS_TEXT, GRID, INK, SURFACE, addCrosshair, moneyTicks, styleAxis, type TipRow } from '$lib/chart';
 
 	// What has happened, then what would happen: an account's real history as a
 	// solid line up to today, joined to a projection drawn from today on. The
@@ -106,7 +106,7 @@
 					.tickFormat(moneyTicks(lo, hi, formatCurrencyWhole))
 			)
 			.call(styleAxis)
-			.call((g) => g.selectAll('.tick line').attr('stroke', '#f0f0f0'))
+			.call((g) => g.selectAll('.tick line').attr('stroke', GRID))
 			.call((g) => g.select('.domain').remove());
 
 		if (lo < 0 && hi > 0) {
@@ -116,7 +116,7 @@
 				.attr('x2', width)
 				.attr('y1', y(0))
 				.attr('y2', y(0))
-				.attr('stroke', '#ccc');
+				.attr('stroke', AXIS_LINE);
 		}
 
 		// Stacked areas, each sitting on the ones before it. A 2px surface
@@ -137,7 +137,7 @@
 				.datum(stacked)
 				.attr('fill', s.color)
 				.attr('fill-opacity', 0.28)
-				.attr('stroke', '#fff')
+				.attr('stroke', SURFACE)
 				.attr('stroke-width', 2)
 				.attr(
 					'd',
@@ -230,7 +230,7 @@
 				.attr('x', now + 4)
 				.attr('y', 10)
 				.attr('font-size', '0.7rem')
-				.attr('fill', '#999')
+				.attr('fill', AXIS_TEXT)
 				.text('Today');
 		}
 

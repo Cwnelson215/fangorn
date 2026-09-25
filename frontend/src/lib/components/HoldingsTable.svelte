@@ -105,7 +105,7 @@
 		grid-template-columns: minmax(180px, 1fr) 110px 120px 130px 120px 70px;
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--line);
 		align-items: start;
 		font-size: 0.9rem;
 	}

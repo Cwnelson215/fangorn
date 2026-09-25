@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as d3 from 'd3';
 	import { formatCurrency, formatCurrencyWhole, formatDate, parseDate } from '$lib/format';
-	import { addCrosshair, moneyTicks, styleAxis, type TipRow } from '$lib/chart';
+	import { ACCENT, AXIS_LINE, AXIS_TEXT, addCrosshair, moneyTicks, styleAxis, type TipRow } from '$lib/chart';
 
 	// A dated line of dollar values: net worth snapshots, an account's value, what
 	// a card owes. Hovering (or scrubbing with a finger) reads off any day; an
@@ -65,7 +65,7 @@
 			.attr('transform', `translate(0,${height})`)
 			.call(d3.axisBottom(x).ticks(Math.min(6, Math.max(2, Math.floor(width / 70)))).tickFormat(d3.timeFormat(tickFormat) as any))
 			.selectAll('text')
-			.attr('fill', '#999')
+			.attr('fill', AXIS_TEXT)
 			.attr('font-size', '0.7rem');
 
 		// SI-abbreviated labels ("$4.4k") collapse into duplicates when the range
@@ -81,7 +81,7 @@
 			svg.append('line')
 				.attr('x1', 0).attr('x2', width)
 				.attr('y1', y(0)).attr('y2', y(0))
-				.attr('stroke', '#ddd')
+				.attr('stroke', AXIS_LINE)
 				.attr('stroke-dasharray', '4,4');
 		}
 
@@ -102,8 +102,8 @@
 			.attr('id', gradientId)
 			.attr('x1', '0').attr('y1', '0')
 			.attr('x2', '0').attr('y2', '1');
-		gradient.append('stop').attr('offset', '0%').attr('stop-color', '#45b7d1').attr('stop-opacity', 0.3);
-		gradient.append('stop').attr('offset', '100%').attr('stop-color', '#45b7d1').attr('stop-opacity', 0.02);
+		gradient.append('stop').attr('offset', '0%').attr('stop-color', ACCENT).attr('stop-opacity', 0.3);
+		gradient.append('stop').attr('offset', '100%').attr('stop-color', ACCENT).attr('stop-opacity', 0.02);
 
 		svg.append('path')
 			.datum(parsed)
@@ -113,7 +113,7 @@
 		svg.append('path')
 			.datum(parsed)
 			.attr('fill', 'none')
-			.attr('stroke', '#45b7d1')
+			.attr('stroke', ACCENT)
 			.attr('stroke-width', 2.5)
 			.attr('d', line);
 
@@ -123,7 +123,7 @@
 			.attr('cx', x(latest.date))
 			.attr('cy', y(latest.value))
 			.attr('r', 4)
-			.attr('fill', '#45b7d1');
+			.attr('fill', ACCENT);
 
 		svg.append('text')
 			.attr('x', x(latest.date) - 5)
@@ -131,7 +131,7 @@
 			.attr('text-anchor', 'end')
 			.attr('font-size', '0.8rem')
 			.attr('font-weight', '600')
-			.attr('fill', '#45b7d1')
+			.attr('fill', ACCENT)
 			.text(formatCurrencyWhole(latest.value));
 
 		addCrosshair(svg, container, {
@@ -143,14 +143,14 @@
 			title: (i) => formatDate(points[i].date),
 			rows: (i) => {
 				const p = points[i];
-				const rows: TipRow[] = [{ label, value: formatCurrency(p.value), color: '#45b7d1' }];
+				const rows: TipRow[] = [{ label, value: formatCurrency(p.value), color: ACCENT }];
 				if (split) {
 					rows.push({ label: 'invested', value: formatCurrency(p.holdings ?? 0) });
 					rows.push({ label: 'cash', value: formatCurrency(p.cash ?? 0) });
 				}
 				return rows;
 			},
-			dots: (i) => [{ y: y(parsed[i].value), color: '#45b7d1' }]
+			dots: (i) => [{ y: y(parsed[i].value), color: ACCENT }]
 		});
 	}
 

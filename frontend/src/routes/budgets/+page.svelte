@@ -1065,7 +1065,7 @@
 
 	.item {
 		padding: 0.875rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--line);
 	}
 
 	.item:last-child {
@@ -1107,8 +1107,8 @@
 		font-weight: 600;
 		padding: 0.1rem 0.45rem;
 		border-radius: 4px;
-		background: #dcfce7;
-		color: #166534;
+		background: var(--pos-soft);
+		color: var(--pos);
 	}
 
 	.bar {

@@ -2,6 +2,7 @@
 	import * as d3 from 'd3';
 	import type { WeekSpend } from '$lib/types';
 	import { parseDate } from '$lib/format';
+	import { ACCENT, AXIS_TEXT } from '$lib/chart';
 
 	// Weekly totals arrive already bucketed from the dashboard endpoint, with
 	// empty weeks as zeros. Summing raw transactions here instead would silently
@@ -45,13 +46,13 @@
 			.attr('transform', `translate(0,${height})`)
 			.call(d3.axisBottom(x).ticks(Math.min(5, Math.max(2, Math.floor(width / 70)))).tickFormat(d3.timeFormat('%b %d') as any))
 			.selectAll('text')
-			.attr('fill', '#999')
+			.attr('fill', AXIS_TEXT)
 			.attr('font-size', '0.7rem');
 
 		svg.append('g')
 			.call(d3.axisLeft(y).ticks(5).tickFormat(d => `$${d3.format('.0s')(d as number)}`))
 			.selectAll('text')
-			.attr('fill', '#999')
+			.attr('fill', AXIS_TEXT)
 			.attr('font-size', '0.7rem');
 
 		const line = d3.line<{ date: Date; amount: number }>()
@@ -67,13 +68,14 @@
 
 		svg.append('path')
 			.datum(data)
-			.attr('fill', 'rgba(78, 204, 163, 0.1)')
+			.attr('fill', ACCENT)
+			.attr('fill-opacity', 0.12)
 			.attr('d', area);
 
 		svg.append('path')
 			.datum(data)
 			.attr('fill', 'none')
-			.attr('stroke', '#4ecca3')
+			.attr('stroke', ACCENT)
 			.attr('stroke-width', 2)
 			.attr('d', line);
 	}

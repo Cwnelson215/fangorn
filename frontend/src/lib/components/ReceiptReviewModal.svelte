@@ -255,9 +255,9 @@
 	.reasons {
 		margin: 0;
 		padding: 0.75rem 1rem 0.75rem 2rem;
-		background: #fff8e6;
+		background: var(--warn-soft);
 		border-radius: var(--radius-sm);
-		color: #8a5a00;
+		color: var(--warn-text);
 		font-size: 0.875rem;
 	}
 

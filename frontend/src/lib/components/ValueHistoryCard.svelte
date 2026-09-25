@@ -143,8 +143,8 @@
 	}
 
 	.ranges button.active {
-		background: var(--ink);
-		color: var(--surface);
+		background: var(--surface-2);
+		color: var(--accent);
 	}
 
 	.dim {

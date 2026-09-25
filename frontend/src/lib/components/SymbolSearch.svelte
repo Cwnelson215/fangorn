@@ -157,7 +157,8 @@
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
-		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+		border: 1px solid var(--border);
+		box-shadow: var(--shadow-lg);
 		max-height: 18rem;
 		overflow-y: auto;
 	}

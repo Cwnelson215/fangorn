@@ -83,7 +83,7 @@
 		grid-template-columns: 80px 1fr 150px 120px;
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--line);
 		align-items: center;
 		font-size: 0.9rem;
 		text-align: left;
@@ -111,7 +111,7 @@
 
 	.clickable:hover,
 	.clickable:focus-visible {
-		background: #fafafa;
+		background: var(--surface-2);
 		outline: none;
 	}
 
@@ -148,25 +148,25 @@
 	.tag {
 		display: inline-block;
 		font-size: 0.75rem;
-		background: #e8f5e9;
-		color: #2e7d32;
+		background: var(--pos-soft);
+		color: var(--pos);
 		padding: 0.15rem 0.5rem;
 		border-radius: 4px;
 	}
 
 	.tag.transfer {
-		background: #e3f2fd;
-		color: #1565c0;
+		background: var(--info-soft);
+		color: var(--info);
 	}
 
 	.tag.trade {
-		background: #f3e8ff;
-		color: #7e22ce;
+		background: var(--violet-soft);
+		color: var(--violet);
 	}
 
 	.tag.refund {
-		background: #fff4e5;
-		color: #b26a00;
+		background: var(--warn-soft);
+		color: var(--warn-text);
 	}
 
 	.amount,
