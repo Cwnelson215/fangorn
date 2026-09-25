@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { getAccount, getAccountValueHistory, getHoldings, getTrades } from '$lib/api';
 	import type { AccountDetail, Holdings, Trade } from '$lib/types';
-	import { ACCOUNT_TYPE_LABELS, TRADE_SIDE_LABELS } from '$lib/types';
+	import { TRADE_SIDE_LABELS, accountKindLabel, holdsSecurities } from '$lib/types';
 	import {
 		formatCurrency,
 		formatDate,
@@ -38,7 +38,7 @@
 	let editingTrade = $state<Trade | null>(null);
 
 	let accountId = $derived(Number(page.params.id));
-	let isInvestment = $derived(detail?.account.type === 'investment');
+	let isInvestment = $derived(detail ? holdsSecurities(detail.account.type) : false);
 
 	onMount(() => {
 		load();
@@ -50,7 +50,7 @@
 		error = null;
 		try {
 			detail = await getAccount(accountId);
-			if (detail.account.type === 'investment') {
+			if (holdsSecurities(detail.account.type)) {
 				[holdings, trades] = await Promise.all([getHoldings(accountId), getTrades(accountId)]);
 			}
 		} catch (e) {
@@ -100,7 +100,7 @@
 			<div>
 				<h1>{account.name}</h1>
 				<p class="muted">
-					{ACCOUNT_TYPE_LABELS[account.type] ?? account.type}
+					{accountKindLabel(account)}
 					{#if account.institution_name}· {account.institution_name}{/if}
 					{#if account.mask}· ····{account.mask}{/if}
 				</p>

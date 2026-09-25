@@ -18,19 +18,19 @@ import (
 const accountSelect = `
 	SELECT a.id, a.household_id, a.name, a.institution_name, a.type, a.class, a.mask,
 	       a.starting_balance, a.starting_balance_date, a.currency, a.color, a.notes,
-	       a.archived_at IS NOT NULL AS archived,
+	       a.tax_treatment, a.archived_at IS NOT NULL AS archived,
 	       b.cash_balance, b.holdings_value, b.cash_balance + b.holdings_value AS balance
 	FROM accounts a
 	JOIN (` + accountBalances + `) b ON b.account_id = a.id`
 
 func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	var a models.Account
-	var institution, mask, color, notes sql.NullString
+	var institution, mask, color, notes, tax sql.NullString
 	var startDate time.Time
 	err := rows.Scan(
 		&a.ID, &a.HouseholdID, &a.Name, &institution, &a.Type, &a.Class, &mask,
 		&a.StartingBalance, &startDate, &a.Currency, &color, &notes,
-		&a.Archived, &a.CashBalance, &a.HoldingsValue, &a.Balance,
+		&tax, &a.Archived, &a.CashBalance, &a.HoldingsValue, &a.Balance,
 	)
 	if err != nil {
 		return a, err
@@ -40,6 +40,7 @@ func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	a.Mask = strPtr(mask)
 	a.Color = strPtr(color)
 	a.Notes = strPtr(notes)
+	a.TaxTreatment = strPtr(tax)
 	return a, nil
 }
 
@@ -95,6 +96,8 @@ type AccountInput struct {
 	Currency            string  `json:"currency"`
 	Color               *string `json:"color"`
 	Notes               *string `json:"notes"`
+	// TaxTreatment is required on a retirement account and refused on any other.
+	TaxTreatment *string `json:"tax_treatment"`
 }
 
 func trimmedOrNil(s *string) *string {
@@ -119,6 +122,15 @@ func (in *AccountInput) normalize() error {
 	if !models.ValidAccountType(in.Type) {
 		return invalid("unknown account type %q", in.Type)
 	}
+	in.TaxTreatment = trimmedOrNil(in.TaxTreatment)
+	if in.Type == models.AccountRetirement {
+		if in.TaxTreatment == nil ||
+			(*in.TaxTreatment != models.TaxRoth && *in.TaxTreatment != models.TaxTraditional) {
+			return invalid("a retirement account must be Roth or traditional")
+		}
+	} else if in.TaxTreatment != nil {
+		return invalid("only retirement accounts have a tax treatment")
+	}
 	if in.StartingBalanceDate == "" {
 		return invalid("starting_balance_date is required")
 	}
@@ -140,13 +152,13 @@ func (s *Service) CreateAccount(ctx context.Context, householdID int, in Account
 	err := s.db.QueryRowContext(ctx,
 		`INSERT INTO accounts
 		   (household_id, name, institution_name, type, class, mask,
-		    starting_balance, starting_balance_date, currency, color, notes)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		    starting_balance, starting_balance_date, currency, color, notes, tax_treatment)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 RETURNING id`,
 		householdID, in.Name, nullStr(in.InstitutionName), in.Type,
 		models.ClassForType(in.Type), nullStr(in.Mask),
 		in.StartingBalance, in.StartingBalanceDate, in.Currency,
-		nullStr(in.Color), nullStr(in.Notes),
+		nullStr(in.Color), nullStr(in.Notes), nullStr(in.TaxTreatment),
 	).Scan(&id)
 	if err != nil {
 		return models.Account{}, fmt.Errorf("creating account: %w", err)
@@ -159,9 +171,10 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		return models.Account{}, err
 	}
 
-	// Trades only make sense on an investment account, so one that holds any
-	// cannot be turned into something else out from under them.
-	if in.Type != models.AccountInvestment {
+	// Trades only make sense on an account that holds securities, so one that
+	// has any cannot be turned into something else out from under them. Moving
+	// between investment and retirement is fine: both keep the trade log.
+	if !models.HoldsSecurities(in.Type) {
 		var hasTrades bool
 		err := s.db.QueryRowContext(ctx,
 			`SELECT EXISTS (SELECT 1 FROM trades WHERE household_id = $1 AND account_id = $2)`,
@@ -170,7 +183,7 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 			return models.Account{}, fmt.Errorf("checking for trades: %w", err)
 		}
 		if hasTrades {
-			return models.Account{}, invalid("this account has trades logged, so it has to stay an investment account")
+			return models.Account{}, invalid("this account has trades logged, so it has to stay an investment or retirement account")
 		}
 	}
 
@@ -178,11 +191,11 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		`UPDATE accounts SET
 		   name = $1, institution_name = $2, type = $3, class = $4, mask = $5,
 		   starting_balance = $6, starting_balance_date = $7, currency = $8,
-		   color = $9, notes = $10, updated_at = NOW()
-		 WHERE household_id = $11 AND id = $12`,
+		   color = $9, notes = $10, tax_treatment = $11, updated_at = NOW()
+		 WHERE household_id = $12 AND id = $13`,
 		in.Name, nullStr(in.InstitutionName), in.Type, models.ClassForType(in.Type),
 		nullStr(in.Mask), in.StartingBalance, in.StartingBalanceDate, in.Currency,
-		nullStr(in.Color), nullStr(in.Notes), householdID, id,
+		nullStr(in.Color), nullStr(in.Notes), nullStr(in.TaxTreatment), householdID, id,
 	)
 	if err != nil {
 		return models.Account{}, fmt.Errorf("updating account: %w", err)

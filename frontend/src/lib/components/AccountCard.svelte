@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Account } from '$lib/types';
-	import { ACCOUNT_TYPE_LABELS } from '$lib/types';
+	import { accountKindLabel, holdsSecurities } from '$lib/types';
 	import { formatCurrency, formatDate } from '$lib/format';
 
 	let { account }: { account: Account } = $props();
@@ -20,7 +20,7 @@
 				{account.institution_name || ''}{account.mask ? ` ····${account.mask}` : ''}
 			</div>
 		</div>
-		<div class="account-type">{ACCOUNT_TYPE_LABELS[account.type] ?? account.type}</div>
+		<div class="account-type">{accountKindLabel(account)}</div>
 	</div>
 
 	<div class="card-body">
@@ -28,7 +28,7 @@
 		<span class="balance-value" class:debt={isLiability && account.balance !== 0}>
 			{formatCurrency(displayBalance)}
 		</span>
-		{#if account.type === 'investment'}
+		{#if holdsSecurities(account.type)}
 			<span class="since">
 				Cash {formatCurrency(account.cash_balance)} · Invested {formatCurrency(account.holdings_value)}
 			</span>

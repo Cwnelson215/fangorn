@@ -21,12 +21,28 @@ const (
 	AccountSavings    = "savings"
 	AccountCash       = "cash"
 	AccountInvestment = "investment"
+	AccountRetirement = "retirement"
 	AccountCreditCard = "credit_card"
 	AccountLoan       = "loan"
 
 	ClassAsset     = "asset"
 	ClassLiability = "liability"
 )
+
+// Tax treatments of a retirement account. Every retirement account has one;
+// no other type does.
+const (
+	TaxRoth        = "roth"        // contributed after tax, withdrawn tax-free
+	TaxTraditional = "traditional" // contributed pre-tax, taxed on withdrawal
+)
+
+// HoldsSecurities reports whether an account of this type keeps a trade log and
+// holdings. A retirement account is an investment account with rules on top, so
+// everything that works for one — trades, prices, value history, the
+// investments summary — asks this rather than comparing against a single type.
+func HoldsSecurities(accountType string) bool {
+	return accountType == AccountInvestment || accountType == AccountRetirement
+}
 
 // Transaction and rule kinds.
 const (
@@ -101,7 +117,7 @@ func ClassForType(accountType string) string {
 func ValidAccountType(t string) bool {
 	switch t {
 	case AccountChecking, AccountSavings, AccountCash,
-		AccountInvestment, AccountCreditCard, AccountLoan:
+		AccountInvestment, AccountRetirement, AccountCreditCard, AccountLoan:
 		return true
 	}
 	return false
@@ -120,11 +136,14 @@ type Account struct {
 	Currency            string  `json:"currency"`
 	Color               *string `json:"color"`
 	Notes               *string `json:"notes"`
-	Archived            bool    `json:"archived"`
+	// TaxTreatment is TaxRoth or TaxTraditional on a retirement account, nil on
+	// every other type.
+	TaxTreatment *string `json:"tax_treatment"`
+	Archived     bool    `json:"archived"`
 
 	// CashBalance is StartingBalance plus every posted transaction on the account.
-	// HoldingsValue is the market value of an investment account's positions at
-	// the latest known prices (0 for every other type). Balance is their sum, and
+	// HoldingsValue is the market value of the positions in an account that
+	// HoldsSecurities, at the latest known prices (0 for every other type). Balance is their sum, and
 	// is the figure net worth adds up. All three are computed on read.
 	CashBalance   float64 `json:"cash_balance"`
 	HoldingsValue float64 `json:"holdings_value"`

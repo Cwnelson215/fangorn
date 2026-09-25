@@ -350,8 +350,8 @@ func lockInvestmentAccount(ctx context.Context, tx *sql.Tx, householdID, account
 	if err != nil {
 		return fmt.Errorf("locking account: %w", err)
 	}
-	if typ != models.AccountInvestment {
-		return invalid("trades can only be logged on investment accounts")
+	if !models.HoldsSecurities(typ) {
+		return invalid("trades can only be logged on investment and retirement accounts")
 	}
 	return nil
 }

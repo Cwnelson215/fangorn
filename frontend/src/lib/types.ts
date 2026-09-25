@@ -7,10 +7,28 @@ export type AccountType =
 	| 'savings'
 	| 'cash'
 	| 'investment'
+	| 'retirement'
 	| 'credit_card'
 	| 'loan';
 
 export type AccountClass = 'asset' | 'liability';
+
+/** How a retirement account is taxed; null on every other type. */
+export type TaxTreatment = 'roth' | 'traditional';
+
+export const TAX_TREATMENT_LABELS: Record<TaxTreatment, string> = {
+	roth: 'Roth',
+	traditional: 'Traditional'
+};
+
+/**
+ * Whether an account keeps trades and holdings. A retirement account is an
+ * investment account with rules on top, so ask this rather than comparing the
+ * type to 'investment' (mirrors models.HoldsSecurities).
+ */
+export function holdsSecurities(type: AccountType): boolean {
+	return type === 'investment' || type === 'retirement';
+}
 export type Kind = 'income' | 'expense' | 'transfer';
 /**
  * A transaction can also be the cash side of a trade, or a refund; rules and
@@ -35,9 +53,18 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
 	savings: 'Savings',
 	cash: 'Cash',
 	investment: 'Investment',
+	retirement: 'Retirement',
 	credit_card: 'Credit Card',
 	loan: 'Loan'
 };
+
+/** What an account is, for badges and headers: "Roth retirement", "Checking". */
+export function accountKindLabel(account: Pick<Account, 'type' | 'tax_treatment'>): string {
+	if (account.type === 'retirement' && account.tax_treatment) {
+		return `${TAX_TREATMENT_LABELS[account.tax_treatment]} retirement`;
+	}
+	return ACCOUNT_TYPE_LABELS[account.type] ?? account.type;
+}
 
 export const FREQUENCY_LABELS: Record<Frequency, string> = {
 	daily: 'Daily',
@@ -62,6 +89,7 @@ export interface Account {
 	currency: string;
 	color: string | null;
 	notes: string | null;
+	tax_treatment: TaxTreatment | null;
 	archived: boolean;
 	/** starting_balance plus every transaction. */
 	cash_balance: number;
@@ -264,6 +292,8 @@ export interface Dashboard {
 	total_assets: number;
 	total_liabilities: number;
 	net_worth: number;
+	/** The part of net_worth held in retirement accounts. */
+	retirement_value: number;
 	accounts: Account[];
 	categories: CategorySpend[];
 	weekly_spending: WeekSpend[];
@@ -418,6 +448,7 @@ export interface AccountInput {
 	currency: string;
 	color: string | null;
 	notes: string | null;
+	tax_treatment: TaxTreatment | null;
 }
 
 /** Amount is a positive magnitude; the server applies the sign from `kind`. */

@@ -44,6 +44,9 @@ type Dashboard struct {
 	TotalAssets      float64 `json:"total_assets"`
 	TotalLiabilities float64 `json:"total_liabilities"`
 	NetWorth         float64 `json:"net_worth"`
+	// RetirementValue is the part of NetWorth held in retirement accounts —
+	// money that is counted but can't be spent without penalties.
+	RetirementValue float64 `json:"retirement_value"`
 
 	Accounts        []models.Account       `json:"accounts"`
 	Categories      []CategorySpend        `json:"categories"`
@@ -105,13 +108,16 @@ func (s *Service) Dashboard(ctx context.Context, householdID int, from, to strin
 		} else {
 			d.TotalAssets += a.Balance
 		}
+		if a.Type == models.AccountRetirement {
+			d.RetirementValue += a.Balance
+		}
 	}
 	d.NetWorth = d.TotalAssets - d.TotalLiabilities
 
 	// Stored prices only: the dashboard is one round trip and must not wait on
 	// the quote provider. The scheduler keeps them within a tick of current.
 	for _, a := range accounts {
-		if a.Type != models.AccountInvestment {
+		if !models.HoldsSecurities(a.Type) {
 			continue
 		}
 		summary, err := s.InvestmentsSummary(ctx, householdID)

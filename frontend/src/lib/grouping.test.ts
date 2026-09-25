@@ -23,6 +23,7 @@ function account(
     currency: "USD",
     color: null,
     notes: null,
+    tax_treatment: null,
     archived: false,
     cash_balance: balance,
     holdings_value: 0,
@@ -83,5 +84,25 @@ describe("groupAccounts", () => {
 describe("institutionNames", () => {
   it("lists distinct names without the empty group", () => {
     expect(institutionNames(accounts)).toEqual(["Fidelity", "Gesa"]);
+  });
+});
+
+describe("retirement accounts", () => {
+  it("group on their own, right after investment accounts", () => {
+    const roth = {
+      ...account("Roth IRA", "retirement", "Fidelity", 800),
+      tax_treatment: "roth" as const,
+    };
+    const labels = groupAccounts([...accounts, roth], "type").map(
+      (g) => g.label,
+    );
+    expect(labels).toEqual([
+      "Checking",
+      "Savings",
+      "Cash",
+      "Investment",
+      "Retirement",
+      "Credit Card",
+    ]);
   });
 });

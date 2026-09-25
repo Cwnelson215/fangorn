@@ -88,7 +88,7 @@ func (s *Service) investmentLedgers(ctx context.Context, householdID int, accoun
 	q := `SELECT id, type, starting_balance, starting_balance_date FROM accounts WHERE household_id = $1`
 	args := []any{householdID}
 	if accountIDs == nil {
-		q += ` AND type = '` + models.AccountInvestment + `' AND archived_at IS NULL`
+		q += ` AND type IN ('` + models.AccountInvestment + `','` + models.AccountRetirement + `') AND archived_at IS NULL`
 	} else {
 		q += ` AND id = ANY($2)`
 		args = append(args, pq.Array(accountIDs))
@@ -108,8 +108,8 @@ func (s *Service) investmentLedgers(ctx context.Context, householdID int, accoun
 		if err := rows.Scan(&id, &typ, &l.StartingCash, &l.StartingDate); err != nil {
 			return nil, fmt.Errorf("scanning account: %w", err)
 		}
-		if typ != models.AccountInvestment {
-			return nil, invalid("value history is only kept for investment accounts")
+		if !models.HoldsSecurities(typ) {
+			return nil, invalid("value history is only kept for investment and retirement accounts")
 		}
 		byID[id] = &l
 		ids = append(ids, id)

@@ -74,7 +74,7 @@ own money is neither earning nor spending it. Mutations go through `ledger.Creat
 `UpdateTransfer` / `DeleteTransfer`, which operate on the whole group in one transaction. Editing a
 single leg through `/api/transactions` is rejected; deleting one leg deletes both.
 
-**3. A trade is a `trades` row plus a cash leg.** In an `investment` account, a buy or sell also
+**3. A trade is a `trades` row plus a cash leg.** In an `investment` or `retirement` account, a buy or sell also
 writes one `kind = 'trade'` transaction on the same account (`transactions.trade_id`, composite FK
 so it can't sit on another account). Cash therefore stays `starting_balance + SUM(amount)`, and
 income/expense totals list kinds explicitly (today `kind IN ('income','expense','refund')`) so trades
@@ -96,6 +96,14 @@ A transaction's category must match its kind — `models.CategoryKindFor` maps `
 `expense`/`refund`→expense, and `assertCategory` rejects the rest. Without that check an expense
 filed under an income category is accepted, moves the balance, and then appears in no budget, no
 breakdown and no chart: the money gone with nothing saying where.
+
+**5. A retirement account is an investment account with rules on top.** `type = 'retirement'`
+(a Roth IRA, a 401(k)) keeps trades, holdings, prices and value history exactly like `investment`,
+and always carries a `tax_treatment` (`roth` / `traditional`; nothing else may). Anything that means
+"can this account hold securities" asks `models.HoldsSecurities` (frontend: `holdsSecurities` in
+`lib/types.ts`) — never `type == 'investment'`, which would silently drop retirement accounts from
+holdings, the investments summary or the value chart. It groups separately, and the dashboard
+reports `retirement_value`, the part of net worth that can't be spent without penalties.
 
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
@@ -237,6 +245,7 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 `008_refunds` adds the `refund` kind (positive, expense category required).
 `009_receipts` adds the `receipts` table and the `receipt` transaction source.
 `010_device_keys` adds `device_keys`, the per-phone keys the iPhone Shortcut uses.
+`011_retirement_accounts` adds the `retirement` account type and `accounts.tax_treatment`.
 
 ## Conventions
 

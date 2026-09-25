@@ -73,6 +73,12 @@
 					<span class="muted">
 						{formatCurrency(data.total_assets)} assets · {formatCurrency(data.total_liabilities)} owed
 					</span>
+					{#if data.retirement_value > 0}
+						<span class="muted">
+							{formatCurrency(data.retirement_value)} retirement ·
+							{formatCurrency(data.net_worth - data.retirement_value)} outside it
+						</span>
+					{/if}
 					{#if data.investments}
 						{@const inv = data.investments}
 						<a class="investments-line" href="/investments">

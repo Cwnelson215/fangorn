@@ -201,7 +201,7 @@ func (s *Service) InvestmentsSummary(ctx context.Context, householdID int) (Inve
 
 	var views []Holdings
 	for _, a := range accounts {
-		if a.Type != models.AccountInvestment {
+		if !models.HoldsSecurities(a.Type) {
 			continue
 		}
 		h, err := s.holdingsFor(ctx, a)

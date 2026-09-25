@@ -7,8 +7,8 @@
 		unarchiveAccount,
 		updateAccount
 	} from '$lib/api';
-	import type { Account, AccountInput, AccountType } from '$lib/types';
-	import { ACCOUNT_TYPE_LABELS } from '$lib/types';
+	import type { Account, AccountInput, AccountType, TaxTreatment } from '$lib/types';
+	import { ACCOUNT_TYPE_LABELS, TAX_TREATMENT_LABELS, holdsSecurities } from '$lib/types';
 	import { formatCurrency, today } from '$lib/format';
 	import AccountCard from '$lib/components/AccountCard.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -36,6 +36,7 @@
 	let startingBalance = $state('');
 	let startingDate = $state(today());
 	let notes = $state('');
+	let taxTreatment = $state<TaxTreatment>('roth');
 
 	onMount(load);
 
@@ -67,6 +68,7 @@
 		startingBalance = '';
 		startingDate = today();
 		notes = '';
+		taxTreatment = 'roth';
 		formError = null;
 		modalOpen = true;
 	}
@@ -80,6 +82,7 @@
 		startingBalance = String(account.starting_balance);
 		startingDate = account.starting_balance_date;
 		notes = account.notes ?? '';
+		taxTreatment = account.tax_treatment ?? 'roth';
 		formError = null;
 		modalOpen = true;
 	}
@@ -100,7 +103,8 @@
 			starting_balance_date: startingDate,
 			currency: 'USD',
 			color: null,
-			notes: notes.trim() || null
+			notes: notes.trim() || null,
+			tax_treatment: type === 'retirement' ? taxTreatment : null
 		};
 	}
 
@@ -243,17 +247,33 @@
 			</Field>
 		</div>
 
+		{#if type === 'retirement'}
+			<Field
+				label="Tax treatment"
+				id="taxTreatment"
+				hint={taxTreatment === 'roth'
+					? 'Contributed after tax; withdrawals in retirement are tax-free.'
+					: 'Contributed pre-tax; withdrawals are taxed as income.'}
+			>
+				<select id="taxTreatment" bind:value={taxTreatment} disabled={saving}>
+					{#each Object.entries(TAX_TREATMENT_LABELS) as [value, label]}
+						<option {value}>{label}</option>
+					{/each}
+				</select>
+			</Field>
+		{/if}
+
 		<div class="form-row">
 			<Field
 				label={isLiabilityType
 					? 'Amount currently owed'
-					: type === 'investment'
+					: holdsSecurities(type)
 						? 'Cash balance'
 						: 'Starting balance'}
 				id="balance"
 				hint={isLiabilityType
 					? 'Enter what you owe as a positive number'
-					: type === 'investment'
+					: holdsSecurities(type)
 						? 'Uninvested cash only (including a money market core position). Add what you hold from the account page.'
 						: undefined}
 			>
