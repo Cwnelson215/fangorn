@@ -12,9 +12,12 @@ import (
 )
 
 // A high-yield savings account keeps a rate history, and once a month is over
-// the scheduler posts that month's interest as an income transaction. The
-// arithmetic is in internal/interest; this file loads what it needs and makes
-// posting safe to repeat.
+// the scheduler posts that month's interest as an income transaction. An
+// investment or retirement account can keep one too, for the yield of its
+// uninvested cash (a money market core position like SPAXX): the same posting,
+// on the cash balance only, filed as a dividend. The arithmetic is in
+// internal/interest; this file loads what it needs and makes posting safe to
+// repeat.
 
 func validAPY(apy float64) error {
 	if math.IsNaN(apy) || apy < 0 || apy >= 100 {
@@ -30,30 +33,31 @@ type SavingsRateInput struct {
 	EffectiveFrom string  `json:"effective_from"`
 }
 
-// assertHighYield checks the account exists in the household and is a
-// high-yield savings account, returning the date it starts earning from.
-func (s *Service) assertHighYield(ctx context.Context, q interface {
+// assertEarnsOnCash checks the account exists in the household and is a type
+// whose cash can earn a rate, returning its type and the date it starts
+// earning from.
+func (s *Service) assertEarnsOnCash(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, householdID, accountID int) (time.Time, error) {
+}, householdID, accountID int) (string, time.Time, error) {
 	var typ string
 	var start time.Time
 	err := q.QueryRowContext(ctx,
 		`SELECT type, starting_balance_date FROM accounts WHERE household_id = $1 AND id = $2`,
 		householdID, accountID).Scan(&typ, &start)
 	if err == sql.ErrNoRows {
-		return start, ErrNotFound
+		return typ, start, ErrNotFound
 	}
 	if err != nil {
-		return start, fmt.Errorf("fetching account: %w", err)
+		return typ, start, fmt.Errorf("fetching account: %w", err)
 	}
-	if typ != models.AccountHighYieldSavings {
-		return start, invalid("only high-yield savings accounts have an interest rate")
+	if !models.EarnsOnCash(typ) {
+		return typ, start, invalid("only high-yield savings, investment and retirement accounts earn a rate on their cash")
 	}
-	return start, nil
+	return typ, start, nil
 }
 
 func (s *Service) ListSavingsRates(ctx context.Context, householdID, accountID int) ([]models.SavingsRate, error) {
-	if _, err := s.assertHighYield(ctx, s.db, householdID, accountID); err != nil {
+	if _, _, err := s.assertEarnsOnCash(ctx, s.db, householdID, accountID); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx,
@@ -84,7 +88,7 @@ func (s *Service) AddSavingsRate(ctx context.Context, householdID, accountID int
 	if _, err := models.ParseDate(in.EffectiveFrom); err != nil {
 		return models.SavingsRate{}, invalid("effective_from must be YYYY-MM-DD")
 	}
-	if _, err := s.assertHighYield(ctx, s.db, householdID, accountID); err != nil {
+	if _, _, err := s.assertEarnsOnCash(ctx, s.db, householdID, accountID); err != nil {
 		return models.SavingsRate{}, err
 	}
 	r := models.SavingsRate{AccountID: accountID, APY: in.APY, EffectiveFrom: in.EffectiveFrom}
@@ -100,9 +104,15 @@ func (s *Service) AddSavingsRate(ctx context.Context, householdID, accountID int
 	return r, nil
 }
 
-// DeleteSavingsRate removes a mistaken entry. The last one can't go: an account
-// with no rate silently stops earning, which is never what deleting a typo means.
+// DeleteSavingsRate removes a mistaken entry. A high-yield savings account's
+// last rate can't go: it would silently stop earning, which is never what
+// deleting a typo means. On an investment account the yield is optional, and
+// removing the last one just turns the cash dividend off.
 func (s *Service) DeleteSavingsRate(ctx context.Context, householdID, accountID, rateID int) error {
+	typ, _, err := s.assertEarnsOnCash(ctx, s.db, householdID, accountID)
+	if err != nil {
+		return err
+	}
 	return s.inTx(func(tx *sql.Tx) error {
 		var n int
 		err := tx.QueryRowContext(ctx,
@@ -120,8 +130,8 @@ func (s *Service) DeleteSavingsRate(ctx context.Context, householdID, accountID,
 		if k, _ := res.RowsAffected(); k == 0 {
 			return ErrNotFound
 		}
-		if n <= 1 {
-			return invalid("an account needs at least one rate; add the new rate before removing this one")
+		if n <= 1 && typ == models.AccountHighYieldSavings {
+			return invalid("a high-yield savings account needs at least one rate; add the new rate before removing this one")
 		}
 		return nil
 	})
@@ -161,26 +171,28 @@ func cashBalanceOn(ctx context.Context, q interface {
 }
 
 // PostInterest posts every finished month's interest that hasn't been worked
-// out yet, for each of the household's open high-yield savings accounts. Like
+// out yet, for each of the household's open accounts with a rate history. Like
 // the recurring engine it is idempotent rather than reliable: run it twice, or
 // not for a month, and the ledger still lands right. It returns how many
 // interest transactions it wrote.
 func (s *Service) PostInterest(ctx context.Context, householdID int, today time.Time) (int, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, starting_balance_date FROM accounts
-		 WHERE household_id = $1 AND type = $2 AND archived_at IS NULL`,
-		householdID, models.AccountHighYieldSavings)
+		`SELECT a.id, a.type, a.starting_balance_date FROM accounts a
+		 WHERE a.household_id = $1 AND a.archived_at IS NULL
+		   AND EXISTS (SELECT 1 FROM savings_rates r WHERE r.account_id = a.id)`,
+		householdID)
 	if err != nil {
-		return 0, fmt.Errorf("listing high-yield accounts: %w", err)
+		return 0, fmt.Errorf("listing accounts with a rate: %w", err)
 	}
 	type account struct {
 		id    int
+		typ   string
 		start time.Time
 	}
 	var accounts []account
 	for rows.Next() {
 		var a account
-		if err := rows.Scan(&a.id, &a.start); err != nil {
+		if err := rows.Scan(&a.id, &a.typ, &a.start); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("scanning account: %w", err)
 		}
@@ -193,7 +205,10 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 
 	posted := 0
 	for _, a := range accounts {
-		n, err := s.postAccountInterest(ctx, householdID, a.id, a.start, today)
+		if !models.EarnsOnCash(a.typ) {
+			continue // rates left from an older type; the update guard prevents new ones
+		}
+		n, err := s.postAccountInterest(ctx, householdID, a.id, a.typ, a.start, today)
 		posted += n
 		if err != nil {
 			return posted, fmt.Errorf("account %d: %w", a.id, err)
@@ -202,7 +217,7 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 	return posted, nil
 }
 
-func (s *Service) postAccountInterest(ctx context.Context, householdID, accountID int, start, today time.Time) (int, error) {
+func (s *Service) postAccountInterest(ctx context.Context, householdID, accountID int, typ string, start, today time.Time) (int, error) {
 	rates, err := s.interestRates(ctx, accountID)
 	if err != nil || len(rates) == 0 {
 		return 0, err
@@ -243,7 +258,7 @@ func (s *Service) postAccountInterest(ctx context.Context, householdID, accountI
 		if done[dateStr(m)] {
 			continue
 		}
-		wrote, err := s.postInterestMonth(ctx, householdID, accountID, m, rates, start)
+		wrote, err := s.postInterestMonth(ctx, householdID, accountID, typ, m, rates, start)
 		if err != nil {
 			return posted, fmt.Errorf("%s: %w", m.Format("2006-01"), err)
 		}
@@ -254,10 +269,21 @@ func (s *Service) postAccountInterest(ctx context.Context, householdID, accountI
 	return posted, nil
 }
 
+// earningLabel is how a month's earnings are described and filed. Savings pay
+// interest; the money market fund an investment account's cash sits in pays a
+// dividend, and keeping those apart lets a report tell them apart.
+func earningLabel(accountType string) (description, category string) {
+	if accountType == models.AccountHighYieldSavings {
+		return "Interest", "Interest"
+	}
+	return "Money market dividend", "Dividends"
+}
+
 // postInterestMonth works out one month and records it. The postings row and
 // the transaction go in together; a row that already exists means another pass
-// got there first, and nothing is written.
-func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, month time.Time, rates []interest.Rate, start time.Time) (bool, error) {
+// got there first, and nothing is written. The balance is the cash balance, so
+// an investment account's holdings don't earn the cash rate.
+func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, typ string, month time.Time, rates []interest.Rate, start time.Time) (bool, error) {
 	end := interest.MonthEnd(month)
 	wrote := false
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -284,7 +310,8 @@ func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID 
 			return nil // handled, but nothing earned: no zero-dollar transaction
 		}
 
-		categoryID, err := interestCategory(ctx, tx, householdID)
+		description, categoryName := earningLabel(typ)
+		categoryID, err := incomeCategory(ctx, tx, householdID, categoryName)
 		if err != nil {
 			return err
 		}
@@ -292,10 +319,10 @@ func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID 
 		err = tx.QueryRowContext(ctx,
 			`INSERT INTO transactions
 			   (household_id, account_id, date, amount, kind, description, category_id, source)
-			 VALUES ($1,$2,$3,$4,$5,'Interest',$6,$7)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 			 RETURNING id`,
-			householdID, accountID, dateStr(end), amount, models.KindIncome, categoryID,
-			models.SourceInterest).Scan(&txnID)
+			householdID, accountID, dateStr(end), amount, models.KindIncome, description,
+			categoryID, models.SourceInterest).Scan(&txnID)
 		if err != nil {
 			return fmt.Errorf("posting interest: %w", err)
 		}
@@ -309,33 +336,34 @@ func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID 
 	return wrote, err
 }
 
-// interestCategory finds the household's income category called "Interest",
-// creating it the first time, so posted interest is filed rather than left
-// uncategorized. An archived one is reused rather than duplicated.
-func interestCategory(ctx context.Context, tx *sql.Tx, householdID int) (int, error) {
+// incomeCategory finds the household's income category with this name, any
+// case, creating it the first time, so posted earnings are filed rather than
+// left uncategorized. An archived one is reused rather than duplicated.
+func incomeCategory(ctx context.Context, tx *sql.Tx, householdID int, name string) (int, error) {
 	var id int
 	err := tx.QueryRowContext(ctx,
 		`SELECT id FROM categories
-		 WHERE household_id = $1 AND kind = $2 AND lower(btrim(name)) = 'interest'
+		 WHERE household_id = $1 AND kind = $2 AND lower(btrim(name)) = lower($3)
 		 ORDER BY archived_at NULLS FIRST, id LIMIT 1`,
-		householdID, models.KindIncome).Scan(&id)
+		householdID, models.KindIncome, name).Scan(&id)
 	if err == nil {
 		return id, nil
 	}
 	if err != sql.ErrNoRows {
-		return 0, fmt.Errorf("finding the Interest category: %w", err)
+		return 0, fmt.Errorf("finding the %s category: %w", name, err)
 	}
 	err = tx.QueryRowContext(ctx,
-		`INSERT INTO categories (household_id, name, kind) VALUES ($1, 'Interest', $2) RETURNING id`,
-		householdID, models.KindIncome).Scan(&id)
+		`INSERT INTO categories (household_id, name, kind) VALUES ($1, $2, $3) RETURNING id`,
+		householdID, name, models.KindIncome).Scan(&id)
 	if err != nil {
-		return 0, fmt.Errorf("creating the Interest category: %w", err)
+		return 0, fmt.Errorf("creating the %s category: %w", name, err)
 	}
 	return id, nil
 }
 
 // SavingsOutlook is what the account page shows: the rate history and roughly
-// what this month will earn if the balance stays where it is.
+// what this month will earn if the cash balance stays where it is. Rates is
+// empty on an investment account whose cash yield was never set.
 type SavingsOutlook struct {
 	Rates []models.SavingsRate `json:"rates"`
 	// ProjectedDate is the last day of this month, when the interest posts.
@@ -358,7 +386,7 @@ func (s *Service) SavingsOutlookFor(ctx context.Context, householdID, accountID 
 	month := interest.MonthStart(household.Today())
 	out.ProjectedDate = dateStr(interest.MonthEnd(month))
 
-	start, err := s.assertHighYield(ctx, s.db, householdID, accountID)
+	_, start, err := s.assertEarnsOnCash(ctx, s.db, householdID, accountID)
 	if err != nil {
 		return out, err
 	}

@@ -1,7 +1,12 @@
 <script lang="ts">
-	// A high-yield savings account's interest: the current rate, what this month
-	// should earn, and the rate history. Interest itself posts on its own once a
-	// month ends (the scheduler); this is where the rate it uses is kept.
+	// What an account's cash earns: the current rate, what this month should
+	// earn, and the rate history. The scheduler posts it once a month ends; this
+	// is where the rate it uses is kept.
+	//
+	// 'interest' is a high-yield savings account: its whole balance earns an APY,
+	// and it always has a rate. 'cash' is an investment or retirement account:
+	// only its uninvested cash earns — the yield of the money market fund it sits
+	// in, such as SPAXX — and setting one is optional.
 	import { onMount } from 'svelte';
 	import { addSavingsRate, deleteSavingsRate, getSavingsOutlook } from '$lib/api';
 	import type { SavingsOutlook } from '$lib/types';
@@ -10,7 +15,10 @@
 	import Field from './Field.svelte';
 	import Button from './Button.svelte';
 
-	let { accountId }: { accountId: number } = $props();
+	let { accountId, mode = 'interest' }: { accountId: number; mode?: 'interest' | 'cash' } = $props();
+
+	let isCash = $derived(mode === 'cash');
+	let unit = $derived(isCash ? 'yield' : 'APY');
 
 	let outlook = $state<SavingsOutlook | null>(null);
 	let error = $state<string | null>(null);
@@ -69,30 +77,46 @@
 
 <div class="card">
 	<div class="head">
-		<h2>Interest</h2>
-		<Button size="sm" onclick={openChange}>Change rate</Button>
+		<h2>{isCash ? 'Cash yield' : 'Interest'}</h2>
+		<Button size="sm" onclick={openChange}>
+			{isCash && outlook?.rates.length === 0 ? 'Set yield' : 'Change rate'}
+		</Button>
 	</div>
 
 	{#if error}
 		<p class="error-text">{error}</p>
 	{/if}
 
-	{#if outlook}
+	{#if outlook && isCash && outlook.rates.length === 0}
+		<p class="muted note">
+			The account's uninvested cash usually sits in a money market fund (SPAXX at Fidelity) that
+			pays a dividend each month. Set its yield — Fidelity shows the 7-day yield on the fund's page —
+			and Fangorn adds that dividend when each month ends. Holdings don't count, only the cash.
+		</p>
+	{:else if outlook}
 		<div class="summary">
 			<div>
-				<span class="label">Rate</span>
-				<span class="value">{current ? `${current.apy}% APY` : 'Not started yet'}</span>
+				<span class="label">{isCash ? 'Yield' : 'Rate'}</span>
+				<span class="value">{current ? `${current.apy}% ${unit}` : 'Not started yet'}</span>
 			</div>
 			<div>
 				<span class="label">This month</span>
 				<span class="value pos">≈ {formatCurrency(outlook.projected_amount)}</span>
-				<span class="muted note">posts {formatDate(outlook.projected_date)} if the balance holds</span>
+				<span class="muted note">
+					posts {formatDate(outlook.projected_date)} if the {isCash ? 'cash' : 'balance'} holds
+				</span>
 			</div>
 		</div>
 
 		<p class="muted note">
-			Once a month ends, its interest is added as an <strong>Interest</strong> income entry: the
-			month-end balance × the month's rate. A rate change mid-month counts from its date.
+			{#if isCash}
+				Once a month ends, a <strong>Money market dividend</strong> is added under
+				<strong>Dividends</strong>: the month-end cash × the month's yield. Money market yields move a
+				little every day, so check it against the statement and edit it if it's off.
+			{:else}
+				Once a month ends, its interest is added as an <strong>Interest</strong> income entry: the
+				month-end balance × the month's rate. A rate change mid-month counts from its date.
+			{/if}
 		</p>
 
 		<h3>Rate history</h3>
@@ -102,7 +126,7 @@
 					<span class="apy">{r.apy}%</span>
 					<span class="muted">from {formatDate(r.effective_from)}</span>
 					{#if r.effective_from > today()}<span class="badge">upcoming</span>{/if}
-					{#if outlook.rates.length > 1}
+					{#if isCash || outlook.rates.length > 1}
 						<Button variant="ghost" size="sm" onclick={() => remove(r.id)}>Remove</Button>
 					{/if}
 				</li>
@@ -111,10 +135,10 @@
 	{/if}
 </div>
 
-<Modal bind:open={modalOpen} title="Change interest rate">
+<Modal bind:open={modalOpen} title={isCash ? 'Cash yield' : 'Change interest rate'}>
 	<form onsubmit={save}>
 		<div class="form-row">
-			<Field label="New APY (%)" id="newApy">
+			<Field label={isCash ? 'Yield (%)' : 'New APY (%)'} id="newApy">
 				<input
 					id="newApy"
 					type="number"
@@ -122,13 +146,17 @@
 					step="0.001"
 					min="0"
 					max="99.999"
-					placeholder="4.35"
+					placeholder={isCash ? '4.02' : '4.35'}
 					bind:value={apy}
 					disabled={saving}
 					required
 				/>
 			</Field>
-			<Field label="Effective from" id="rateFrom" hint="The day the bank's new rate started">
+			<Field
+				label="Effective from"
+				id="rateFrom"
+				hint={isCash ? 'Earlier dates add past months too' : "The day the bank's new rate started"}
+			>
 				<input id="rateFrom" type="date" bind:value={effectiveFrom} disabled={saving} required />
 			</Field>
 		</div>

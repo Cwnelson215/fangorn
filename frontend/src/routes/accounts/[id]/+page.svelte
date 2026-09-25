@@ -217,6 +217,10 @@
 			{/if}
 		{/if}
 
+		{#if isInvestment}
+			<SavingsRateCard accountId={account.id} mode="cash" />
+		{/if}
+
 		<div class="card">
 			<h2>{isInvestment ? 'Cash activity' : 'Register'}</h2>
 			{#if detail.transactions.length === 0}

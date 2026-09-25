@@ -169,7 +169,7 @@ func (s *Scheduler) runHousehold(ctx context.Context, household ledger.Household
 	if n, err := s.svc.PostInterest(ctx, household.ID, today); err != nil {
 		log.Printf("Scheduler: interest for household %d: %v", household.ID, err)
 	} else if n > 0 {
-		log.Printf("Scheduler: posted %d month(s) of interest for household %d", n, household.ID)
+		log.Printf("Scheduler: posted %d month(s) of interest or cash dividends for household %d", n, household.ID)
 	}
 
 	// Receipts before the snapshot too, so an expense photographed today is in

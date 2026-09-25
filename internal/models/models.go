@@ -40,6 +40,15 @@ const (
 	TaxTraditional = "traditional" // contributed pre-tax, taxed on withdrawal
 )
 
+// EarnsOnCash reports whether an account of this type can keep a rate history
+// and have the scheduler post what its cash earns each month. A high-yield
+// savings account earns interest on its whole balance; an account that holds
+// securities earns on its uninvested cash, which sits in a money market fund
+// such as Fidelity's SPAXX and pays a monthly dividend.
+func EarnsOnCash(accountType string) bool {
+	return accountType == AccountHighYieldSavings || HoldsSecurities(accountType)
+}
+
 // HoldsSecurities reports whether an account of this type keeps a trade log and
 // holdings. A retirement account is an investment account with rules on top, so
 // everything that works for one — trades, prices, value history, the

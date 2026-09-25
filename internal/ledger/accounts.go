@@ -214,9 +214,9 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		return models.Account{}, invalid("change the rate from the account's page, so past months keep the rate they earned")
 	}
 
-	// A rate history belongs to a high-yield savings account, and the scheduler
-	// only pays interest on one; keep them together rather than strand the rates.
-	if in.Type != models.AccountHighYieldSavings {
+	// A rate history only earns on a type that EarnsOnCash; keep the two together
+	// rather than strand the rates on, say, a checking account.
+	if !models.EarnsOnCash(in.Type) {
 		var hasRates bool
 		err := s.db.QueryRowContext(ctx,
 			`SELECT EXISTS (SELECT 1 FROM savings_rates WHERE household_id = $1 AND account_id = $2)`,
@@ -225,7 +225,7 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 			return models.Account{}, fmt.Errorf("checking for rates: %w", err)
 		}
 		if hasRates {
-			return models.Account{}, invalid("this account has an interest rate history, so it has to stay a high-yield savings account")
+			return models.Account{}, invalid("this account has an interest rate history; remove it before changing to a type that doesn't earn on cash")
 		}
 	}
 

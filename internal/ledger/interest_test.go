@@ -240,3 +240,65 @@ func TestSavingsOutlook(t *testing.T) {
 	_, err = f.svc.SavingsOutlookFor(f.ctx, f.hh, savings.ID)
 	wantInvalid(t, err)
 }
+
+// An investment account's uninvested cash sits in a money market fund (SPAXX)
+// that pays a monthly dividend. With a cash yield set, that posts like savings
+// interest — on the cash only, not the holdings — and is filed as a dividend.
+func TestCashYieldOnInvestmentAccount(t *testing.T) {
+	f := newFixture(t)
+	brokerage, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
+		Name: "Fidelity", Type: models.AccountInvestment, StartingBalance: 3000, StartingBalanceDate: "2026-07-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.trade(brokerage.ID, "buy", f.sym("FXAIX"), "2026-07-10", 10, 200) // $2,000 out of cash
+
+	// No yield set: nothing is posted, and that's allowed.
+	if n := f.postInterest("2026-09-01"); n != 0 {
+		t.Fatalf("posted %d with no yield set", n)
+	}
+
+	if _, err := f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{
+		APY: 4.0, EffectiveFrom: "2026-08-01",
+	}); err != nil {
+		t.Fatalf("setting a cash yield: %v", err)
+	}
+	if n := f.postInterest("2026-09-01"); n != 1 {
+		t.Fatalf("posted %d, want August's", n)
+	}
+	txns := f.interestTxns(brokerage.ID)
+	if len(txns) != 1 {
+		t.Fatalf("dividends = %+v", txns)
+	}
+	d := txns[0]
+	want := interest.ForMonth(day("2026-08-01"), 1000, []interest.Rate{{From: day("2026-08-01"), APY: 4.0}}, day("2026-07-01"))
+	money(t, "dividend on $1,000 cash, not $3,000", d.Amount, want)
+	if d.Description != "Money market dividend" || d.CategoryName == nil || *d.CategoryName != "Dividends" {
+		t.Errorf("dividend = %+v, want a Money market dividend under Dividends", d)
+	}
+	if d.Date != "2026-08-31" {
+		t.Errorf("dated %s", d.Date)
+	}
+
+	// The yield is optional on an investment account: its last rate can go,
+	// which turns the dividend off.
+	rates, _ := f.svc.ListSavingsRates(f.ctx, f.hh, brokerage.ID)
+	if err := f.svc.DeleteSavingsRate(f.ctx, f.hh, brokerage.ID, rates[0].ID); err != nil {
+		t.Errorf("removing the only cash yield: %v", err)
+	}
+}
+
+func TestCashYieldOnRetirementAccount(t *testing.T) {
+	f := newFixture(t)
+	roth := f.retirement("Roth IRA", models.TaxRoth, 500)
+	if _, err := f.svc.AddSavingsRate(f.ctx, f.hh, roth.ID, ledger.SavingsRateInput{
+		APY: 4.0, EffectiveFrom: "2026-08-01",
+	}); err != nil {
+		t.Fatalf("setting a cash yield on a Roth IRA: %v", err)
+	}
+	f.postInterest("2026-09-01")
+	if txns := f.interestTxns(roth.ID); len(txns) != 1 || txns[0].Amount <= 0 {
+		t.Errorf("Roth dividends = %+v", txns)
+	}
+}

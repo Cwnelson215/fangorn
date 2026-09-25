@@ -115,7 +115,14 @@ effect. The math is pure, in `internal/interest`. Posting is idempotent like the
 as the interest, and keeps its row when the transaction is deleted, so deleting a month's interest
 skips that month rather than reposting it. Rate changes go through `AddSavingsRate`, never the
 account form, so months already posted keep the rate they earned at, and an account with rates
-can't change type.
+can't change to a type that doesn't earn on cash.
+
+The same machinery gives an `investment` or `retirement` account an optional **cash yield** — the
+money market fund its uninvested cash sits in (SPAXX at Fidelity) pays a monthly dividend. It posts
+on the **cash balance only** (`cashBalanceOn`: starting balance + transactions, trade legs
+included, so holdings never earn the cash rate), described "Money market dividend" under
+**Dividends**. `models.EarnsOnCash` decides which types can keep rates; a high-yield savings account
+must keep at least one, an investment account may remove its last to turn the dividend off.
 
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
