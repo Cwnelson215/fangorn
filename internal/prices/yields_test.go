@@ -11,17 +11,15 @@ import (
 
 func (f *fixture) linkedAccount(fund string) models.Account {
 	f.t.Helper()
-	a, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
-		Name: "Brokerage", Type: models.AccountInvestment, StartingBalance: 1000, StartingBalanceDate: "2026-09-01",
-	})
-	if err != nil {
-		f.t.Fatal(err)
-	}
 	f.provider.prices[fund] = 1
 	if err := f.r.EnsureSecurity(f.ctx, fund); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.svc.SetCashFund(f.ctx, f.hh, a.ID, fund, time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)); err != nil {
+	a, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
+		Name: "Brokerage", Type: models.AccountInvestment, StartingBalance: 1000, StartingBalanceDate: "2026-09-01",
+		CashFund: &fund,
+	})
+	if err != nil {
 		f.t.Fatal(err)
 	}
 	return a

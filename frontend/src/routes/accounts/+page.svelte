@@ -17,6 +17,7 @@
 	import GroupBySwitch from '$lib/components/GroupBySwitch.svelte';
 	import { groupAccounts, institutionNames } from '$lib/grouping';
 	import { grouping } from '$lib/grouping.svelte';
+	import { defaultCashFund } from '$lib/cashfund';
 
 	let accounts: Account[] = $state([]);
 	let loading = $state(true);
@@ -38,6 +39,10 @@
 	let notes = $state('');
 	let taxTreatment = $state<TaxTreatment>('roth');
 	let apy = $state<string | number>('');
+	// Where an investment account's cash sits. It follows the institution
+	// (Fidelity → SPAXX) until someone types in it.
+	let cashFund = $state('');
+	let cashFundTouched = $state(false);
 
 	onMount(load);
 
@@ -71,6 +76,8 @@
 		notes = '';
 		taxTreatment = 'roth';
 		apy = '';
+		cashFund = '';
+		cashFundTouched = false;
 		formError = null;
 		modalOpen = true;
 	}
@@ -85,6 +92,10 @@
 		startingDate = account.starting_balance_date;
 		notes = account.notes ?? '';
 		taxTreatment = account.tax_treatment ?? 'roth';
+		// An account added before cash funds existed gets its institution's default
+		// offered here, so saving it once links the fund.
+		cashFund = account.cash_fund ?? defaultCashFund(account.institution_name) ?? '';
+		cashFundTouched = account.cash_fund != null;
 		formError = null;
 		modalOpen = true;
 	}
@@ -108,8 +119,13 @@
 			notes: notes.trim() || null,
 			tax_treatment: type === 'retirement' ? taxTreatment : null,
 			// Only the opening rate; later changes go into the account's rate history.
-			apy: !editing && type === 'high_yield_savings' ? Number(apy) : null
+			apy: !editing && type === 'high_yield_savings' ? Number(apy) : null,
+			cash_fund: holdsSecurities(type) && cashFund.trim() ? cashFund.trim().toUpperCase() : null
 		};
+	}
+
+	function onInstitutionInput() {
+		if (!cashFundTouched) cashFund = defaultCashFund(institution) ?? '';
 	}
 
 	async function handleSubmit(event: Event) {
@@ -239,6 +255,7 @@
 					id="institution"
 					list="institution-names"
 					bind:value={institution}
+					oninput={onInstitutionInput}
 					placeholder="Gesa"
 					autocomplete="off"
 					disabled={saving}
@@ -264,6 +281,26 @@
 						<option {value}>{label}</option>
 					{/each}
 				</select>
+			</Field>
+		{/if}
+
+		{#if holdsSecurities(type)}
+			<Field
+				label="Cash sits in"
+				id="cashFund"
+				hint={editing && !editing.cash_fund
+					? "The money market fund holding this account's cash. Its yield is looked up daily and pays a dividend each month, counted from today."
+					: "The money market fund holding this account's cash (SPAXX at Fidelity). Its yield is looked up daily and pays a dividend each month. Leave blank if it doesn't earn."}
+			>
+				<input
+					id="cashFund"
+					bind:value={cashFund}
+					oninput={() => (cashFundTouched = true)}
+					placeholder="SPAXX"
+					autocapitalize="characters"
+					autocomplete="off"
+					disabled={saving}
+				/>
 			</Field>
 		{/if}
 

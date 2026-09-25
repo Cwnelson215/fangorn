@@ -124,12 +124,15 @@ included, so holdings never earn the cash rate), described "Money market dividen
 **Dividends**. `models.EarnsOnCash` decides which types can keep rates; a high-yield savings account
 must keep at least one, an investment account may remove its last to turn the dividend off.
 
-Better than typing it: link the account to its fund (`accounts.cash_fund`, e.g. `SPAXX`, via
-`PUT /api/accounts/{id}/cash-fund`). The scheduler then looks the fund's yield up at most every 12h
+Better than typing it: the account names its fund (`accounts.cash_fund`, e.g. `SPAXX`) — the
+**Cash sits in** field on the account form, filled in from the institution by `lib/cashfund.ts`
+(Fidelity → SPAXX, Vanguard → VMFXX) and saved with the account like any other field; the account
+handlers fetch its first quote and yield. The scheduler then looks the yield up at most every 12h
 (`prices.Refresher.RefreshYields`, retrying a failure after 30m) into `security_yields` — shared
-market data like `security_prices`, one row per day. The fund governs from `cash_fund_since`, the
-day it was linked, so linking never back-posts; hand-entered rates still cover the time before, and
-can't be added while linked. A money market yield is a simple annual rate, so `fundYields` converts
+market data like `security_prices`, one row per day. The fund governs from `cash_fund_since`: the
+starting-balance date on a new account, but **today** when a fund is added to an existing one (its
+earlier months may have been entered by hand), and unchanged when the account is re-saved with the
+same fund. Hand-entered rates still cover the time before, and can't be added while a fund is set. A money market yield is a simple annual rate, so `fundYields` converts
 it to the APY whose monthly rate is exactly yield ÷ 12. The dividend is described "SPAXX dividend".
 
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net

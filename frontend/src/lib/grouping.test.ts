@@ -25,6 +25,7 @@ function account(
     notes: null,
     tax_treatment: null,
     apy: null,
+    cash_fund: null,
     archived: false,
     cash_balance: balance,
     holdings_value: 0,

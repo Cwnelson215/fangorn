@@ -3,7 +3,6 @@ package ledger
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -229,56 +228,6 @@ func (s *Service) fundYields(ctx context.Context, symbol string) ([]interest.Rat
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-// SetCashFund links an investment or retirement account's cash to the money
-// market fund it sits in, so its yield is looked up rather than typed in. An
-// empty symbol unlinks it. Relinking the same fund keeps the original date.
-// The fund must already be a known security (the handler fetches its first
-// quote); today is the household's, and is when the fund takes over.
-func (s *Service) SetCashFund(ctx context.Context, householdID, accountID int, symbol string, today time.Time) error {
-	var typ string
-	var current sql.NullString
-	err := s.db.QueryRowContext(ctx,
-		`SELECT type, cash_fund FROM accounts WHERE household_id = $1 AND id = $2`,
-		householdID, accountID).Scan(&typ, &current)
-	if err == sql.ErrNoRows {
-		return ErrNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("fetching account: %w", err)
-	}
-	if !models.HoldsSecurities(typ) {
-		return invalid("only investment and retirement accounts have a cash fund")
-	}
-
-	if symbol == "" {
-		_, err = s.db.ExecContext(ctx,
-			`UPDATE accounts SET cash_fund = NULL, cash_fund_since = NULL, updated_at = NOW()
-			 WHERE household_id = $1 AND id = $2`, householdID, accountID)
-		if err != nil {
-			return fmt.Errorf("unlinking cash fund: %w", err)
-		}
-		return nil
-	}
-
-	symbol = NormalizeSymbol(symbol)
-	if current.Valid && current.String == symbol {
-		return nil
-	}
-	if _, err := s.GetSecurity(ctx, symbol); errors.Is(err, ErrNotFound) {
-		return invalid("couldn't look up %s right now; try again in a minute", symbol)
-	} else if err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE accounts SET cash_fund = $1, cash_fund_since = $2, updated_at = NOW()
-		 WHERE household_id = $3 AND id = $4`,
-		symbol, dateStr(today), householdID, accountID)
-	if err != nil {
-		return fmt.Errorf("linking cash fund: %w", err)
-	}
-	return nil
 }
 
 // SaveFundYield records a fund's yield for a day; a later lookup the same day

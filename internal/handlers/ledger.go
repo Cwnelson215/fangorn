@@ -1,14 +1,20 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/cwnelson/fangorn/internal/ledger"
+	"github.com/cwnelson/fangorn/internal/models"
+	"github.com/cwnelson/fangorn/internal/prices"
 )
 
 // LedgerHandler serves every ledger endpoint. It is one type rather than eight
-// because they all need exactly the same two things — the service and the
-// household to scope to — and splitting them would only spread that plumbing out.
+// because they all need the same things — the service and the household to
+// scope to (plus the price refresher, for an account's cash fund) — and
+// splitting them would only spread that plumbing out.
 //
 // householdID is resolved once at boot. Phase 2 replaces it with a per-request
 // value read from the session; every method already takes it as a parameter, so
@@ -16,10 +22,14 @@ import (
 type LedgerHandler struct {
 	svc         *ledger.Service
 	householdID int
+	// prices looks up an account's cash fund when it is saved: its first quote
+	// so the ledger knows the symbol, and its first yield so the account page
+	// has a figure straight away.
+	prices *prices.Refresher
 }
 
-func NewLedgerHandler(svc *ledger.Service, householdID int) *LedgerHandler {
-	return &LedgerHandler{svc: svc, householdID: householdID}
+func NewLedgerHandler(svc *ledger.Service, refresher *prices.Refresher, householdID int) *LedgerHandler {
+	return &LedgerHandler{svc: svc, prices: refresher, householdID: householdID}
 }
 
 // Register wires every ledger route onto the mux.
@@ -131,11 +141,17 @@ func (h *LedgerHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), lookupBudget)
+	defer cancel()
+	if !h.ensureCashFund(ctx, w, in.CashFund) {
+		return
+	}
 	account, err := h.svc.CreateAccount(r.Context(), h.householdID, in)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	h.firstYield(ctx, account)
 	writeJSON(w, http.StatusCreated, account)
 }
 
@@ -148,12 +164,50 @@ func (h *LedgerHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), lookupBudget)
+	defer cancel()
+	if !h.ensureCashFund(ctx, w, in.CashFund) {
+		return
+	}
 	account, err := h.svc.UpdateAccount(r.Context(), h.householdID, id, in)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	h.firstYield(ctx, account)
 	writeJSON(w, http.StatusOK, account)
+}
+
+// ensureCashFund fetches a cash fund's first quote so the ledger knows the
+// symbol, and rejects one the provider says doesn't exist.
+func (h *LedgerHandler) ensureCashFund(ctx context.Context, w http.ResponseWriter, fund *string) bool {
+	if fund == nil || strings.TrimSpace(*fund) == "" {
+		return true
+	}
+	if err := h.prices.EnsureSecurity(ctx, *fund); err != nil {
+		fail(w, err)
+		return false
+	}
+	return true
+}
+
+// firstYield looks up a newly linked fund's yield so the account page has a
+// figure at once. Best effort: the scheduler fills it in shortly otherwise.
+func (h *LedgerHandler) firstYield(ctx context.Context, account models.Account) {
+	if account.CashFund == nil {
+		return
+	}
+	household, err := h.svc.GetHousehold(ctx, h.householdID)
+	if err != nil {
+		return
+	}
+	if due, err := h.svc.CashFundsDue(ctx, h.householdID, time.Now().Add(-time.Hour)); err == nil {
+		for _, sym := range due {
+			if sym == *account.CashFund {
+				_ = h.prices.FetchYield(ctx, sym, household.Today())
+			}
+		}
+	}
 }
 
 func (h *LedgerHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {

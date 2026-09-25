@@ -165,8 +165,12 @@ type Account struct {
 	TaxTreatment *string `json:"tax_treatment"`
 	// APY is a high-yield savings account's current rate in percent (4.35 means
 	// 4.35%), nil on every other type and before a rate is set.
-	APY      *float64 `json:"apy"`
-	Archived bool     `json:"archived"`
+	APY *float64 `json:"apy"`
+	// CashFund is the money market fund an investment or retirement account's
+	// uninvested cash sits in (SPAXX at Fidelity); its yield is looked up and
+	// pays the account's monthly cash dividend. Nil on every other type.
+	CashFund *string `json:"cash_fund"`
+	Archived bool    `json:"archived"`
 
 	// CashBalance is StartingBalance plus every posted transaction on the account.
 	// HoldingsValue is the market value of the positions in an account that

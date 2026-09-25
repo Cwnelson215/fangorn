@@ -94,6 +94,8 @@ export interface Account {
 	tax_treatment: TaxTreatment | null;
 	/** A high-yield savings account's current APY in percent (4.35 = 4.35%). */
 	apy: number | null;
+	/** The money market fund an investment account's cash sits in (SPAXX). */
+	cash_fund: string | null;
 	archived: boolean;
 	/** starting_balance plus every transaction. */
 	cash_balance: number;
@@ -455,6 +457,8 @@ export interface AccountInput {
 	tax_treatment: TaxTreatment | null;
 	/** The opening APY of a new high-yield savings account; create only. */
 	apy?: number | null;
+	/** Where an investment account's cash sits; null for none. */
+	cash_fund: string | null;
 }
 
 /** One entry in a high-yield savings account's rate history. */

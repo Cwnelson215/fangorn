@@ -6,16 +6,11 @@
 	// 'interest' is a high-yield savings account: its whole balance earns an APY
 	// you enter, and it always has a rate. 'cash' is an investment or retirement
 	// account: only its uninvested cash earns, at the yield of the money market
-	// fund it sits in (SPAXX at Fidelity). Linking the fund lets the server look
-	// that yield up every day; entering one by hand is the fallback.
+	// fund it sits in (SPAXX at Fidelity). That fund is part of the account —
+	// "Cash sits in" on its form — and the server looks its yield up every day;
+	// entering one by hand is the fallback for cash that isn't in a known fund.
 	import { onMount } from 'svelte';
-	import {
-		addSavingsRate,
-		deleteSavingsRate,
-		getSavingsOutlook,
-		setCashFund,
-		unlinkCashFund
-	} from '$lib/api';
+	import { addSavingsRate, deleteSavingsRate, getSavingsOutlook } from '$lib/api';
 	import type { SavingsOutlook } from '$lib/types';
 	import { formatCurrency, formatDate, today } from '$lib/format';
 	import Modal from './Modal.svelte';
@@ -36,12 +31,6 @@
 	let effectiveFrom = $state(today());
 	let saving = $state(false);
 	let formError = $state<string | null>(null);
-
-	// The link-a-fund form.
-	let fundOpen = $state(false);
-	let fundSymbol = $state('SPAXX');
-	let linking = $state(false);
-	let fundError = $state<string | null>(null);
 
 	onMount(load);
 
@@ -89,48 +78,17 @@
 			error = e instanceof Error ? e.message : 'Could not remove the rate';
 		}
 	}
-
-	function openFund() {
-		fundSymbol = 'SPAXX';
-		fundError = null;
-		fundOpen = true;
-	}
-
-	async function linkFund(event: Event) {
-		event.preventDefault();
-		linking = true;
-		fundError = null;
-		try {
-			outlook = await setCashFund(accountId, fundSymbol.trim());
-			fundOpen = false;
-		} catch (e) {
-			fundError = e instanceof Error ? e.message : 'Could not link the fund';
-		} finally {
-			linking = false;
-		}
-	}
-
-	async function unlink() {
-		try {
-			outlook = await unlinkCashFund(accountId);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not unlink the fund';
-		}
-	}
 </script>
 
 <div class="card">
 	<div class="head">
 		<h2>{isCash ? 'Cash yield' : 'Interest'}</h2>
 		<div class="head-actions">
-			{#if isCash && linked}
-				<Button variant="ghost" size="sm" onclick={unlink}>Unlink</Button>
-			{:else if isCash}
+			{#if isCash && !linked}
 				<Button variant="ghost" size="sm" onclick={openRate}>
 					{hasRates ? 'Change yield' : 'Enter by hand'}
 				</Button>
-				<Button size="sm" onclick={openFund}>Look up fund</Button>
-			{:else}
+			{:else if !isCash}
 				<Button size="sm" onclick={openRate}>Change rate</Button>
 			{/if}
 		</div>
@@ -143,9 +101,9 @@
 	{#if outlook && isCash && !linked && !hasRates}
 		<p class="muted note">
 			The account's uninvested cash usually sits in a money market fund (SPAXX at Fidelity) that
-			pays a dividend each month. <strong>Look up fund</strong> links it: Fangorn checks the fund's
-			published yield every day and adds the dividend when each month ends. Only the cash counts, not
-			the holdings.
+			pays a dividend each month. Name it under <strong>Cash sits in</strong> when editing the account,
+			and Fangorn looks up its yield every day and adds the dividend when each month ends. Only the
+			cash counts, not the holdings.
 		</p>
 	{:else if outlook}
 		<div class="summary">
@@ -174,7 +132,7 @@
 
 		<p class="muted note">
 			{#if linked}
-				Checked against {outlook.cash_fund}'s published yield every day since
+				{outlook.cash_fund}'s published yield is looked up every day, and counts from
 				{formatDate(outlook.cash_fund_since ?? '')}. When a month ends, an
 				<strong>{outlook.cash_fund} dividend</strong> is added under <strong>Dividends</strong>: the
 				month-end cash × the month's average yield ÷ 12. It lands close to the statement; edit it if
@@ -190,7 +148,7 @@
 		</p>
 
 		{#if hasRates}
-			<h3>{linked ? 'Entered by hand, before linking' : 'Rate history'}</h3>
+			<h3>{linked ? `Entered by hand, before ${outlook.cash_fund}` : 'Rate history'}</h3>
 			<ul class="rates">
 				{#each outlook.rates as r (r.id)}
 					<li>
@@ -242,37 +200,6 @@
 		<div class="form-actions">
 			<Button variant="secondary" onclick={() => (rateOpen = false)}>Cancel</Button>
 			<Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save rate'}</Button>
-		</div>
-	</form>
-</Modal>
-
-<Modal bind:open={fundOpen} title="Look up the cash fund">
-	<form onsubmit={linkFund}>
-		<Field
-			label="Money market fund"
-			id="cashFund"
-			hint="Where this account's uninvested cash sits — SPAXX is Fidelity's usual core position."
-		>
-			<input
-				id="cashFund"
-				bind:value={fundSymbol}
-				autocapitalize="characters"
-				autocomplete="off"
-				disabled={linking}
-				required
-			/>
-		</Field>
-		<p class="muted note">
-			The fund's yield counts from today. Anything entered by hand still covers the months before.
-		</p>
-		{#if fundError}
-			<p class="error-text">{fundError}</p>
-		{/if}
-		<div class="form-actions">
-			<Button variant="secondary" onclick={() => (fundOpen = false)}>Cancel</Button>
-			<Button type="submit" disabled={linking || !fundSymbol.trim()}>
-				{linking ? 'Looking up…' : 'Link fund'}
-			</Button>
 		</div>
 	</form>
 </Modal>

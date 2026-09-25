@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -304,27 +305,31 @@ func TestCashYieldOnRetirementAccount(t *testing.T) {
 	}
 }
 
-// A linked cash fund takes over the account's yield from the day it's linked:
-// hand-entered rates still cover the months before, the fund's daily published
-// yields everything after, each a simple annual rate that earns yield ÷ 12.
-func TestCashFundYieldTakesOverFromLink(t *testing.T) {
-	f := newFixture(t)
-	brokerage, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
-		Name: "Fidelity", Type: models.AccountInvestment, StartingBalance: 1000, StartingBalanceDate: "2026-06-01",
+func (f *fixture) investment(name, since string, cash float64, fund *string) models.Account {
+	f.t.Helper()
+	a, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
+		Name: name, Type: models.AccountInvestment, StartingBalance: cash, StartingBalanceDate: since,
+		CashFund: fund,
 	})
 	if err != nil {
-		t.Fatal(err)
+		f.t.Fatalf("CreateAccount(%s): %v", name, err)
 	}
-	if _, err := f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{
-		APY: 4.0, EffectiveFrom: "2026-06-01",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	return a
+}
 
+func simpleYield(y float64) float64 { return (math.Pow(1+y/100/12, 12) - 1) * 100 }
+
+// A new account names its cash fund when it is added, and the fund's yield
+// governs from the account's as-of date: its first lookup stands in for the
+// days before, then each day's published yield from its date. A money market
+// yield is a simple annual rate, so a month earns yield / 12.
+func TestCashFundOnNewAccount(t *testing.T) {
+	f := newFixture(t)
 	fund := f.sym("SPAXX")
-	f.price(fund, 1, 1) // the fund is a known security
-	if err := f.svc.SetCashFund(f.ctx, f.hh, brokerage.ID, fund, day("2026-08-10")); err != nil {
-		t.Fatalf("linking: %v", err)
+	f.price(fund, 1, 1) // the handler makes sure the fund is a known security
+	brokerage := f.investment("Fidelity", "2026-06-01", 1000, &fund)
+	if brokerage.CashFund == nil || *brokerage.CashFund != fund {
+		t.Fatalf("cash fund = %v", brokerage.CashFund)
 	}
 	for asOf, y := range map[string]float64{"2026-08-10": 3.3, "2026-08-20": 3.6} {
 		if err := f.svc.SaveFundYield(f.ctx, fund, day(asOf), y); err != nil {
@@ -332,8 +337,8 @@ func TestCashFundYieldTakesOverFromLink(t *testing.T) {
 		}
 	}
 
-	_, err = f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{APY: 5, EffectiveFrom: "2026-09-01"})
-	wantInvalid(t, err) // the fund owns the yield now
+	_, err := f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{APY: 5, EffectiveFrom: "2026-09-01"})
+	wantInvalid(t, err) // the fund owns the yield
 
 	if n := f.postInterest("2026-09-02"); n != 3 {
 		t.Fatalf("posted %d, want June, July and August", n)
@@ -345,29 +350,24 @@ func TestCashFundYieldTakesOverFromLink(t *testing.T) {
 	if want := fund + " dividend"; txns[2].Description != want {
 		t.Errorf("description = %q, want %q", txns[2].Description, want)
 	}
-
-	simple := func(y float64) float64 { return (math.Pow(1+y/100/12, 12) - 1) * 100 }
 	rates := []interest.Rate{
-		{From: day("2026-06-01"), APY: 4.0},
-		{From: day("2026-08-10"), APY: simple(3.3)},
-		{From: day("2026-08-20"), APY: simple(3.6)},
+		{From: day("2026-06-01"), APY: simpleYield(3.3)},
+		{From: day("2026-08-20"), APY: simpleYield(3.6)},
 	}
-	balance := 1000 + txns[0].Amount + txns[1].Amount
-	money(t, "July still at the manual 4%", txns[1].Amount,
-		interest.ForMonth(day("2026-07-01"), 1000+txns[0].Amount, rates[:1], day("2026-06-01")))
-	money(t, "August: manual to the 9th, then the fund's yields", txns[2].Amount,
-		interest.ForMonth(day("2026-08-01"), balance, rates, day("2026-06-01")))
-	// A 3.6% simple yield earns exactly 0.3% a month.
-	near := interest.MonthlyRate(simple(3.6))
-	if math.Abs(near-0.003) > 1e-12 {
-		t.Errorf("3.6%% simple yield earns %.6f a month, want 0.003", near)
+	money(t, "June at the first lookup", txns[0].Amount,
+		interest.ForMonth(day("2026-06-01"), 1000, rates, day("2026-06-01")))
+	money(t, "August: 3.3% to the 19th, 3.6% after", txns[2].Amount,
+		interest.ForMonth(day("2026-08-01"), 1000+txns[0].Amount+txns[1].Amount, rates, day("2026-06-01")))
+	if m := interest.MonthlyRate(simpleYield(3.6)); math.Abs(m-0.003) > 1e-12 {
+		t.Errorf("3.6%% simple yield earns %.6f a month, want exactly 0.003", m)
 	}
 
 	out, err := f.svc.SavingsOutlookFor(f.ctx, f.hh, brokerage.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.CashFund == nil || *out.CashFund != fund || out.FundYield == nil || *out.FundYield != 3.6 {
+	if out.CashFund == nil || *out.CashFund != fund || out.FundYield == nil || *out.FundYield != 3.6 ||
+		*out.CashFundSince != "2026-06-01" {
 		t.Errorf("outlook = %+v", out)
 	}
 
@@ -378,26 +378,109 @@ func TestCashFundYieldTakesOverFromLink(t *testing.T) {
 	if due, _ = f.svc.CashFundsDue(f.ctx, f.hh, time.Now().Add(-time.Hour)); len(due) != 0 {
 		t.Errorf("fetched just now but due: %v", due)
 	}
+}
 
-	_, err = f.svc.UpdateAccount(f.ctx, f.hh, brokerage.ID, ledger.AccountInput{
-		Name: "Fidelity", Type: models.AccountChecking, StartingBalance: 1000, StartingBalanceDate: "2026-06-01",
-	})
-	wantInvalid(t, err)
-
-	if err := f.svc.SetCashFund(f.ctx, f.hh, brokerage.ID, "", time.Time{}); err != nil {
+// Saving the account again keeps the fund's original date; naming a fund on
+// an account that already exists counts from today, so months that may have
+// been entered by hand stay as they were; clearing it unlinks.
+func TestCashFundOnExistingAccount(t *testing.T) {
+	f := newFixture(t)
+	fund := f.sym("SPAXX")
+	f.price(fund, 1, 1)
+	household, err := f.svc.GetHousehold(f.ctx, f.hh)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.AddSavingsRate(f.ctx, f.hh, brokerage.ID, ledger.SavingsRateInput{APY: 3.4, EffectiveFrom: "2026-09-01"}); err != nil {
-		t.Errorf("manual rate after unlinking: %v", err)
+	today := household.Today()
+
+	update := func(id int, fund *string) models.Account {
+		t.Helper()
+		a, err := f.svc.UpdateAccount(f.ctx, f.hh, id, ledger.AccountInput{
+			Name: "Fidelity", Type: models.AccountInvestment, StartingBalance: 1000,
+			StartingBalanceDate: "2026-01-01", CashFund: fund,
+		})
+		if err != nil {
+			t.Fatalf("UpdateAccount: %v", err)
+		}
+		return a
 	}
+	since := func(id int) string {
+		t.Helper()
+		out, err := f.svc.SavingsOutlookFor(f.ctx, f.hh, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.CashFundSince == nil {
+			return ""
+		}
+		return *out.CashFundSince
+	}
+
+	withFund := f.investment("Fidelity", "2026-01-01", 1000, &fund)
+	update(withFund.ID, &fund)
+	if got := since(withFund.ID); got != "2026-01-01" {
+		t.Errorf("re-saving moved the fund's start to %s", got)
+	}
+	if a := update(withFund.ID, nil); a.CashFund != nil || since(withFund.ID) != "" {
+		t.Errorf("clearing left %v", a.CashFund)
+	}
+
+	// An account that has been earning a hand-entered 4% since January.
+	manual := f.investment("Old", "2026-01-01", 1000, nil)
+	if _, err := f.svc.AddSavingsRate(f.ctx, f.hh, manual.ID, ledger.SavingsRateInput{
+		APY: 4.0, EffectiveFrom: "2026-01-01",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	update(manual.ID, &fund)
+	if got := since(manual.ID); got != dateStr(today) {
+		t.Fatalf("linked from %s, want today %s", got, dateStr(today))
+	}
+	if err := f.svc.SaveFundYield(f.ctx, fund, today, 3.0); err != nil {
+		t.Fatal(err)
+	}
+
+	month := interest.MonthStart(today)
+	f.postInterest(dateStr(month.AddDate(0, 1, 0))) // the month with today in it is now over
+	txns := f.interestTxns(manual.ID)
+	var before float64
+	var got *models.Transaction
+	for i := range txns {
+		if txns[i].Date < dateStr(month) {
+			before += txns[i].Amount
+		} else if txns[i].Date == dateStr(interest.MonthEnd(month)) {
+			got = &txns[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("no dividend for the month of the link: %+v", txns)
+	}
+	rates := []interest.Rate{{From: day("2026-01-01"), APY: 4.0}, {From: today, APY: simpleYield(3.0)}}
+	money(t, "hand-entered 4% until today, the fund after", got.Amount,
+		interest.ForMonth(month, 1000+before, rates, day("2026-01-01")))
 }
 
 func TestCashFundRules(t *testing.T) {
 	f := newFixture(t)
-	savings := f.account("Savings", models.AccountSavings, 100)
-	wantInvalid(t, f.svc.SetCashFund(f.ctx, f.hh, savings.ID, "SPAXX", day("2026-09-01")))
+	fund := f.sym("SPAXX")
+	f.price(fund, 1, 1)
 
-	brokerage := f.account("Brokerage", models.AccountInvestment, 100)
-	// A symbol that was never looked up can't be linked.
-	wantInvalid(t, f.svc.SetCashFund(f.ctx, f.hh, brokerage.ID, f.sym("NOPE"), day("2026-09-01")))
+	_, err := f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
+		Name: "Savings", Type: models.AccountSavings, StartingBalanceDate: "2026-01-01", CashFund: &fund,
+	})
+	wantInvalid(t, err)
+
+	nope := f.sym("NOPE") // never looked up
+	_, err = f.svc.CreateAccount(f.ctx, f.hh, ledger.AccountInput{
+		Name: "Brokerage", Type: models.AccountInvestment, StartingBalanceDate: "2026-01-01", CashFund: &nope,
+	})
+	wantInvalid(t, err)
+
+	lower := strings.ToLower(fund)
+	a := f.investment("Brokerage", "2026-01-01", 100, &lower)
+	if a.CashFund == nil || *a.CashFund != fund {
+		t.Errorf("cash fund = %v, want it normalized to %s", a.CashFund, fund)
+	}
 }
+
+func dateStr(t time.Time) string { return t.Format(models.DateOnly) }

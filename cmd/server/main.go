@@ -85,7 +85,7 @@ func main() {
 	receiptProc := receipts.New(svc, extractor)
 
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
-	ledgerH := handlers.NewLedgerHandler(svc, householdID)
+	ledgerH := handlers.NewLedgerHandler(svc, refresher, householdID)
 	investmentH := handlers.NewInvestmentHandler(svc, refresher, householdID)
 	receiptH := handlers.NewReceiptHandler(svc, receiptProc, householdID)
 	shortcutH := handlers.NewShortcutHandler(svc, receiptH, householdID)

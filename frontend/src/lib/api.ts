@@ -107,10 +107,6 @@ export const addSavingsRate = (accountId: number, input: { apy: number; effectiv
 	send<SavingsRate>('POST', `/api/accounts/${accountId}/rates`, input);
 export const deleteSavingsRate = (accountId: number, rateId: number) =>
 	send<void>('DELETE', `/api/accounts/${accountId}/rates/${rateId}`);
-export const setCashFund = (accountId: number, symbol: string) =>
-	send<SavingsOutlook>('PUT', `/api/accounts/${accountId}/cash-fund`, { symbol });
-export const unlinkCashFund = (accountId: number) =>
-	send<SavingsOutlook>('DELETE', `/api/accounts/${accountId}/cash-fund`);
 
 // ---------------------------------------------------------------------------
 // investments

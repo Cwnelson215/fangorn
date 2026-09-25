@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -22,20 +23,20 @@ const accountSelect = `
 	       (SELECT r.apy FROM savings_rates r
 	         WHERE r.account_id = a.id AND r.effective_from <= CURRENT_DATE
 	         ORDER BY r.effective_from DESC LIMIT 1) AS apy,
-	       a.archived_at IS NOT NULL AS archived,
+	       a.cash_fund, a.archived_at IS NOT NULL AS archived,
 	       b.cash_balance, b.holdings_value, b.cash_balance + b.holdings_value AS balance
 	FROM accounts a
 	JOIN (` + accountBalances + `) b ON b.account_id = a.id`
 
 func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	var a models.Account
-	var institution, mask, color, notes, tax sql.NullString
+	var institution, mask, color, notes, tax, fund sql.NullString
 	var apy sql.NullFloat64
 	var startDate time.Time
 	err := rows.Scan(
 		&a.ID, &a.HouseholdID, &a.Name, &institution, &a.Type, &a.Class, &mask,
 		&a.StartingBalance, &startDate, &a.Currency, &color, &notes,
-		&tax, &apy, &a.Archived, &a.CashBalance, &a.HoldingsValue, &a.Balance,
+		&tax, &apy, &fund, &a.Archived, &a.CashBalance, &a.HoldingsValue, &a.Balance,
 	)
 	if err != nil {
 		return a, err
@@ -46,6 +47,7 @@ func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	a.Color = strPtr(color)
 	a.Notes = strPtr(notes)
 	a.TaxTreatment = strPtr(tax)
+	a.CashFund = strPtr(fund)
 	if apy.Valid {
 		a.APY = &apy.Float64
 	}
@@ -111,6 +113,12 @@ type AccountInput struct {
 	// changes go into the rate history (AddSavingsRate) so past months keep the
 	// rate they were earned at.
 	APY *float64 `json:"apy"`
+	// CashFund is where an investment or retirement account's cash sits, as a
+	// symbol (SPAXX); nil for none. On a new account the fund counts from
+	// StartingBalanceDate. Linking one to an existing account counts from
+	// today, so months that may have been entered by hand aren't posted again.
+	// The handler makes sure the symbol is a known security first.
+	CashFund *string `json:"cash_fund"`
 }
 
 func trimmedOrNil(s *string) *string {
@@ -144,6 +152,14 @@ func (in *AccountInput) normalize() error {
 	} else if in.TaxTreatment != nil {
 		return invalid("only retirement accounts have a tax treatment")
 	}
+	in.CashFund = trimmedOrNil(in.CashFund)
+	if in.CashFund != nil {
+		if !models.HoldsSecurities(in.Type) {
+			return invalid("only investment and retirement accounts have a cash fund")
+		}
+		sym := NormalizeSymbol(*in.CashFund)
+		in.CashFund = &sym
+	}
 	if in.APY != nil {
 		if in.Type != models.AccountHighYieldSavings {
 			return invalid("only high-yield savings accounts have an interest rate")
@@ -171,19 +187,30 @@ func (s *Service) CreateAccount(ctx context.Context, householdID int, in Account
 	if in.Type == models.AccountHighYieldSavings && in.APY == nil {
 		return models.Account{}, invalid("a high-yield savings account needs its interest rate (APY)")
 	}
+	if err := s.assertKnownFund(ctx, in.CashFund); err != nil {
+		return models.Account{}, err
+	}
+	// A new account's fund counts from the day its balance is as of, like a
+	// high-yield account's opening rate.
+	var fundSince any
+	if in.CashFund != nil {
+		fundSince = in.StartingBalanceDate
+	}
 
 	var id int
 	err := s.inTx(func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx,
 			`INSERT INTO accounts
 		   (household_id, name, institution_name, type, class, mask,
-		    starting_balance, starting_balance_date, currency, color, notes, tax_treatment)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		    starting_balance, starting_balance_date, currency, color, notes, tax_treatment,
+		    cash_fund, cash_fund_since)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		 RETURNING id`,
 			householdID, in.Name, nullStr(in.InstitutionName), in.Type,
 			models.ClassForType(in.Type), nullStr(in.Mask),
 			in.StartingBalance, in.StartingBalanceDate, in.Currency,
 			nullStr(in.Color), nullStr(in.Notes), nullStr(in.TaxTreatment),
+			nullStr(in.CashFund), fundSince,
 		).Scan(&id)
 		if err != nil {
 			return fmt.Errorf("creating account: %w", err)
@@ -229,18 +256,15 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		}
 	}
 
-	// A linked cash fund likewise only belongs on an account that holds securities.
-	if !models.HoldsSecurities(in.Type) {
-		var linked bool
-		err := s.db.QueryRowContext(ctx,
-			`SELECT cash_fund IS NOT NULL FROM accounts WHERE household_id = $1 AND id = $2`,
-			householdID, id).Scan(&linked)
-		if err != nil && err != sql.ErrNoRows {
-			return models.Account{}, fmt.Errorf("checking the cash fund: %w", err)
-		}
-		if linked {
-			return models.Account{}, invalid("this account's cash is linked to a money market fund; unlink it before changing to a type that doesn't hold securities")
-		}
+	if err := s.assertKnownFund(ctx, in.CashFund); err != nil {
+		return models.Account{}, err
+	}
+	// Linking a fund to an account that already exists counts from today:
+	// earlier months may have been entered by hand. Keeping the same fund keeps
+	// its original date; clearing it (or a type without one) unlinks it.
+	household, err := s.GetHousehold(ctx, householdID)
+	if err != nil {
+		return models.Account{}, err
 	}
 
 	// Trades only make sense on an account that holds securities, so one that
@@ -263,11 +287,18 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		`UPDATE accounts SET
 		   name = $1, institution_name = $2, type = $3, class = $4, mask = $5,
 		   starting_balance = $6, starting_balance_date = $7, currency = $8,
-		   color = $9, notes = $10, tax_treatment = $11, updated_at = NOW()
+		   color = $9, notes = $10, tax_treatment = $11,
+		   cash_fund_since = CASE
+		     WHEN $14::text IS NULL THEN NULL
+		     WHEN cash_fund IS NOT DISTINCT FROM $14::text THEN cash_fund_since
+		     ELSE $15::date END,
+		   cash_fund = $14,
+		   updated_at = NOW()
 		 WHERE household_id = $12 AND id = $13`,
 		in.Name, nullStr(in.InstitutionName), in.Type, models.ClassForType(in.Type),
 		nullStr(in.Mask), in.StartingBalance, in.StartingBalanceDate, in.Currency,
 		nullStr(in.Color), nullStr(in.Notes), nullStr(in.TaxTreatment), householdID, id,
+		nullStr(in.CashFund), dateStr(household.Today()),
 	)
 	if err != nil {
 		return models.Account{}, fmt.Errorf("updating account: %w", err)
@@ -379,4 +410,18 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// assertKnownFund checks a cash fund symbol is a security the ledger knows —
+// the handler fetches its first quote before calling in. A lookup that failed
+// is worth retrying rather than a mystery foreign-key error.
+func (s *Service) assertKnownFund(ctx context.Context, symbol *string) error {
+	if symbol == nil {
+		return nil
+	}
+	_, err := s.GetSecurity(ctx, *symbol)
+	if errors.Is(err, ErrNotFound) {
+		return invalid("couldn't look up %s right now; try again in a minute", *symbol)
+	}
+	return err
 }
