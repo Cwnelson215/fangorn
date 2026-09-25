@@ -17,13 +17,17 @@ import (
 
 // Account types and the class each implies.
 const (
-	AccountChecking   = "checking"
-	AccountSavings    = "savings"
-	AccountCash       = "cash"
-	AccountInvestment = "investment"
-	AccountRetirement = "retirement"
-	AccountCreditCard = "credit_card"
-	AccountLoan       = "loan"
+	AccountChecking = "checking"
+	AccountSavings  = "savings"
+	// AccountHighYieldSavings is a savings account that earns interest by
+	// itself: it keeps a rate history and the scheduler posts each month's
+	// interest (internal/interest).
+	AccountHighYieldSavings = "high_yield_savings"
+	AccountCash             = "cash"
+	AccountInvestment       = "investment"
+	AccountRetirement       = "retirement"
+	AccountCreditCard       = "credit_card"
+	AccountLoan             = "loan"
 
 	ClassAsset     = "asset"
 	ClassLiability = "liability"
@@ -100,7 +104,18 @@ const (
 	SourceRecurring = "recurring"
 	// SourceReceipt is a transaction posted from a photographed receipt.
 	SourceReceipt = "receipt"
+	// SourceInterest is a high-yield savings account's monthly interest.
+	SourceInterest = "interest"
 )
+
+// SavingsRate is one entry in a high-yield savings account's rate history: an
+// APY in percent, in effect from a date until the next entry.
+type SavingsRate struct {
+	ID            int     `json:"id"`
+	AccountID     int     `json:"account_id"`
+	APY           float64 `json:"apy"`
+	EffectiveFrom string  `json:"effective_from"`
+}
 
 // ClassForType returns the balance class implied by an account type.
 // Unknown types are treated as assets; the DB CHECK constraint is the real guard.
@@ -116,7 +131,7 @@ func ClassForType(accountType string) string {
 // ValidAccountType reports whether t is one of the supported account types.
 func ValidAccountType(t string) bool {
 	switch t {
-	case AccountChecking, AccountSavings, AccountCash,
+	case AccountChecking, AccountSavings, AccountHighYieldSavings, AccountCash,
 		AccountInvestment, AccountRetirement, AccountCreditCard, AccountLoan:
 		return true
 	}
@@ -139,7 +154,10 @@ type Account struct {
 	// TaxTreatment is TaxRoth or TaxTraditional on a retirement account, nil on
 	// every other type.
 	TaxTreatment *string `json:"tax_treatment"`
-	Archived     bool    `json:"archived"`
+	// APY is a high-yield savings account's current rate in percent (4.35 means
+	// 4.35%), nil on every other type and before a rate is set.
+	APY      *float64 `json:"apy"`
+	Archived bool     `json:"archived"`
 
 	// CashBalance is StartingBalance plus every posted transaction on the account.
 	// HoldingsValue is the market value of the positions in an account that

@@ -1,4 +1,6 @@
 import type {
+	SavingsOutlook,
+	SavingsRate,
 	Account,
 	AccountDetail,
 	AccountInput,
@@ -98,6 +100,13 @@ export const updateAccount = (id: number, input: AccountInput) =>
 export const deleteAccount = (id: number) => send<void>('DELETE', `/api/accounts/${id}`);
 export const archiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/archive`);
 export const unarchiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/unarchive`);
+
+export const getSavingsOutlook = (accountId: number) =>
+	request<SavingsOutlook>(`/api/accounts/${accountId}/savings`);
+export const addSavingsRate = (accountId: number, input: { apy: number; effective_from: string }) =>
+	send<SavingsRate>('POST', `/api/accounts/${accountId}/rates`, input);
+export const deleteSavingsRate = (accountId: number, rateId: number) =>
+	send<void>('DELETE', `/api/accounts/${accountId}/rates/${rateId}`);
 
 // ---------------------------------------------------------------------------
 // investments

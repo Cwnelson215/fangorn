@@ -5,6 +5,7 @@
 export type AccountType =
 	| 'checking'
 	| 'savings'
+	| 'high_yield_savings'
 	| 'cash'
 	| 'investment'
 	| 'retirement'
@@ -51,6 +52,7 @@ export type Frequency =
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
 	checking: 'Checking',
 	savings: 'Savings',
+	high_yield_savings: 'High-Yield Savings',
 	cash: 'Cash',
 	investment: 'Investment',
 	retirement: 'Retirement',
@@ -90,6 +92,8 @@ export interface Account {
 	color: string | null;
 	notes: string | null;
 	tax_treatment: TaxTreatment | null;
+	/** A high-yield savings account's current APY in percent (4.35 = 4.35%). */
+	apy: number | null;
 	archived: boolean;
 	/** starting_balance plus every transaction. */
 	cash_balance: number;
@@ -123,7 +127,7 @@ export interface Transaction {
 	transfer_group_id: string | null;
 	recurring_rule_id: number | null;
 	trade_id: number | null;
-	source: 'manual' | 'recurring' | 'receipt';
+	source: 'manual' | 'recurring' | 'receipt' | 'interest';
 	created_at: string;
 	/** The photographed receipt this was posted from, if any. */
 	receipt_id: number | null;
@@ -449,6 +453,25 @@ export interface AccountInput {
 	color: string | null;
 	notes: string | null;
 	tax_treatment: TaxTreatment | null;
+	/** The opening APY of a new high-yield savings account; create only. */
+	apy?: number | null;
+}
+
+/** One entry in a high-yield savings account's rate history. */
+export interface SavingsRate {
+	id: number;
+	account_id: number;
+	apy: number;
+	effective_from: string;
+}
+
+export interface SavingsOutlook {
+	/** Newest first. */
+	rates: SavingsRate[];
+	/** The last day of this month, when its interest posts. */
+	projected_date: string;
+	/** This month's interest if the balance stays where it is. */
+	projected_amount: number;
 }
 
 /** Amount is a positive magnitude; the server applies the sign from `kind`. */

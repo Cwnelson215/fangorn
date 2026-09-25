@@ -37,6 +37,7 @@
 	let startingDate = $state(today());
 	let notes = $state('');
 	let taxTreatment = $state<TaxTreatment>('roth');
+	let apy = $state<string | number>('');
 
 	onMount(load);
 
@@ -69,6 +70,7 @@
 		startingDate = today();
 		notes = '';
 		taxTreatment = 'roth';
+		apy = '';
 		formError = null;
 		modalOpen = true;
 	}
@@ -104,7 +106,9 @@
 			currency: 'USD',
 			color: null,
 			notes: notes.trim() || null,
-			tax_treatment: type === 'retirement' ? taxTreatment : null
+			tax_treatment: type === 'retirement' ? taxTreatment : null,
+			// Only the opening rate; later changes go into the account's rate history.
+			apy: !editing && type === 'high_yield_savings' ? Number(apy) : null
 		};
 	}
 
@@ -263,6 +267,34 @@
 			</Field>
 		{/if}
 
+		{#if type === 'high_yield_savings'}
+			{#if editing}
+				<p class="muted rate-note">
+					Interest rate: {editing.apy != null ? `${editing.apy}% APY` : 'not set'}. Change it from
+					the account's page, so months already earned keep their rate.
+				</p>
+			{:else}
+				<Field
+					label="Interest rate (APY %)"
+					id="apy"
+					hint="Each month's interest is posted automatically once the month ends, from the as-of date below."
+				>
+					<input
+						id="apy"
+						type="number"
+						inputmode="decimal"
+						step="0.001"
+						min="0"
+						max="99.999"
+						placeholder="4.35"
+						bind:value={apy}
+						disabled={saving}
+						required
+					/>
+				</Field>
+			{/if}
+		{/if}
+
 		<div class="form-row">
 			<Field
 				label={isLiabilityType
@@ -333,6 +365,11 @@
 
 	.group-total.neg {
 		color: var(--neg);
+	}
+
+	.rate-note {
+		margin: 0;
+		font-size: 0.8125rem;
 	}
 
 	.group-bar {

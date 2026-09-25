@@ -18,7 +18,11 @@ import (
 const accountSelect = `
 	SELECT a.id, a.household_id, a.name, a.institution_name, a.type, a.class, a.mask,
 	       a.starting_balance, a.starting_balance_date, a.currency, a.color, a.notes,
-	       a.tax_treatment, a.archived_at IS NOT NULL AS archived,
+	       a.tax_treatment,
+	       (SELECT r.apy FROM savings_rates r
+	         WHERE r.account_id = a.id AND r.effective_from <= CURRENT_DATE
+	         ORDER BY r.effective_from DESC LIMIT 1) AS apy,
+	       a.archived_at IS NOT NULL AS archived,
 	       b.cash_balance, b.holdings_value, b.cash_balance + b.holdings_value AS balance
 	FROM accounts a
 	JOIN (` + accountBalances + `) b ON b.account_id = a.id`
@@ -26,11 +30,12 @@ const accountSelect = `
 func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	var a models.Account
 	var institution, mask, color, notes, tax sql.NullString
+	var apy sql.NullFloat64
 	var startDate time.Time
 	err := rows.Scan(
 		&a.ID, &a.HouseholdID, &a.Name, &institution, &a.Type, &a.Class, &mask,
 		&a.StartingBalance, &startDate, &a.Currency, &color, &notes,
-		&tax, &a.Archived, &a.CashBalance, &a.HoldingsValue, &a.Balance,
+		&tax, &apy, &a.Archived, &a.CashBalance, &a.HoldingsValue, &a.Balance,
 	)
 	if err != nil {
 		return a, err
@@ -41,6 +46,9 @@ func scanAccount(rows interface{ Scan(...any) error }) (models.Account, error) {
 	a.Color = strPtr(color)
 	a.Notes = strPtr(notes)
 	a.TaxTreatment = strPtr(tax)
+	if apy.Valid {
+		a.APY = &apy.Float64
+	}
 	return a, nil
 }
 
@@ -98,6 +106,11 @@ type AccountInput struct {
 	Notes               *string `json:"notes"`
 	// TaxTreatment is required on a retirement account and refused on any other.
 	TaxTreatment *string `json:"tax_treatment"`
+	// APY is the opening rate of a new high-yield savings account, in percent,
+	// in effect from StartingBalanceDate. It is only read on create: later
+	// changes go into the rate history (AddSavingsRate) so past months keep the
+	// rate they were earned at.
+	APY *float64 `json:"apy"`
 }
 
 func trimmedOrNil(s *string) *string {
@@ -131,6 +144,14 @@ func (in *AccountInput) normalize() error {
 	} else if in.TaxTreatment != nil {
 		return invalid("only retirement accounts have a tax treatment")
 	}
+	if in.APY != nil {
+		if in.Type != models.AccountHighYieldSavings {
+			return invalid("only high-yield savings accounts have an interest rate")
+		}
+		if err := validAPY(*in.APY); err != nil {
+			return err
+		}
+	}
 	if in.StartingBalanceDate == "" {
 		return invalid("starting_balance_date is required")
 	}
@@ -147,21 +168,40 @@ func (s *Service) CreateAccount(ctx context.Context, householdID int, in Account
 	if err := in.normalize(); err != nil {
 		return models.Account{}, err
 	}
+	if in.Type == models.AccountHighYieldSavings && in.APY == nil {
+		return models.Account{}, invalid("a high-yield savings account needs its interest rate (APY)")
+	}
 
 	var id int
-	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO accounts
+	err := s.inTx(func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx,
+			`INSERT INTO accounts
 		   (household_id, name, institution_name, type, class, mask,
 		    starting_balance, starting_balance_date, currency, color, notes, tax_treatment)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 RETURNING id`,
-		householdID, in.Name, nullStr(in.InstitutionName), in.Type,
-		models.ClassForType(in.Type), nullStr(in.Mask),
-		in.StartingBalance, in.StartingBalanceDate, in.Currency,
-		nullStr(in.Color), nullStr(in.Notes), nullStr(in.TaxTreatment),
-	).Scan(&id)
+			householdID, in.Name, nullStr(in.InstitutionName), in.Type,
+			models.ClassForType(in.Type), nullStr(in.Mask),
+			in.StartingBalance, in.StartingBalanceDate, in.Currency,
+			nullStr(in.Color), nullStr(in.Notes), nullStr(in.TaxTreatment),
+		).Scan(&id)
+		if err != nil {
+			return fmt.Errorf("creating account: %w", err)
+		}
+		if in.APY == nil {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO savings_rates (household_id, account_id, apy, effective_from)
+			 VALUES ($1,$2,$3,$4)`,
+			householdID, id, *in.APY, in.StartingBalanceDate)
+		if err != nil {
+			return fmt.Errorf("recording the opening rate: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return models.Account{}, fmt.Errorf("creating account: %w", err)
+		return models.Account{}, err
 	}
 	return s.GetAccount(ctx, householdID, id)
 }
@@ -169,6 +209,24 @@ func (s *Service) CreateAccount(ctx context.Context, householdID int, in Account
 func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in AccountInput) (models.Account, error) {
 	if err := in.normalize(); err != nil {
 		return models.Account{}, err
+	}
+	if in.APY != nil {
+		return models.Account{}, invalid("change the rate from the account's page, so past months keep the rate they earned")
+	}
+
+	// A rate history belongs to a high-yield savings account, and the scheduler
+	// only pays interest on one; keep them together rather than strand the rates.
+	if in.Type != models.AccountHighYieldSavings {
+		var hasRates bool
+		err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM savings_rates WHERE household_id = $1 AND account_id = $2)`,
+			householdID, id).Scan(&hasRates)
+		if err != nil {
+			return models.Account{}, fmt.Errorf("checking for rates: %w", err)
+		}
+		if hasRates {
+			return models.Account{}, invalid("this account has an interest rate history, so it has to stay a high-yield savings account")
+		}
 	}
 
 	// Trades only make sense on an account that holds securities, so one that

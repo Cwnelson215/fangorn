@@ -21,6 +21,7 @@
 	import HoldingsTable from '$lib/components/HoldingsTable.svelte';
 	import TradeModal from '$lib/components/TradeModal.svelte';
 	import ValueHistoryCard from '$lib/components/ValueHistoryCard.svelte';
+	import SavingsRateCard from '$lib/components/SavingsRateCard.svelte';
 	import Button from '$lib/components/Button.svelte';
 
 	// Prices are refreshed server-side at most once a minute during market hours,
@@ -135,6 +136,10 @@
 				{/if}
 			</div>
 		</div>
+
+		{#if account.type === 'high_yield_savings'}
+			<SavingsRateCard accountId={account.id} />
+		{/if}
 
 		{#if isInvestment && holdings}
 			<div class="card">

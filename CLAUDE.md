@@ -105,6 +105,18 @@ and always carries a `tax_treatment` (`roth` / `traditional`; nothing else may).
 holdings, the investments summary or the value chart. It groups separately, and the dashboard
 reports `retirement_value`, the part of net worth that can't be spent without penalties.
 
+**6. A high-yield savings account earns interest by itself.** `type = 'high_yield_savings'` keeps a
+rate history (`savings_rates`: an APY in percent from a date; the opening rate starts on the
+account's `starting_balance_date`). Once a month is over, the scheduler posts its interest as an
+`income` transaction (`source = 'interest'`, dated the month's last day, category **Interest**,
+created if missing): month-end balance × the month's rate, each rate weighted by the days it was in
+effect. The math is pure, in `internal/interest`. Posting is idempotent like the recurring engine:
+`interest_postings` has `UNIQUE (account_id, month)`, is written in the same database transaction
+as the interest, and keeps its row when the transaction is deleted, so deleting a month's interest
+skips that month rather than reposting it. Rate changes go through `AddSavingsRate`, never the
+account form, so months already posted keep the rate they earned at, and an account with rates
+can't change type.
+
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
 don't recompute a balance anywhere else.
@@ -120,6 +132,7 @@ internal/config/          env -> Config
 internal/database/        Connect, RunMigrations, embedded migrations/
 internal/models/          domain types + the enum constants; ClassForType
 internal/recurring/       PURE date engine — no DB, no clock. The best-tested code here.
+internal/interest/        PURE monthly interest for high-yield savings — month-end balance × day-weighted rate
 internal/portfolio/       PURE trade-log math — replay, average cost, cent rounding, daily value series
 internal/quotes/          price Provider interface + Yahoo client (network, no DB)
 internal/prices/          Refresher: decides when a price is stale, fetches, saves, backs off
@@ -246,6 +259,8 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 `009_receipts` adds the `receipts` table and the `receipt` transaction source.
 `010_device_keys` adds `device_keys`, the per-phone keys the iPhone Shortcut uses.
 `011_retirement_accounts` adds the `retirement` account type and `accounts.tax_treatment`.
+`012_high_yield_savings` adds the `high_yield_savings` type, `savings_rates`, `interest_postings` and
+the `interest` transaction source.
 
 ## Conventions
 

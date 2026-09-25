@@ -33,6 +33,9 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/accounts/{id}", h.DeleteAccount)
 	mux.HandleFunc("POST /api/accounts/{id}/archive", h.ArchiveAccount)
 	mux.HandleFunc("POST /api/accounts/{id}/unarchive", h.UnarchiveAccount)
+	mux.HandleFunc("GET /api/accounts/{id}/savings", h.SavingsOutlook)
+	mux.HandleFunc("POST /api/accounts/{id}/rates", h.AddSavingsRate)
+	mux.HandleFunc("DELETE /api/accounts/{id}/rates/{rateID}", h.DeleteSavingsRate)
 
 	mux.HandleFunc("GET /api/categories", h.ListCategories)
 	mux.HandleFunc("POST /api/categories", h.CreateCategory)
@@ -629,4 +632,52 @@ func (h *LedgerHandler) setGoalAchieved(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, goal)
+}
+
+// SavingsOutlook is a high-yield savings account's rate history and this
+// month's projected interest.
+func (h *LedgerHandler) SavingsOutlook(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	out, err := h.svc.SavingsOutlookFor(r.Context(), h.householdID, id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *LedgerHandler) AddSavingsRate(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	var in ledger.SavingsRateInput
+	if !decode(w, r, &in) {
+		return
+	}
+	rate, err := h.svc.AddSavingsRate(r.Context(), h.householdID, id, in)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rate)
+}
+
+func (h *LedgerHandler) DeleteSavingsRate(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	rateID, ok := pathInt(w, r, "rateID")
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteSavingsRate(r.Context(), h.householdID, id, rateID); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

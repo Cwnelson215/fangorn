@@ -34,6 +34,7 @@
 			</span>
 		{:else}
 			<span class="since">
+				{#if account.apy != null}{account.apy}% APY ·{/if}
 				from {formatCurrency(Math.abs(account.starting_balance))} on
 				{formatDate(account.starting_balance_date)}
 			</span>

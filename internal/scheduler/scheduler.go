@@ -163,6 +163,15 @@ func (s *Scheduler) runHousehold(ctx context.Context, household ledger.Household
 		log.Printf("Scheduler: posted %d recurring transaction(s) for household %d", posted, household.ID)
 	}
 
+	// A finished month's interest before the snapshot, so the 1st's net worth
+	// includes what the savings earned. Months that were missed while the
+	// process was down are picked up here too.
+	if n, err := s.svc.PostInterest(ctx, household.ID, today); err != nil {
+		log.Printf("Scheduler: interest for household %d: %v", household.ID, err)
+	} else if n > 0 {
+		log.Printf("Scheduler: posted %d month(s) of interest for household %d", n, household.ID)
+	}
+
 	// Receipts before the snapshot too, so an expense photographed today is in
 	// today's net worth.
 	s.processReceipts(ctx, household)
