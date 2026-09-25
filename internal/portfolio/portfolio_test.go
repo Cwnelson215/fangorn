@@ -214,3 +214,22 @@ func TestFormatShares(t *testing.T) {
 		}
 	}
 }
+
+// A position is worth what the brokerage says it is: shares × price cut to the
+// cent, not rounded. These are a real Roth IRA's two funds, which Fidelity shows
+// as $5,311.04 and $2,274.35 — rounding put each a cent over.
+func TestMarketValueTruncatesLikeTheBrokerage(t *testing.T) {
+	for _, c := range []struct {
+		shares, price, want float64
+	}{
+		{197.878, 26.84, 5311.04}, // 5311.04552
+		{133.707, 17.01, 2274.35}, // 2274.35607
+		{10, 50, 500},             // exact stays exact
+		{0.1, 0.3, 0.03},          // float noise doesn't knock it down a cent
+		{3, 0.33, 0.99},
+	} {
+		if got := MarketValue(c.shares, c.price); got != c.want {
+			t.Errorf("MarketValue(%v, %v) = %v, want %v", c.shares, c.price, got, c.want)
+		}
+	}
+}

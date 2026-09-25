@@ -136,7 +136,9 @@ same fund. Hand-entered rates still cover the time before, and can't be added wh
 it to the APY whose monthly rate is exactly yield ÷ 12. The dividend is described "SPAXX dividend".
 
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
-shares × `securities.last_price`. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
+shares × `securities.last_price`, each position **truncated** to the cent (`TRUNC`, and
+`portfolio.MarketValue` in Go) — that is how Fidelity values a position, and rounding to nearest put
+positions a cent over the statement. Trade amounts, which are real dollars paid, still round. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
 don't recompute a balance anywhere else.
 
 ## Architecture

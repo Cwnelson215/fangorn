@@ -91,9 +91,9 @@ func TestValueSeriesLastPointUsesLatestPrice(t *testing.T) {
 	pts := pointsByDate(series)
 
 	near(t, "yesterday at the close", pts["2026-09-02"].Value, 50+73.5)
-	// 3.5 × 21.333 = 74.6655 → 74.67, the same rounding as MarketValue.
-	near(t, "today at the latest price", pts["2026-09-03"].Holdings, 74.67)
-	near(t, "today total", series[len(series)-1].Value, 124.67)
+	// 3.5 × 21.333 = 74.6655 → 74.66, cut to the cent like MarketValue.
+	near(t, "today at the latest price", pts["2026-09-03"].Holdings, 74.66)
+	near(t, "today total", series[len(series)-1].Value, 124.66)
 }
 
 func TestValueSeriesStartsAtFirstActivity(t *testing.T) {

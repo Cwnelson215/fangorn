@@ -9,8 +9,9 @@ package ledger
 //	holdings_value  SUM over symbols of (net shares × latest price), per account
 //
 // Net shares are summed straight from the trade log: sells subtract, every other
-// side adds. Each position is rounded to cents before summing, which is the same
-// rounding the holdings view applies in Go, so the two figures agree exactly.
+// side adds. Each position is truncated to the cent before summing — how the
+// brokerage values a position — which is the same cut portfolio.MarketValue
+// applies in Go, so the two figures agree exactly.
 //
 // Callers select from it as a subquery aliased b, joined on b.account_id.
 const accountBalances = `
@@ -22,7 +23,7 @@ const accountBalances = `
 		SELECT account_id, SUM(amount) AS total FROM transactions GROUP BY account_id
 	) t ON t.account_id = a.id
 	LEFT JOIN (
-		SELECT p.account_id, SUM(ROUND(p.shares * s.last_price, 2)) AS value
+		SELECT p.account_id, SUM(TRUNC(p.shares * s.last_price, 2)) AS value
 		FROM (
 			SELECT account_id, symbol,
 			       SUM(CASE WHEN side = 'sell' THEN -shares ELSE shares END) AS shares

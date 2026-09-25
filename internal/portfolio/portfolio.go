@@ -74,11 +74,15 @@ func CashAmount(side string, shares, price, fees float64) float64 {
 	return roundCents(total)
 }
 
-// MarketValue is shares × price rounded to cents, computed exactly. The SQL
-// balance projection rounds each position the same way, so an account's
-// holdings_value and the holdings view add up to the same figure.
+// MarketValue is shares × price, computed exactly and cut down to the cent —
+// truncated, not rounded, because that is what the brokerage shows: Fidelity
+// values 197.878 FZROX at $26.84 ($5,311.0455) as $5,311.04, and rounding to
+// nearest put every position with a fraction of half a cent or more a cent
+// over the statement. The SQL balance projection truncates each position the
+// same way (TRUNC in accountBalances), so an account's holdings_value and the
+// holdings view add up to the same figure.
 func MarketValue(shares, price float64) float64 {
-	return roundCents(new(big.Rat).Mul(rat(RoundShares(shares)), rat(price)))
+	return truncCents(new(big.Rat).Mul(rat(RoundShares(shares)), rat(price)))
 }
 
 // SignedCash applies the account-relative sign to a trade's amount: a buy is
@@ -99,6 +103,14 @@ func rat(f float64) *big.Rat {
 		return new(big.Rat)
 	}
 	return r
+}
+
+// truncCents drops everything past the cent, toward zero.
+func truncCents(r *big.Rat) float64 {
+	cents := new(big.Rat).Mul(r, big.NewRat(100, 1))
+	q := new(big.Int).Quo(cents.Num(), cents.Denom()) // Quo truncates toward zero
+	f, _ := new(big.Rat).SetFrac(q, big.NewInt(100)).Float64()
+	return f
 }
 
 // roundCents rounds half away from zero to two decimal places.
