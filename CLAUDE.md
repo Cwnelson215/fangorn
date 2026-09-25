@@ -193,8 +193,9 @@ no "over" (`incomePace` in `lib/budget.ts`). The dashboard's budget widget shows
 in" on the budgets page, `GET/PUT /api/settings`) — `/add` switches to it for Money in, unless the
 income category names its own account. From there it's distributed to savings goals. A goal's
 target is how much to **add**, not a balance to reach: progress (`goalSelect`) is the money moved
-into its account since `started_on` — transfers in less transfers out; interest, market growth and
-income landing there directly don't count. A goal with `monthly_amount` is a Savings line in the
+into its account since `started_on` (`goalMoney`) — transfers in less transfers out, plus income
+deposited there directly; interest and money market dividends (`source = 'interest'`) and market
+growth don't count. A goal with `monthly_amount` is a Savings line in the
 month's budget (`BudgetMonth.savings`, `moved` = that month's transfers in). "Add money" on the
 line is a real transfer from the income account, so one action fills the month and the goal; a
 transfer made anywhere else counts the same way. A goal with no account still takes hand-logged

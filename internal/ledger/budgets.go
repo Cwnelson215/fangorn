@@ -72,7 +72,8 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 }
 
 // savingsLines is each open goal with a monthly amount, and what went toward it
-// in the month: transfers into its account (from the day the goal started), or
+// in the month: money added to its account (goalMoney, from the day the goal
+// started), or
 // contributions for a goal with no account. A transfer counts toward the month
 // and the goal alike, so "Add money" on the budgets page is one transfer.
 func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart string) ([]models.SavingsLine, error) {
@@ -82,7 +83,7 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 		 SELECT g.id, g.name, g.account_id, g.account_name, g.monthly_amount, g.target_amount, g.saved,
 		        CASE WHEN g.account_id IS NOT NULL THEN COALESCE((
 		               SELECT SUM(t.amount) FROM transactions t
-		               WHERE t.household_id = $1 AND t.account_id = g.account_id AND t.kind = 'transfer'
+		               WHERE t.household_id = $1 AND t.account_id = g.account_id AND `+goalMoney+`
 		                 AND t.date >= GREATEST(g.started_on, $2::date)
 		                 AND t.date < ($2::date + INTERVAL '1 month')), 0)
 		             ELSE COALESCE((

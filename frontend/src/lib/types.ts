@@ -287,9 +287,10 @@ export interface Goal {
 	notes: string | null;
 	achieved: boolean;
 	/**
-	 * Progress toward the target, which is how much to ADD: money moved into the
-	 * linked account since started_on (transfers in less out), or contributions
-	 * logged by hand when there's no account.
+	 * Progress toward the target, which is how much to ADD: money added to the
+	 * linked account since started_on (transfers in less out, plus income
+	 * deposited there, not interest), or contributions logged by hand when
+	 * there's no account.
 	 */
 	saved: number;
 	started_on: string;

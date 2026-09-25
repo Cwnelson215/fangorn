@@ -7,9 +7,9 @@ import (
 	"github.com/cwnelson/fangorn/internal/models"
 )
 
-// A linked goal counts money moved into its account from the day it starts —
-// not the balance already there, not income landing there directly, and not
-// money moved in before it began.
+// A linked goal counts money added to its account from the day it starts —
+// transfers and income deposited there — but not the balance already there,
+// not interest the account earned, and not money moved in before it began.
 func TestGoalCountsMoneyMovedIn(t *testing.T) {
 	f := newFixture(t)
 	checking := f.account("Checking", models.AccountChecking, 5000)
@@ -35,13 +35,17 @@ func TestGoalCountsMoneyMovedIn(t *testing.T) {
 
 	f.transfer(checking.ID, savings.ID, 300, day)
 	f.transfer(savings.ID, checking.ID, 50, day)
-	f.txn(savings.ID, models.KindIncome, day, 25, &gifts.ID) // not moved from our own money
+	f.txn(savings.ID, models.KindIncome, day, 25, &gifts.ID) // deposited straight in: counts
+	interest := f.txn(savings.ID, models.KindIncome, day, 7.5, &gifts.ID)
+	if _, err := f.svc.DB().Exec(`UPDATE transactions SET source = 'interest' WHERE id = $1`, interest.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	goal, err = f.svc.GetGoal(f.ctx, f.hh, goal.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	money(t, "moved in, less moved out", goal.Saved, 250)
+	money(t, "moved in, less moved out, plus income deposited", goal.Saved, 275)
 
 	bm, err := f.svc.BudgetMonth(f.ctx, f.hh, day)
 	if err != nil {
@@ -52,8 +56,8 @@ func TestGoalCountsMoneyMovedIn(t *testing.T) {
 	}
 	line := bm.Savings[0]
 	money(t, "planned", line.Monthly, 200)
-	money(t, "moved this month", line.Moved, 250)
-	money(t, "saved overall", line.Saved, 250)
+	money(t, "moved this month", line.Moved, 275)
+	money(t, "saved overall", line.Saved, 275)
 
 	// A goal without a monthly amount isn't in the budget.
 	if _, err := f.svc.UpdateGoal(f.ctx, f.hh, goal.ID, ledger.GoalInput{

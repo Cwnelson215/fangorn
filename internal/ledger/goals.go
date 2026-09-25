@@ -10,13 +10,19 @@ import (
 	"github.com/cwnelson/fangorn/internal/models"
 )
 
+// goalMoney is which of a goal account's transactions count as money added:
+// transfers in and out, and income deposited there directly — but not interest
+// or money market dividends (source 'interest'), which the account earned by
+// itself, and not market growth, which isn't a transaction at all.
+const goalMoney = `(t.kind = 'transfer' OR (t.kind = 'income' AND t.source <> 'interest'))`
+
 // A goal's target is how much to ADD, not a balance to reach. Progress comes
 // from one of two places depending on how the goal is set up:
 //
-//   - Linked to an account: the money moved into that account since the goal
-//     started — transfers in less transfers out. Distributing income from the
-//     income account to savings is exactly that, so the goal tracks itself.
-//     Interest and market growth aren't money added, so they don't count.
+//   - Linked to an account: the money added to that account since the goal
+//     started (goalMoney) — transfers in less transfers out, plus income
+//     deposited there. Distributing income from the income account to savings
+//     is a transfer, so the goal tracks itself.
 //   - Unlinked: the sum of explicit contributions, for goals spread across
 //     accounts or held partly in cash.
 const goalSelect = `
@@ -27,7 +33,7 @@ const goalSelect = `
 	           THEN COALESCE((
 	                  SELECT SUM(t.amount) FROM transactions t
 	                  WHERE t.household_id = g.household_id AND t.account_id = g.account_id
-	                    AND t.kind = 'transfer' AND t.date >= g.started_on
+	                    AND ` + goalMoney + ` AND t.date >= g.started_on
 	                ), 0)
 	         ELSE COALESCE((
 	                SELECT SUM(gc.amount) FROM goal_contributions gc WHERE gc.goal_id = g.id
