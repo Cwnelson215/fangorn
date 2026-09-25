@@ -8,6 +8,7 @@
 	import { addMonths, formatDuration, projectPayoff } from '$lib/projection';
 	import { forget, recallValues, rememberValues } from '$lib/remember';
 	import { SERIES } from '$lib/chart';
+	import { untrack } from 'svelte';
 	import ProjectionChart from './ProjectionChart.svelte';
 	import SliderField from './SliderField.svelte';
 	import Button from './Button.svelte';
@@ -17,7 +18,8 @@
 		kind,
 		owed,
 		defaultPayment,
-		loadHistory
+		loadHistory,
+		remember = true
 	}: {
 		id: string;
 		kind: 'credit_card' | 'loan';
@@ -26,6 +28,8 @@
 		/** What the recurring rules already pay each month. */
 		defaultPayment: number;
 		loadHistory?: () => Promise<ValuePoint[]>;
+		/** Keep changed assumptions on this device; the What if page doesn't. */
+		remember?: boolean;
 	} = $props();
 
 	let isCard = $derived(kind === 'credit_card');
@@ -42,7 +46,7 @@
 	}
 
 	// svelte-ignore state_referenced_locally
-	const initial = recallValues(`payoff.${id}`, defaults());
+	const initial = remember ? recallValues(`payoff.${id}`, defaults()) : defaults();
 	let apr = $state(initial.apr);
 	let payment = $state(initial.payment);
 	let extra = $state(initial.extra);
@@ -50,10 +54,24 @@
 	// Only a change is remembered: values left at their defaults keep following
 	// the recurring rules they came from.
 	$effect(() => {
+		if (!remember) return;
 		const values = { apr, payment, extra };
 		const d: Record<string, number | boolean> = defaults();
 		if (Object.entries(values).every(([k, v]) => d[k] === v)) forget(`payoff.${id}`);
 		else rememberValues(`payoff.${id}`, values);
+	});
+
+	// The suggested payment depends on what's owed. While the payment is still
+	// the suggestion, it follows the balance — the What if page changes it —
+	// and once someone sets their own, it stays put.
+	// svelte-ignore state_referenced_locally
+	let suggested = defaults().payment;
+	$effect(() => {
+		const next = defaults().payment;
+		untrack(() => {
+			if (payment === suggested) payment = next;
+			suggested = next;
+		});
 	});
 
 	function reset() {

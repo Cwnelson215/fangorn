@@ -254,6 +254,14 @@ accounts — it's an assumption like the rest. Assumptions are remembered per de
 (`recallValues` in `lib/remember.ts`), but only once they differ from the defaults, so untouched
 values keep following the recurring rules.
 
+`/whatif` (Wealth menu; "What if…" on an account page links to it with `?account=`) takes any
+account, or none, and lets every assumption move — including the balance itself, yearly raises to
+contributions (`raise`) and a one-time deposit or withdrawal (`oneTime`) in `projectGrowth`. It keeps
+the account as it really is on the chart as "As things are", seeded with **exact** values (not
+rounded: cents a month compound into hundreds), so an untouched what-if differs by $0. Cards and
+loans get `PayoffCard` with an editable amount owed. Nothing on the page is remembered
+(`PayoffCard remember={false}`); its suggested payment follows the amount owed until the user sets one.
+
 Every line chart shares one hover layer, `addCrosshair` in `src/lib/chart.ts`: a snapping
 hairline and one tooltip for all series, pointer events for touch, arrow keys when focused. Tooltip
 text goes through `textContent`. Series colours are `SERIES` there (validated together for

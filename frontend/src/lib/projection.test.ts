@@ -19,6 +19,29 @@ describe('projectGrowth', () => {
 		expect(pts[24].growth).toBe(0);
 	});
 
+	it('steps contributions up once a year', () => {
+		const pts = projectGrowth({ start: 0, monthly: 100, annualReturn: 0, months: 24, raise: 0.1 });
+		expect(pts[12].contributed).toBe(1200);
+		expect(pts[24].contributed).toBeCloseTo(1200 + 1320, 2);
+	});
+
+	it('applies one-time deposits and withdrawals in their month', () => {
+		const pts = projectGrowth({
+			start: 1000,
+			monthly: 0,
+			annualReturn: 0,
+			months: 12,
+			oneTime: [
+				{ month: 3, amount: 500 },
+				{ month: 6, amount: -200 }
+			]
+		});
+		expect(pts[2].balance).toBe(1000);
+		expect(pts[3].balance).toBe(1500);
+		expect(pts[12].balance).toBe(1300);
+		expect(pts[12].contributed).toBe(1300);
+	});
+
 	it('deflates into today’s dollars', () => {
 		const pts = projectGrowth({ start: 1000, monthly: 0, annualReturn: 0.03, months: 12, inflation: 0.03 });
 		expect(pts[12].balance).toBeCloseTo(1000, 2);

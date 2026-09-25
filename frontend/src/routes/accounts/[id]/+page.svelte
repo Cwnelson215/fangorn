@@ -138,6 +138,9 @@
 					{#if account.institution_name}· {account.institution_name}{/if}
 					{#if account.mask}· {formatCards(account.mask)}{/if}
 				</p>
+				{#if projects(account.type)}
+					<a class="whatif" href="/whatif?account={account.id}">What if…</a>
+				{/if}
 			</div>
 			<div class="balance-block">
 				{#if isInvestment && holdings}
@@ -364,6 +367,19 @@
 		align-items: flex-start;
 		gap: 1.5rem;
 		flex-wrap: wrap;
+	}
+
+	.whatif {
+		display: inline-block;
+		margin-top: 0.5rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: var(--info);
+		text-decoration: none;
+	}
+
+	.whatif:hover {
+		text-decoration: underline;
 	}
 
 	.balance-block {

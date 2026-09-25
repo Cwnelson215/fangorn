@@ -11,12 +11,13 @@
 	let authChecked = $state(false);
 	let isLoginPage = $derived(page.url.pathname === '/login');
 
-	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear' | 'chevron';
+	type Icon = 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear' | 'chevron' | 'trend';
 
 	const NAV: { href: string; label: string; icon: Icon }[] = [
 		{ href: '/', label: 'Dashboard', icon: 'home' },
 		{ href: '/accounts', label: 'Accounts', icon: 'wallet' },
 		{ href: '/investments', label: 'Investments', icon: 'chart' },
+		{ href: '/whatif', label: 'What if', icon: 'trend' },
 		{ href: '/transactions', label: 'Transactions', icon: 'list' },
 		{ href: '/receipts', label: 'Receipts', icon: 'receipt' },
 		{ href: '/transfers', label: 'Transfers', icon: 'swap' },
@@ -39,7 +40,7 @@
 			label: 'Plan',
 			items: [pick('/budgets', 'Budgets & goals'), pick('/recurring'), pick('/categories')]
 		},
-		{ id: 'wealth', label: 'Wealth', items: [pick('/accounts'), pick('/investments')] }
+		{ id: 'wealth', label: 'Wealth', items: [pick('/accounts'), pick('/investments'), pick('/whatif')] }
 	];
 
 	let openMenu = $state<string | null>(null);
@@ -206,6 +207,8 @@
 			<path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3" />
 		{:else if name === 'camera'}
 			<path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" />
+		{:else if name === 'trend'}
+			<path d="M3 17l6-6 4 4 8-8M15 7h6v6" />
 		{:else if name === 'chevron'}
 			<path d="M6 9l6 6 6-6" />
 		{:else if name === 'gear'}

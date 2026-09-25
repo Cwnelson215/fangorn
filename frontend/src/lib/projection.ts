@@ -20,6 +20,10 @@ export interface GrowthInput {
 	 * today's dollars — what the future balance would buy now.
 	 */
 	inflation?: number;
+	/** Yearly increase in the monthly contribution as a ratio (0.03 = 3% a year), stepping up every 12 months. */
+	raise?: number;
+	/** One-time amounts: a deposit (positive) or withdrawal (negative) at the end of a month. */
+	oneTime?: { month: number; amount: number }[];
 }
 
 export interface GrowthPoint {
@@ -33,12 +37,21 @@ export interface GrowthPoint {
 }
 
 /**
- * Month-by-month growth of a balance with a fixed monthly contribution. The
+ * Month-by-month growth of a balance with a monthly contribution (optionally
+ * raised each year) and one-time deposits or withdrawals. The
  * yearly return is treated as an effective annual rate, so 12 months at 7% with
  * no contributions lands on exactly 1.07× — the way an APY or a fund's annual
  * return is quoted.
  */
-export function projectGrowth({ start, monthly, annualReturn, months, inflation = 0 }: GrowthInput): GrowthPoint[] {
+export function projectGrowth({
+	start,
+	monthly,
+	annualReturn,
+	months,
+	inflation = 0,
+	raise = 0,
+	oneTime = []
+}: GrowthInput): GrowthPoint[] {
 	const rate = Math.pow(1 + annualReturn, 1 / 12) - 1;
 	const deflate = Math.pow(1 + inflation, 1 / 12);
 	const out: GrowthPoint[] = [];
@@ -46,8 +59,11 @@ export function projectGrowth({ start, monthly, annualReturn, months, inflation 
 	let contributed = start;
 	for (let m = 0; m <= Math.max(0, Math.floor(months)); m++) {
 		if (m > 0) {
-			balance = balance * (1 + rate) + monthly;
-			contributed += monthly;
+			// Months 1–12 add the starting amount, 13–24 one raise more, and so on.
+			const add = monthly * Math.pow(1 + raise, Math.floor((m - 1) / 12));
+			const extra = oneTime.reduce((sum, o) => (o.month === m ? sum + o.amount : sum), 0);
+			balance = balance * (1 + rate) + add + extra;
+			contributed += add + extra;
 		}
 		const d = Math.pow(deflate, m);
 		out.push({
