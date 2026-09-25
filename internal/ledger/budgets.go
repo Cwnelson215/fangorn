@@ -57,13 +57,59 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 			unbudgeted -= b.Spent
 		}
 	}
+	savings, err := s.savingsLines(ctx, householdID, monthStart)
+	if err != nil {
+		return models.BudgetMonth{}, err
+	}
 	return models.BudgetMonth{
 		Month:           monthStart,
 		Budgets:         budgets,
 		UnbudgetedSpent: round2(unbudgeted),
 		IncomeReceived:  round2(income),
 		UnplannedIncome: round2(unplanned),
+		Savings:         savings,
 	}, nil
+}
+
+// savingsLines is each open goal with a monthly amount, and what went toward it
+// in the month: transfers into its account (from the day the goal started), or
+// contributions for a goal with no account. A transfer counts toward the month
+// and the goal alike, so "Add money" on the budgets page is one transfer.
+func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart string) ([]models.SavingsLine, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`WITH g AS (`+goalSelect+` WHERE g.household_id = $1
+		              AND g.monthly_amount IS NOT NULL AND g.achieved_at IS NULL)
+		 SELECT g.id, g.name, g.account_id, g.account_name, g.monthly_amount, g.target_amount, g.saved,
+		        CASE WHEN g.account_id IS NOT NULL THEN COALESCE((
+		               SELECT SUM(t.amount) FROM transactions t
+		               WHERE t.household_id = $1 AND t.account_id = g.account_id AND t.kind = 'transfer'
+		                 AND t.date >= GREATEST(g.started_on, $2::date)
+		                 AND t.date < ($2::date + INTERVAL '1 month')), 0)
+		             ELSE COALESCE((
+		               SELECT SUM(gc.amount) FROM goal_contributions gc
+		               WHERE gc.goal_id = g.id
+		                 AND gc.date >= $2::date AND gc.date < ($2::date + INTERVAL '1 month')), 0)
+		        END
+		 FROM g ORDER BY g.name`,
+		householdID, monthStart)
+	if err != nil {
+		return nil, fmt.Errorf("loading savings lines: %w", err)
+	}
+	defer rows.Close()
+	out := []models.SavingsLine{}
+	for rows.Next() {
+		var l models.SavingsLine
+		var accountID sql.NullInt64
+		var accountName sql.NullString
+		if err := rows.Scan(&l.GoalID, &l.Name, &accountID, &accountName, &l.Monthly, &l.Target,
+			&l.Saved, &l.Moved); err != nil {
+			return nil, fmt.Errorf("scanning savings line: %w", err)
+		}
+		l.AccountID = intPtr(accountID)
+		l.AccountName = strPtr(accountName)
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // listBudgets finds, per category, the newest row whose effective_from is on or

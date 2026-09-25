@@ -132,14 +132,6 @@ func TestOneBalanceDefinition(t *testing.T) {
 	money(t, "holdings view vs account", h.HoldingsValue, account.HoldingsValue)
 	money(t, "holdings cash vs account", h.Cash, account.CashBalance)
 
-	goal, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
-		Name: "Retirement", TargetAmount: 100000, AccountID: &brokerage.ID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	money(t, "goal progress", goal.Saved, account.Balance)
-
 	if err := f.svc.SnapshotNetWorth(f.ctx, f.hh, time.Now()); err != nil {
 		t.Fatal(err)
 	}

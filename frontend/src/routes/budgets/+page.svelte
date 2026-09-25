@@ -5,17 +5,20 @@
 		achieveGoal,
 		contributeToGoal,
 		createGoal,
+		createTransfer,
 		deleteGoal,
 		getAccounts,
 		getBudgets,
 		getCategories,
 		getGoals,
+		getSettings,
 		reopenGoal,
 		setBudget,
 		stopBudget,
-		updateGoal
+		updateGoal,
+		updateSettings
 	} from '$lib/api';
-	import type { Account, Budget, Category, Goal, GoalInput } from '$lib/types';
+	import type { Account, Budget, Category, Goal, GoalInput, SavingsLine } from '$lib/types';
 	import {
 		formatCurrency,
 		formatDate,
@@ -36,6 +39,9 @@
 	let unbudgeted = $state(0);
 	let incomeReceived = $state(0);
 	let unplannedIncome = $state(0);
+	let savings: SavingsLine[] = $state([]);
+	// Where income lands, and savings are moved from.
+	let incomeAccountId = $state(0);
 	let budgetsLoading = $state(false);
 	let goals: Goal[] = $state([]);
 	let categories: Category[] = $state([]);
@@ -62,10 +68,13 @@
 	let goalDate = $state('');
 	let goalAccountId = $state(0);
 	let goalNotes = $state('');
+	let goalMonthly = $state('');
 
-	// Contribution form
+	// "Add money" to a goal: a transfer into its account, or a contribution
+	// logged by hand when it has none.
 	let contribModalOpen = $state(false);
-	let contribGoal = $state<Goal | null>(null);
+	let contribGoal = $state<Pick<Goal, 'id' | 'name' | 'account_id'> | null>(null);
+	let contribFromId = $state(0);
 	let contribSaving = $state(false);
 	let contribError = $state<string | null>(null);
 	let contribAmount = $state('');
@@ -77,12 +86,15 @@
 		loading = true;
 		loadError = null;
 		try {
-			[, goals, categories, accounts] = await Promise.all([
+			let settings;
+			[, goals, categories, accounts, settings] = await Promise.all([
 				loadBudgets(),
 				getGoals(),
 				getCategories(),
-				getAccounts()
+				getAccounts(),
+				getSettings()
 			]);
+			incomeAccountId = settings.income_account_id ?? 0;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Could not load budgets and goals';
 		} finally {
@@ -102,6 +114,7 @@
 			unbudgeted = data.unbudgeted_spent;
 			incomeReceived = data.income_received;
 			unplannedIncome = data.unplanned_income;
+			savings = data.savings;
 		} finally {
 			if (requested === month) budgetsLoading = false;
 		}
@@ -133,8 +146,24 @@
 	let totalScheduled = $derived(spendBudgets.reduce((sum, b) => sum + b.scheduled, 0));
 	let totalExpected = $derived(incomeBudgets.reduce((sum, b) => sum + b.amount, 0));
 	let incomeScheduled = $derived(incomeBudgets.reduce((sum, b) => sum + b.scheduled, 0));
-	// What the plan leaves over: expected income less the spending budgeted.
-	let planLeft = $derived(totalExpected - totalBudget);
+	let totalSavingsPlanned = $derived(savings.reduce((sum, l) => sum + l.monthly_amount, 0));
+	let totalMoved = $derived(savings.reduce((sum, l) => sum + l.moved, 0));
+	// What the plan leaves over: expected income less budgeted spending and the
+	// month's savings.
+	let planLeft = $derived(totalExpected - totalBudget - totalSavingsPlanned);
+	let showPlan = $derived(incomeBudgets.length > 0 || savings.length > 0);
+
+	async function chooseIncomeAccount(id: number) {
+		const previous = incomeAccountId;
+		incomeAccountId = id;
+		try {
+			const saved = await updateSettings({ income_account_id: id || null });
+			incomeAccountId = saved.income_account_id ?? 0;
+		} catch (e) {
+			incomeAccountId = previous;
+			loadError = e instanceof Error ? e.message : 'Could not save the income account';
+		}
+	}
 
 	let modalCategories = $derived(budgetKind === 'income' ? incomeCategories : expenseCategories);
 
@@ -188,6 +217,7 @@
 		goalDate = '';
 		goalAccountId = 0;
 		goalNotes = '';
+		goalMonthly = '';
 		goalError = null;
 		goalModalOpen = true;
 	}
@@ -199,6 +229,7 @@
 		goalDate = goal.target_date ?? '';
 		goalAccountId = goal.account_id ?? 0;
 		goalNotes = goal.notes ?? '';
+		goalMonthly = goal.monthly_amount != null ? String(goal.monthly_amount) : '';
 		goalError = null;
 		goalModalOpen = true;
 	}
@@ -209,7 +240,8 @@
 			target_amount: Math.abs(parseFloat(goalTarget) || 0),
 			target_date: goalDate || null,
 			account_id: goalAccountId || null,
-			notes: goalNotes.trim() || null
+			notes: goalNotes.trim() || null,
+			monthly_amount: parseFloat(goalMonthly) > 0 ? Math.abs(parseFloat(goalMonthly)) : null
 		};
 	}
 
@@ -249,9 +281,14 @@
 		}
 	}
 
-	function openContribute(goal: Goal) {
+	function openContribute(goal: Pick<Goal, 'id' | 'name' | 'account_id'>, suggested = 0) {
 		contribGoal = goal;
-		contribAmount = '';
+		contribAmount = suggested > 0 ? suggested.toFixed(2) : '';
+		// From the income account, unless that's where the goal's money lives.
+		contribFromId =
+			incomeAccountId && incomeAccountId !== goal.account_id
+				? incomeAccountId
+				: (accounts.find((a) => a.id !== goal.account_id)?.id ?? 0);
 		contribDate = today();
 		contribError = null;
 		contribModalOpen = true;
@@ -264,11 +301,21 @@
 		contribSaving = true;
 		contribError = null;
 		try {
-			await contributeToGoal(
-				contribGoal.id,
-				Math.abs(parseFloat(contribAmount) || 0),
-				contribDate
-			);
+			const amount = Math.abs(parseFloat(contribAmount) || 0);
+			if (contribGoal.account_id) {
+				// A transfer into the goal's account is what counts toward it — this
+				// month's line and the goal overall — so the money really moves.
+				await createTransfer({
+					from_account_id: contribFromId,
+					to_account_id: contribGoal.account_id,
+					amount,
+					date: contribDate,
+					description: `Savings: ${contribGoal.name}`,
+					notes: null
+				});
+			} else {
+				await contributeToGoal(contribGoal.id, amount, contribDate);
+			}
 			contribModalOpen = false;
 			await load();
 		} catch (e) {
@@ -337,31 +384,47 @@
 				{/if}
 			</div>
 
-			{#if incomeBudgets.length > 0}
+			{#if showPlan}
 				<div class="plan">
 					<div>
 						<span class="plan-label">Expected income</span>
 						<span class="plan-value">{formatCurrency(totalExpected)}</span>
-						<span class="muted small">{formatCurrency(incomeReceived)} received so far</span>
+						<span class="muted small">{formatCurrency(incomeReceived)} received</span>
 					</div>
 					<span class="plan-op" aria-hidden="true">−</span>
 					<div>
-						<span class="plan-label">Budgeted spending</span>
+						<span class="plan-label">Spending</span>
 						<span class="plan-value">{formatCurrency(totalBudget)}</span>
-						<span class="muted small">{formatCurrency(totalSpent + unbudgeted)} spent so far</span>
+						<span class="muted small">{formatCurrency(totalSpent + unbudgeted)} spent</span>
+					</div>
+					<span class="plan-op" aria-hidden="true">−</span>
+					<div>
+						<span class="plan-label">Savings</span>
+						<span class="plan-value">{formatCurrency(totalSavingsPlanned)}</span>
+						<span class="muted small">{formatCurrency(totalMoved)} put away</span>
 					</div>
 					<span class="plan-op" aria-hidden="true">=</span>
 					<div>
-						<span class="plan-label">{planLeft >= 0 ? 'Left to save' : 'Short'}</span>
+						<span class="plan-label">{planLeft >= 0 ? 'Left over' : 'Short'}</span>
 						<span class="plan-value" class:pos={planLeft > 0} class:neg={planLeft < 0}>
 							{formatCurrency(Math.abs(planLeft))}
 						</span>
 						<span class="muted small">
-							{formatCurrency(incomeReceived - totalSpent - unbudgeted)} actually left so far
+							{formatCurrency(incomeReceived - totalSpent - unbudgeted - totalMoved)} actually left
 						</span>
 					</div>
 				</div>
+			{/if}
 
+			<label class="income-account">
+				<span>Income lands in</span>
+				<select value={incomeAccountId} onchange={(e) => chooseIncomeAccount(Number(e.currentTarget.value))}>
+					<option value={0}>Choose an account…</option>
+					<AccountOptions {accounts} />
+				</select>
+			</label>
+
+			{#if incomeBudgets.length > 0}
 				<h3 class="sub-head">Expected income</h3>
 				<div class="list">
 					{#each incomeBudgets as budget (budget.id)}
@@ -399,7 +462,51 @@
 				{#if unplannedIncome > 0.005}
 					<p class="muted small">Plus {formatCurrency(unplannedIncome)} of income you didn't plan for.</p>
 				{/if}
-				{#if spendBudgets.length > 0}<h3 class="sub-head">Spending</h3>{/if}
+			{/if}
+
+			{#if savings.length > 0}
+				<h3 class="sub-head">Savings</h3>
+				<div class="list">
+					{#each savings as line (line.goal_id)}
+						{@const toGo = line.monthly_amount - line.moved}
+						<div class="item">
+							<div class="item-head">
+								<span class="item-name">
+									{line.name}
+									{#if line.account_name}<span class="muted small">→ {line.account_name}</span>{/if}
+								</span>
+								<span class="item-actions">
+									<Button
+										variant="ghost"
+										size="sm"
+										onclick={() =>
+											openContribute(
+												{ id: line.goal_id, name: line.name, account_id: line.account_id },
+												Math.max(0, toGo)
+											)}
+									>
+										Add money
+									</Button>
+								</span>
+							</div>
+							<BudgetBar
+								spent={line.moved}
+								amount={line.monthly_amount}
+								color="var(--info)"
+								pace={incomePace(month)}
+							/>
+							<div class="item-foot muted">
+								{formatCurrency(line.moved)} of {formatCurrency(line.monthly_amount)} this month
+								{#if toGo > 0.005}· {formatCurrency(toGo)} to go{/if}
+								· {formatCurrency(line.saved)} of {formatCurrency(line.target_amount)} overall
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			{#if (incomeBudgets.length > 0 || savings.length > 0) && spendBudgets.length > 0}
+				<h3 class="sub-head">Spending</h3>
 			{/if}
 
 			{#if spendBudgets.length === 0}
@@ -496,8 +603,8 @@
 
 			{#if goals.length === 0}
 				<p class="muted small">
-					No goals yet. Link one to an account to track it automatically, or log contributions by
-					hand.
+					No goals yet. A goal is how much you want to add to an account; money moved into that
+					account counts toward it.
 				</p>
 			{:else}
 				<div class="list">
@@ -509,9 +616,9 @@
 									{#if goal.achieved}<span class="chip">Reached</span>{/if}
 								</span>
 								<span class="item-actions">
-									{#if !goal.account_id}
+									{#if !goal.achieved}
 										<Button variant="ghost" size="sm" onclick={() => openContribute(goal)}>
-											Add
+											Add money
 										</Button>
 									{/if}
 									<Button variant="ghost" size="sm" onclick={() => toggleAchieved(goal)}>
@@ -527,8 +634,10 @@
 								></div>
 							</div>
 							<div class="item-foot muted">
-								{formatCurrency(goal.saved)} of {formatCurrency(goal.target_amount)}
-								{#if goal.account_name}· tracking {goal.account_name}{/if}
+								{formatCurrency(goal.saved)} of {formatCurrency(goal.target_amount)} added
+								{#if goal.account_name}to {goal.account_name}{/if}
+								since {formatDate(goal.started_on)}
+								{#if goal.monthly_amount}· {formatCurrency(goal.monthly_amount)}/mo{/if}
 								{#if goal.target_date}· by {formatDate(goal.target_date)}{/if}
 							</div>
 						</div>
@@ -596,7 +705,7 @@
 		</Field>
 
 		<div class="form-row">
-			<Field label="Target amount" id="goalTarget">
+			<Field label="Amount to add" id="goalTarget" hint="On top of what's there today">
 				<input
 					id="goalTarget"
 					type="number"
@@ -614,10 +723,23 @@
 			</Field>
 		</div>
 
+		<Field label="Each month" id="goalMonthly" hint="Optional — puts it in the monthly budget">
+			<input
+				id="goalMonthly"
+				type="number"
+				inputmode="decimal"
+				step="0.01"
+				min="0"
+				placeholder="0.00"
+				bind:value={goalMonthly}
+				disabled={goalSaving}
+			/>
+		</Field>
+
 		<Field
-			label="Track an account"
+			label="Saving into"
 			id="goalAccount"
-			hint="Progress follows that account's balance. Leave unset to log contributions by hand."
+			hint="Money moved into this account counts toward the goal. Leave unset to log it by hand."
 		>
 			<select id="goalAccount" bind:value={goalAccountId} disabled={goalSaving}>
 				<option value={0}>Track manually</option>
@@ -650,6 +772,18 @@
 
 <Modal bind:open={contribModalOpen} title="Add to {contribGoal?.name ?? 'Goal'}">
 	<form onsubmit={saveContribution}>
+		{#if contribGoal?.account_id}
+			<Field
+				label="From"
+				id="contribFrom"
+				hint="Moved as a transfer into {accounts.find((a) => a.id === contribGoal?.account_id)?.name ??
+					'the goal account'}"
+			>
+				<select id="contribFrom" bind:value={contribFromId} disabled={contribSaving} required>
+					<AccountOptions accounts={accounts.filter((a) => a.id !== contribGoal?.account_id)} />
+				</select>
+			</Field>
+		{/if}
 		<div class="form-row">
 			<Field label="Amount" id="contribAmount">
 				<input
@@ -675,8 +809,11 @@
 
 		<div class="form-actions">
 			<Button variant="secondary" onclick={() => (contribModalOpen = false)}>Cancel</Button>
-			<Button type="submit" disabled={contribSaving || !contribAmount}>
-				{contribSaving ? 'Saving…' : 'Add'}
+			<Button
+				type="submit"
+				disabled={contribSaving || !contribAmount || (!!contribGoal?.account_id && !contribFromId)}
+			>
+				{contribSaving ? 'Saving…' : contribGoal?.account_id ? 'Move money' : 'Add'}
 			</Button>
 		</div>
 	</form>
@@ -709,7 +846,7 @@
 	/* Expected income − budgeted spending = what's left, as a sum. */
 	.plan {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
 		align-items: center;
 		gap: 0.75rem;
 		padding: 1rem;
@@ -743,6 +880,25 @@
 
 	.pos {
 		color: var(--pos);
+	}
+
+	.income-account {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.5rem;
+		font-size: 0.875rem;
+		color: var(--muted);
+	}
+
+	.income-account select {
+		padding: 0.375rem 0.5rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		font: inherit;
+		background: var(--surface);
+		color: var(--ink);
 	}
 
 	.sub-head {

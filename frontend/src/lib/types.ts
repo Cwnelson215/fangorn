@@ -273,6 +273,8 @@ export interface BudgetMonth {
 	income_received: number;
 	/** Income in categories with no expected-income budget, uncategorized included. */
 	unplanned_income: number;
+	/** Open goals with a monthly amount: planned vs put toward them this month. */
+	savings: SavingsLine[];
 }
 
 export interface Goal {
@@ -284,7 +286,34 @@ export interface Goal {
 	account_name?: string | null;
 	notes: string | null;
 	achieved: boolean;
+	/**
+	 * Progress toward the target, which is how much to ADD: money moved into the
+	 * linked account since started_on (transfers in less out), or contributions
+	 * logged by hand when there's no account.
+	 */
 	saved: number;
+	started_on: string;
+	/** The goal's line in the monthly budget; null for none. */
+	monthly_amount: number | null;
+}
+
+/** One goal's share of a month's budget. */
+export interface SavingsLine {
+	goal_id: number;
+	name: string;
+	account_id: number | null;
+	account_name: string | null;
+	monthly_amount: number;
+	/** Put toward the goal this month. */
+	moved: number;
+	saved: number;
+	target_amount: number;
+}
+
+/** Household-wide choices. */
+export interface Settings {
+	/** Where income is logged by default, and savings are moved from. */
+	income_account_id: number | null;
 }
 
 export interface CategorySpend {
@@ -571,6 +600,7 @@ export interface GoalInput {
 	target_date: string | null;
 	account_id: number | null;
 	notes: string | null;
+	monthly_amount: number | null;
 }
 
 /** A phone's key for the iPhone Shortcut. The key itself is only returned once. */

@@ -13,6 +13,7 @@ import type {
 	DeviceKeyCreated,
 	Goal,
 	GoalInput,
+	Settings,
 	Holdings,
 	InvestmentsSummary,
 	Occurrence,
@@ -241,6 +242,9 @@ export const setBudget = (categoryId: number, amount: number, effectiveFrom: str
 /** Stops a budget from `month` onward; earlier months keep it. */
 export const stopBudget = (id: number, month: string) =>
 	send<void>('DELETE', `/api/budgets/${id}${qs({ month })}`);
+
+export const getSettings = () => request<Settings>('/api/settings');
+export const updateSettings = (input: Settings) => send<Settings>('PUT', '/api/settings', input);
 
 export const getGoals = () => request<Goal[]>('/api/goals');
 export const createGoal = (input: GoalInput) => send<Goal>('POST', '/api/goals', input);

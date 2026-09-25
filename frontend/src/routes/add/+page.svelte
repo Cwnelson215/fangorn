@@ -14,6 +14,7 @@
 		deleteTransaction,
 		getAccounts,
 		getCategories,
+		getSettings,
 		getTransactions
 	} from '$lib/api';
 	import type { Account, Category, Transaction } from '$lib/types';
@@ -44,6 +45,8 @@
 	// rather than by hand: the account to go back to if the category is unpicked.
 	// A routed account isn't remembered as this phone's usual one.
 	let routedFrom = $state<number | null>(null);
+	// Where income lands by default (Budgets → "Income lands in").
+	let incomeAccountId = $state<number | null>(null);
 	let date = $state(today());
 	let note = $state('');
 
@@ -85,6 +88,7 @@
 				getCategories(),
 				getTransactions({ limit: 200 }).catch(() => [] as Transaction[])
 			]);
+			incomeAccountId = (await getSettings().catch(() => null))?.income_account_id ?? null;
 			accounts = a;
 			categories = c;
 			const counts = new Map<number, number>();
@@ -116,20 +120,28 @@
 			if (match) chooseCategory(match.id);
 		}
 		if (q.get('note')) note = q.get('note') ?? '';
+		route();
 		if ([...q.keys()].length > 0) goto('/add', { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
 	function setKind(next: Kind) {
 		kind = next;
 		// Switching between money in and out strands a category from the other list.
-		if (!choices.some((c) => c.id === categoryId)) chooseCategory(0);
+		if (!choices.some((c) => c.id === categoryId)) categoryId = 0;
+		route();
 	}
 
-	// Picks a category (0 for none) and follows its account, if it names one
-	// that is still open.
 	function chooseCategory(id: number) {
 		categoryId = id;
-		const target = categories.find((c) => c.id === id)?.default_account_id;
+		route();
+	}
+
+	// Follows the account the entry should go to, if something names one that is
+	// still open: the category's own account first ("gas goes on the Visa"),
+	// then, for money in, the household's income account.
+	function route() {
+		const byCategory = categories.find((c) => c.id === categoryId)?.default_account_id;
+		const target = byCategory ?? (kind === 'income' ? incomeAccountId : null);
 		if (target && accounts.some((a) => a.id === target)) {
 			if (routedFrom === null) routedFrom = accountId;
 			accountId = target;
@@ -303,8 +315,10 @@
 				</label>
 			</div>
 
-			{#if routedAccount && category}
+			{#if routedAccount && category?.default_account_id}
 				<p class="routed">{category.name} always goes on {routedAccount.name}.</p>
+			{:else if routedAccount && kind === 'income'}
+				<p class="routed">Income goes into {routedAccount.name}.</p>
 			{/if}
 
 			{#if error}

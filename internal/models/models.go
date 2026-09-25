@@ -398,6 +398,9 @@ type BudgetMonth struct {
 	// UnplannedIncome is the part of IncomeReceived in categories with no
 	// expected-income budget, uncategorized included.
 	UnplannedIncome float64 `json:"unplanned_income"`
+
+	// Savings is each open goal with a monthly amount: planned vs put toward it.
+	Savings []SavingsLine `json:"savings"`
 }
 
 type Goal struct {
@@ -409,7 +412,29 @@ type Goal struct {
 	AccountName  *string `json:"account_name,omitempty"`
 	Notes        *string `json:"notes"`
 	Achieved     bool    `json:"achieved"`
-	Saved        float64 `json:"saved"`
+	// Saved is progress toward the target: for a goal linked to an account, the
+	// money moved into it since StartedOn (transfers in less transfers out);
+	// otherwise the contributions logged by hand.
+	Saved float64 `json:"saved"`
+	// StartedOn is when the goal began counting.
+	StartedOn string `json:"started_on"`
+	// MonthlyAmount is the goal's line in the monthly budget; nil for none.
+	MonthlyAmount *float64 `json:"monthly_amount"`
+}
+
+// SavingsLine is one goal's share of a month's budget: what was planned and
+// what has been put toward it that month.
+type SavingsLine struct {
+	GoalID      int     `json:"goal_id"`
+	Name        string  `json:"name"`
+	AccountID   *int    `json:"account_id"`
+	AccountName *string `json:"account_name"`
+	Monthly     float64 `json:"monthly_amount"`
+	// Moved is what went toward the goal in the month: transfers into its
+	// account, or contributions for a goal with none.
+	Moved  float64 `json:"moved"`
+	Saved  float64 `json:"saved"`
+	Target float64 `json:"target_amount"`
 }
 
 // Trade is one entry in an investment account's trade log. Side is one of the

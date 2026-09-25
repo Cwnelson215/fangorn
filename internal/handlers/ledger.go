@@ -77,6 +77,9 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/budgets", h.SetBudget)
 	mux.HandleFunc("DELETE /api/budgets/{id}", h.StopBudget)
 
+	mux.HandleFunc("GET /api/settings", h.GetSettings)
+	mux.HandleFunc("PUT /api/settings", h.UpdateSettings)
+
 	mux.HandleFunc("GET /api/goals", h.ListGoals)
 	mux.HandleFunc("POST /api/goals", h.CreateGoal)
 	mux.HandleFunc("PATCH /api/goals/{id}", h.UpdateGoal)
@@ -734,4 +737,26 @@ func (h *LedgerHandler) DeleteSavingsRate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *LedgerHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.svc.GetSettings(r.Context(), h.householdID)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (h *LedgerHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var in ledger.Settings
+	if !decode(w, r, &in) {
+		return
+	}
+	settings, err := h.svc.UpdateSettings(r.Context(), h.householdID, in)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
 }

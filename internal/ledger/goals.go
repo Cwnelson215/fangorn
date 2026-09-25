@@ -10,38 +10,50 @@ import (
 	"github.com/cwnelson/fangorn/internal/models"
 )
 
-// A goal tracks progress toward a savings target. Progress comes from one of two
-// places depending on how the goal is set up:
+// A goal's target is how much to ADD, not a balance to reach. Progress comes
+// from one of two places depending on how the goal is set up:
 //
-//   - Linked to an account: progress is that account's current balance, so
-//     "$5,000 emergency fund" tracks itself with no extra bookkeeping. For an
-//     investment account that includes its holdings at market value.
-//   - Unlinked: progress is the sum of explicit contributions, for goals spread
-//     across accounts or held partly in cash.
+//   - Linked to an account: the money moved into that account since the goal
+//     started — transfers in less transfers out. Distributing income from the
+//     income account to savings is exactly that, so the goal tracks itself.
+//     Interest and market growth aren't money added, so they don't count.
+//   - Unlinked: the sum of explicit contributions, for goals spread across
+//     accounts or held partly in cash.
 const goalSelect = `
-	SELECT g.id, g.name, g.target_amount, g.target_date, g.account_id, a.name,
-	       g.notes, g.achieved_at IS NOT NULL,
+	SELECT g.id, g.name, g.target_amount, g.target_date, g.account_id, a.name AS account_name,
+	       g.notes, g.achieved_at IS NOT NULL AS achieved,
 	       CASE
 	         WHEN g.account_id IS NOT NULL
-	           THEN b.cash_balance + b.holdings_value
+	           THEN COALESCE((
+	                  SELECT SUM(t.amount) FROM transactions t
+	                  WHERE t.household_id = g.household_id AND t.account_id = g.account_id
+	                    AND t.kind = 'transfer' AND t.date >= g.started_on
+	                ), 0)
 	         ELSE COALESCE((
 	                SELECT SUM(gc.amount) FROM goal_contributions gc WHERE gc.goal_id = g.id
 	              ), 0)
-	       END AS saved
+	       END AS saved,
+	       g.started_on, g.monthly_amount
 	FROM goals g
-	LEFT JOIN accounts a ON a.id = g.account_id
-	LEFT JOIN (` + accountBalances + `) b ON b.account_id = g.account_id`
+	LEFT JOIN accounts a ON a.id = g.account_id`
 
 func scanGoal(rows interface{ Scan(...any) error }) (models.Goal, error) {
 	var g models.Goal
 	var accountName, notes sql.NullString
 	var accountID sql.NullInt64
 	var targetDate sql.NullTime
+	var startedOn time.Time
+	var monthly sql.NullFloat64
 
 	err := rows.Scan(&g.ID, &g.Name, &g.TargetAmount, &targetDate, &accountID,
-		&accountName, &notes, &g.Achieved, &g.Saved)
+		&accountName, &notes, &g.Achieved, &g.Saved, &startedOn, &monthly)
 	if err != nil {
 		return g, err
+	}
+	g.StartedOn = dateStr(startedOn)
+	if monthly.Valid {
+		m := monthly.Float64
+		g.MonthlyAmount = &m
 	}
 	g.TargetDate = dateStrPtr(targetDate)
 	g.AccountID = intPtr(accountID)
@@ -91,6 +103,8 @@ type GoalInput struct {
 	TargetDate   *string `json:"target_date"`
 	AccountID    *int    `json:"account_id"`
 	Notes        *string `json:"notes"`
+	// MonthlyAmount puts the goal in the monthly budget; nil for none.
+	MonthlyAmount *float64 `json:"monthly_amount"`
 }
 
 func (in *GoalInput) normalize() error {
@@ -100,6 +114,9 @@ func (in *GoalInput) normalize() error {
 	}
 	if in.TargetAmount <= 0 {
 		return invalid("target_amount must be greater than zero")
+	}
+	if in.MonthlyAmount != nil && *in.MonthlyAmount <= 0 {
+		in.MonthlyAmount = nil
 	}
 	if in.TargetDate != nil && *in.TargetDate != "" {
 		if _, err := models.ParseDate(*in.TargetDate); err != nil {
@@ -121,12 +138,20 @@ func (s *Service) CreateGoal(ctx context.Context, householdID int, in GoalInput)
 		}
 	}
 
+	// A goal counts what's added from today, in the household's calendar.
+	household, err := s.household(ctx, householdID)
+	if err != nil {
+		return models.Goal{}, err
+	}
+
 	var id int
-	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO goals (household_id, name, target_amount, target_date, account_id, notes)
-		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+	err = s.db.QueryRowContext(ctx,
+		`INSERT INTO goals (household_id, name, target_amount, target_date, account_id, notes,
+		                    started_on, monthly_amount)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
 		householdID, in.Name, in.TargetAmount, nullStr(in.TargetDate),
 		nullInt(in.AccountID), nullStr(in.Notes),
+		household.Today().Format(models.DateOnly), nullFloat(in.MonthlyAmount),
 	).Scan(&id)
 	if err != nil {
 		return models.Goal{}, fmt.Errorf("creating goal: %w", err)
@@ -146,10 +171,10 @@ func (s *Service) UpdateGoal(ctx context.Context, householdID, id int, in GoalIn
 
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE goals SET name = $1, target_amount = $2, target_date = $3,
-		        account_id = $4, notes = $5, updated_at = NOW()
-		 WHERE household_id = $6 AND id = $7`,
+		        account_id = $4, notes = $5, monthly_amount = $6, updated_at = NOW()
+		 WHERE household_id = $7 AND id = $8`,
 		in.Name, in.TargetAmount, nullStr(in.TargetDate), nullInt(in.AccountID),
-		nullStr(in.Notes), householdID, id)
+		nullStr(in.Notes), nullFloat(in.MonthlyAmount), householdID, id)
 	if err != nil {
 		return models.Goal{}, fmt.Errorf("updating goal: %w", err)
 	}
@@ -199,7 +224,7 @@ func (s *Service) AddContribution(ctx context.Context, householdID, goalID int, 
 		return models.Goal{}, err
 	}
 	if goal.AccountID != nil {
-		return models.Goal{}, invalid("this goal tracks an account balance; contributions are not recorded separately")
+		return models.Goal{}, invalid("this goal counts transfers into its account; move the money with a transfer instead")
 	}
 	if in.Amount == 0 {
 		return models.Goal{}, invalid("amount must not be zero")

@@ -138,8 +138,8 @@ it to the APY whose monthly rate is exactly yield ÷ 12. The dividend is describ
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`, each position **truncated** to the cent (`TRUNC`, and
 `portfolio.MarketValue` in Go) — that is how Fidelity values a position, and rounding to nearest put
-positions a cent over the statement. Trade amounts, which are real dollars paid, still round. `accountSelect`, `SnapshotNetWorth` and `goalSelect` all join it —
-don't recompute a balance anywhere else.
+positions a cent over the statement. Trade amounts, which are real dollars paid, still round. `accountSelect` and `SnapshotNetWorth` join it —
+don't recompute a balance anywhere else. (Goals deliberately don't: see Budgets.)
 
 ## Architecture
 
@@ -186,8 +186,19 @@ category it's a spending limit; on an **income** category it's income expected �
 apart by the category's kind (`Budget.kind`). Its `spent` is the month's actual either way (spend
 net of refunds, or income received), and `scheduled` is recurring expenses or income in the month
 not posted yet. `BudgetMonth` also reports `income_received` and `unplanned_income`, and the
-budgets page sums the plan: expected income − budgeted spending = left to save. Income has no
-"over" (`incomePace` in `lib/budget.ts`). The dashboard's budget widget shows spending only.
+budgets page sums the plan: expected income − budgeted spending − savings = left over. Income has
+no "over" (`incomePace` in `lib/budget.ts`). The dashboard's budget widget shows spending only.
+
+**The monthly flow:** income lands in one account (`households.income_account_id`, "Income lands
+in" on the budgets page, `GET/PUT /api/settings`) — `/add` switches to it for Money in, unless the
+income category names its own account. From there it's distributed to savings goals. A goal's
+target is how much to **add**, not a balance to reach: progress (`goalSelect`) is the money moved
+into its account since `started_on` — transfers in less transfers out; interest, market growth and
+income landing there directly don't count. A goal with `monthly_amount` is a Savings line in the
+month's budget (`BudgetMonth.savings`, `moved` = that month's transfers in). "Add money" on the
+line is a real transfer from the income account, so one action fills the month and the goal; a
+transfer made anywhere else counts the same way. A goal with no account still takes hand-logged
+`goal_contributions`.
 
 ## The Recurring Engine
 
@@ -333,6 +344,8 @@ recurring_rules, recurring_occurrences, budgets, goals, goal_contributions, net_
 the `interest` transaction source.
 `013_cash_fund_yields` adds `accounts.cash_fund` / `cash_fund_since` and `security_yields`.
 `014_category_accounts` adds `categories.default_account_id` and `receipts.via_shortcut`.
+`015_savings_plan` adds `households.income_account_id` and `goals.started_on` / `monthly_amount`
+(existing goals start from their creation date).
 
 ## Conventions
 
