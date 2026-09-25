@@ -178,6 +178,17 @@ layer and the background scheduler, and duplicating them is how the two drift ap
 household today and `main.go` resolves it once at boot, but the scoping is written in so adding real
 users is additive rather than a rewrite.
 
+## Budgets
+
+A budget is a monthly amount on a category, versioned by `effective_from` (a change applies from
+its month on; `StopBudget` writes a tombstone rather than deleting history). On an **expense**
+category it's a spending limit; on an **income** category it's income expected — same table, told
+apart by the category's kind (`Budget.kind`). Its `spent` is the month's actual either way (spend
+net of refunds, or income received), and `scheduled` is recurring expenses or income in the month
+not posted yet. `BudgetMonth` also reports `income_received` and `unplanned_income`, and the
+budgets page sums the plan: expected income − budgeted spending = left to save. Income has no
+"over" (`incomePace` in `lib/budget.ts`). The dashboard's budget widget shows spending only.
+
 ## The Recurring Engine
 
 `internal/recurring` computes occurrence dates by **index from a fixed anchor**, never by adding an

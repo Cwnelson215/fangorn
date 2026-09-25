@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { budgetPace, monthElapsed } from './budget';
+import { budgetPace, incomePace, monthElapsed } from './budget';
 
 /**
  * These two functions decide what colour a budget bar is and what warning sits
@@ -104,5 +104,12 @@ describe('budgetPace', () => {
 		const pace = budgetPace(budget(0, 0), '2026-03-01', '2026-03-16');
 		expect(pace.status).toBe('ok');
 		expect(Number.isNaN(pace.projected ?? 0)).toBe(false);
+	});
+});
+
+describe('incomePace', () => {
+	it('is never over and marks the month only while it is in progress', () => {
+		expect(incomePace('2026-09-01', '2026-09-15')).toEqual({ status: 'ok', elapsed: 0.5, projected: null });
+		expect(incomePace('2026-08-01', '2026-09-15').elapsed).toBeNull();
 	});
 });

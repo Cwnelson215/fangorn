@@ -28,11 +28,14 @@
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import BudgetBar from '$lib/components/BudgetBar.svelte';
-	import { budgetPace } from '$lib/budget';
+	import { budgetPace, incomePace } from '$lib/budget';
+	import type { CategoryKind } from '$lib/types';
 
 	let month = $state(monthStart());
 	let budgets: Budget[] = $state([]);
 	let unbudgeted = $state(0);
+	let incomeReceived = $state(0);
+	let unplannedIncome = $state(0);
 	let budgetsLoading = $state(false);
 	let goals: Goal[] = $state([]);
 	let categories: Category[] = $state([]);
@@ -44,6 +47,7 @@
 	let budgetModalOpen = $state(false);
 	let budgetSaving = $state(false);
 	let budgetError = $state<string | null>(null);
+	let budgetKind = $state<CategoryKind>('expense');
 	let budgetCategoryId = $state(0);
 	let budgetAmount = $state('');
 
@@ -96,6 +100,8 @@
 			if (requested !== month) return; // a later month change won
 			budgets = data.budgets;
 			unbudgeted = data.unbudgeted_spent;
+			incomeReceived = data.income_received;
+			unplannedIncome = data.unplanned_income;
 		} finally {
 			if (requested === month) budgetsLoading = false;
 		}
@@ -115,20 +121,34 @@
 	let expenseCategories = $derived(
 		categories.filter((c) => c.kind === 'expense' && !c.archived)
 	);
+	let incomeCategories = $derived(categories.filter((c) => c.kind === 'income' && !c.archived));
 	let budgetedIds = $derived(new Set(budgets.map((b) => b.category_id)));
-	let unbudgetedCategories = $derived(expenseCategories.filter((c) => !budgetedIds.has(c.id)));
-	let totalBudget = $derived(budgets.reduce((sum, b) => sum + b.amount, 0));
-	let totalSpent = $derived(budgets.reduce((sum, b) => sum + b.spent, 0));
-	let totalScheduled = $derived(budgets.reduce((sum, b) => sum + b.scheduled, 0));
 
-	function openBudget() {
-		budgetCategoryId = unbudgetedCategories[0]?.id ?? expenseCategories[0]?.id ?? 0;
+	// Spending limits and expected income share the budgets table, split by the
+	// category's kind.
+	let spendBudgets = $derived(budgets.filter((b) => b.kind === 'expense'));
+	let incomeBudgets = $derived(budgets.filter((b) => b.kind === 'income'));
+	let totalBudget = $derived(spendBudgets.reduce((sum, b) => sum + b.amount, 0));
+	let totalSpent = $derived(spendBudgets.reduce((sum, b) => sum + b.spent, 0));
+	let totalScheduled = $derived(spendBudgets.reduce((sum, b) => sum + b.scheduled, 0));
+	let totalExpected = $derived(incomeBudgets.reduce((sum, b) => sum + b.amount, 0));
+	let incomeScheduled = $derived(incomeBudgets.reduce((sum, b) => sum + b.scheduled, 0));
+	// What the plan leaves over: expected income less the spending budgeted.
+	let planLeft = $derived(totalExpected - totalBudget);
+
+	let modalCategories = $derived(budgetKind === 'income' ? incomeCategories : expenseCategories);
+
+	function openBudget(kind: CategoryKind) {
+		budgetKind = kind;
+		const pool = kind === 'income' ? incomeCategories : expenseCategories;
+		budgetCategoryId = pool.find((c) => !budgetedIds.has(c.id))?.id ?? pool[0]?.id ?? 0;
 		budgetAmount = '';
 		budgetError = null;
 		budgetModalOpen = true;
 	}
 
 	function editBudget(budget: Budget) {
+		budgetKind = budget.kind;
 		budgetCategoryId = budget.category_id;
 		budgetAmount = String(budget.amount);
 		budgetError = null;
@@ -287,9 +307,19 @@
 		<section class="card">
 			<div class="section-head">
 				<h2>Monthly Budgets</h2>
-				<Button size="sm" onclick={openBudget} disabled={expenseCategories.length === 0}>
-					Set a Budget
-				</Button>
+				<span class="head-actions">
+					<Button
+						variant="secondary"
+						size="sm"
+						onclick={() => openBudget('income')}
+						disabled={incomeCategories.length === 0}
+					>
+						Expect Income
+					</Button>
+					<Button size="sm" onclick={() => openBudget('expense')} disabled={expenseCategories.length === 0}>
+						Set a Budget
+					</Button>
+				</span>
 			</div>
 
 			<div class="month-nav">
@@ -307,10 +337,77 @@
 				{/if}
 			</div>
 
-			{#if budgets.length === 0}
+			{#if incomeBudgets.length > 0}
+				<div class="plan">
+					<div>
+						<span class="plan-label">Expected income</span>
+						<span class="plan-value">{formatCurrency(totalExpected)}</span>
+						<span class="muted small">{formatCurrency(incomeReceived)} received so far</span>
+					</div>
+					<span class="plan-op" aria-hidden="true">−</span>
+					<div>
+						<span class="plan-label">Budgeted spending</span>
+						<span class="plan-value">{formatCurrency(totalBudget)}</span>
+						<span class="muted small">{formatCurrency(totalSpent + unbudgeted)} spent so far</span>
+					</div>
+					<span class="plan-op" aria-hidden="true">=</span>
+					<div>
+						<span class="plan-label">{planLeft >= 0 ? 'Left to save' : 'Short'}</span>
+						<span class="plan-value" class:pos={planLeft > 0} class:neg={planLeft < 0}>
+							{formatCurrency(Math.abs(planLeft))}
+						</span>
+						<span class="muted small">
+							{formatCurrency(incomeReceived - totalSpent - unbudgeted)} actually left so far
+						</span>
+					</div>
+				</div>
+
+				<h3 class="sub-head">Expected income</h3>
+				<div class="list">
+					{#each incomeBudgets as budget (budget.id)}
+						<!-- Beyond what's already scheduled, so a recurring paycheck isn't counted twice. -->
+						{@const toCome = budget.amount - budget.spent - budget.scheduled}
+						<div class="item">
+							<div class="item-head">
+								<span class="item-name">{budget.category_name}</span>
+								<span class="item-actions">
+									<Button variant="ghost" size="sm" onclick={() => editBudget(budget)}>Edit</Button>
+									<Button variant="ghost" size="sm" onclick={() => endBudget(budget)}>Stop</Button>
+								</span>
+							</div>
+							<BudgetBar
+								spent={budget.spent}
+								amount={budget.amount}
+								scheduled={budget.scheduled}
+								color="var(--pos)"
+								pace={incomePace(month)}
+							/>
+							<div class="item-foot muted">
+								{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)} received
+								{#if budget.scheduled > 0}
+									· {formatCurrency(budget.scheduled)} scheduled
+								{/if}
+								{#if toCome > 0.005}
+									· {formatCurrency(toCome)} still to come
+								{:else if budget.spent > budget.amount + 0.005}
+									· <span class="pos">{formatCurrency(budget.spent - budget.amount)} more than expected</span>
+								{/if}
+							</div>
+						</div>
+					{/each}
+				</div>
+				{#if unplannedIncome > 0.005}
+					<p class="muted small">Plus {formatCurrency(unplannedIncome)} of income you didn't plan for.</p>
+				{/if}
+				{#if spendBudgets.length > 0}<h3 class="sub-head">Spending</h3>{/if}
+			{/if}
+
+			{#if spendBudgets.length === 0}
 				<p class="muted small">
 					{#if isCurrentMonth}
-						No budgets set. Pick a category and a monthly limit to track spending against it.
+						{incomeBudgets.length > 0 ? 'No spending budgets yet.' : 'No budgets set.'} Pick a category
+						and a monthly limit to track spending against it, or <strong>Expect Income</strong> to plan
+						what comes in.
 					{:else}
 						No budgets in {formatMonth(month)}.
 					{/if}
@@ -334,7 +431,7 @@
 				</div>
 
 				<div class="list">
-					{#each budgets as budget (budget.id)}
+					{#each spendBudgets as budget (budget.id)}
 						{@const pace = budgetPace(budget, month)}
 						{@const remaining = budget.amount - budget.spent - budget.scheduled}
 						<div class="item">
@@ -383,8 +480,8 @@
 					{/each}
 				</div>
 				<p class="muted hint">
-					{#if totalScheduled > 0}
-						Striped: recurring charges scheduled but not posted yet.
+					{#if totalScheduled > 0 || incomeScheduled > 0}
+						Striped: recurring charges{incomeScheduled > 0 ? ' and income' : ''} scheduled but not posted yet.
 					{/if}
 					Stopping a budget ends it from {formatMonth(month)} on. Earlier months keep it.
 				</p>
@@ -442,18 +539,21 @@
 	{/if}
 </div>
 
-<Modal bind:open={budgetModalOpen} title="Set a Budget for {formatMonth(month)}">
+<Modal
+	bind:open={budgetModalOpen}
+	title="{budgetKind === 'income' ? 'Expected Income' : 'Set a Budget'} for {formatMonth(month)}"
+>
 	<form onsubmit={saveBudget}>
-		<Field label="Category" id="budgetCategory">
+		<Field label={budgetKind === 'income' ? 'Income category' : 'Category'} id="budgetCategory">
 			<select id="budgetCategory" bind:value={budgetCategoryId} disabled={budgetSaving}>
-				{#each expenseCategories as category (category.id)}
+				{#each modalCategories as category (category.id)}
 					<option value={category.id}>{category.name}</option>
 				{/each}
 			</select>
 		</Field>
 
 		<Field
-			label="Monthly limit"
+			label={budgetKind === 'income' ? 'Expected each month' : 'Monthly limit'}
 			id="budgetAmount"
 			hint="Applies from {formatMonth(month)} until the next change"
 		>
@@ -477,7 +577,7 @@
 		<div class="form-actions">
 			<Button variant="secondary" onclick={() => (budgetModalOpen = false)}>Cancel</Button>
 			<Button type="submit" disabled={budgetSaving || !budgetAmount}>
-				{budgetSaving ? 'Saving…' : 'Save Budget'}
+				{budgetSaving ? 'Saving…' : budgetKind === 'income' ? 'Save Expected Income' : 'Save Budget'}
 			</Button>
 		</div>
 	</form>
@@ -597,6 +697,72 @@
 		align-items: center;
 		margin-bottom: 1rem;
 		gap: 1rem;
+	}
+
+	.head-actions {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	/* Expected income − budgeted spending = what's left, as a sum. */
+	.plan {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+		align-items: center;
+		gap: 0.75rem;
+		padding: 1rem;
+		margin-bottom: 1.25rem;
+		background: var(--bg);
+		border-radius: var(--radius-sm);
+	}
+
+	.plan > div {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.plan-label {
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: var(--muted);
+	}
+
+	.plan-value {
+		font-size: 1.25rem;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.plan-op {
+		font-size: 1.25rem;
+		color: var(--muted-light);
+	}
+
+	.pos {
+		color: var(--pos);
+	}
+
+	.sub-head {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--muted);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		margin: 1.25rem 0 0.5rem;
+	}
+
+	@media (max-width: 639px) {
+		.plan {
+			grid-template-columns: 1fr;
+			gap: 0.5rem;
+		}
+
+		.plan-op {
+			display: none;
+		}
 	}
 
 	.month-nav {

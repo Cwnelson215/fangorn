@@ -34,28 +34,35 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 
 	// Refunds are summed alongside expenses and are positive, so a returned
 	// purchase subtracts itself here rather than needing its own term.
-	var total float64
+	var spent, income float64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(-SUM(amount), 0) FROM transactions
+		`SELECT COALESCE(-SUM(amount) FILTER (WHERE kind IN ('expense','refund')), 0),
+		        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0)
+		 FROM transactions
 		 WHERE household_id = $1
-		   AND kind IN ('expense','refund')
 		   AND date >= $2::date
 		   AND date < ($2::date + INTERVAL '1 month')`,
-		householdID, monthStart).Scan(&total)
+		householdID, monthStart).Scan(&spent, &income)
 	if err != nil {
-		return models.BudgetMonth{}, fmt.Errorf("totalling month spend: %w", err)
+		return models.BudgetMonth{}, fmt.Errorf("totalling the month: %w", err)
 	}
 
-	// Each budget's spent is exactly its category's expenses for the month, so
-	// whatever is left over — other categories and uncategorized — is unbudgeted.
-	unbudgeted := total
+	// Each budget's actual is exactly its category's for the month, so whatever
+	// is left over — other categories and uncategorized — is outside the plan.
+	unbudgeted, unplanned := spent, income
 	for _, b := range budgets {
-		unbudgeted -= b.Spent
+		if b.Kind == models.KindIncome {
+			unplanned -= b.Spent
+		} else {
+			unbudgeted -= b.Spent
+		}
 	}
 	return models.BudgetMonth{
 		Month:           monthStart,
 		Budgets:         budgets,
 		UnbudgetedSpent: round2(unbudgeted),
+		IncomeReceived:  round2(income),
+		UnplannedIncome: round2(unplanned),
 	}, nil
 }
 
@@ -77,20 +84,22 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 		     AND b.effective_from <= $2::date
 		   ORDER BY b.category_id, b.effective_from DESC
 		 )
-		 SELECT active.id, active.category_id, c.name, c.color, active.period,
+		 SELECT active.id, active.category_id, c.name, c.color, c.kind, active.period,
 		        active.amount, active.effective_from,
 		        COALESCE((
-		          SELECT -SUM(t.amount) FROM transactions t
+		          SELECT CASE WHEN c.kind = 'income' THEN SUM(t.amount) ELSE -SUM(t.amount) END
+		          FROM transactions t
 		          WHERE t.household_id = $1
 		            AND t.category_id = active.category_id
-		            AND t.kind IN ('expense','refund')
+		            AND (CASE WHEN c.kind = 'income' THEN t.kind = 'income'
+		                      ELSE t.kind IN ('expense','refund') END)
 		            AND t.date >= $2::date
 		            AND t.date < ($2::date + INTERVAL '1 month')
 		        ), 0) AS spent
 		 FROM active
 		 JOIN categories c ON c.id = active.category_id AND c.archived_at IS NULL
 		 WHERE active.archived_at IS NULL
-		 ORDER BY c.name`,
+		 ORDER BY c.kind DESC, c.name`,
 		householdID, monthStart)
 	if err != nil {
 		return nil, fmt.Errorf("listing budgets: %w", err)
@@ -102,7 +111,7 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 		var b models.Budget
 		var color sql.NullString
 		var effective time.Time
-		if err := rows.Scan(&b.ID, &b.CategoryID, &b.CategoryName, &color,
+		if err := rows.Scan(&b.ID, &b.CategoryID, &b.CategoryName, &color, &b.Kind,
 			&b.Period, &b.Amount, &effective, &b.Spent); err != nil {
 			return nil, fmt.Errorf("scanning budget: %w", err)
 		}
@@ -127,8 +136,9 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 	return out, nil
 }
 
-// scheduledSpend totals, per category, the recurring expenses that fall in the
-// month but have not posted yet.
+// scheduledSpend totals, per category, the recurring expenses — and recurring
+// income, for expected-income budgets — that fall in the month but have not
+// posted yet. Categories are one kind or the other, so one map holds both.
 //
 // Dates come from the rules through the date engine, not from
 // recurring_occurrences. Those rows only exist out to the scheduler's horizon,
@@ -163,7 +173,8 @@ func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStar
 
 	out := map[int]float64{}
 	for _, rule := range rules {
-		if rule.Paused || rule.Kind != models.KindExpense || rule.CategoryID == nil {
+		if rule.Paused || rule.CategoryID == nil ||
+			(rule.Kind != models.KindExpense && rule.Kind != models.KindIncome) {
 			continue
 		}
 		spec, err := RuleSpec(rule)
@@ -305,8 +316,8 @@ func (s *Service) StopBudget(ctx context.Context, householdID, id int, month str
 	})
 }
 
-// assertBudgetCategory is assertCategory plus the two things a budget needs on
-// top: it only makes sense against spending, and not on a retired category.
+// assertBudgetCategory checks a budget's category: the household's own, not
+// retired, and income or expense — a limit on spending or income expected.
 func (s *Service) assertBudgetCategory(ctx context.Context, householdID, categoryID int) error {
 	var kind string
 	var archived bool
@@ -319,8 +330,8 @@ func (s *Service) assertBudgetCategory(ctx context.Context, householdID, categor
 	if err != nil {
 		return fmt.Errorf("checking category: %w", err)
 	}
-	if kind != models.KindExpense {
-		return invalid("budgets can only be set on expense categories")
+	if kind != models.KindExpense && kind != models.KindIncome {
+		return invalid("budgets can only be set on income or expense categories")
 	}
 	if archived {
 		return invalid("category is archived")

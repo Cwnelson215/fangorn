@@ -361,21 +361,26 @@ type Occurrence struct {
 	TransactionID *int    `json:"transaction_id"`
 }
 
+// Budget is a monthly amount planned for a category. On an expense category
+// it's a spending limit; on an income category it's the income expected.
 type Budget struct {
 	ID            int     `json:"id"`
 	CategoryID    int     `json:"category_id"`
 	CategoryName  string  `json:"category_name,omitempty"`
 	CategoryColor *string `json:"category_color,omitempty"`
+	// Kind is the category's kind: "expense" for a limit, "income" for expected income.
+	Kind          string  `json:"kind"`
 	Period        string  `json:"period"`
 	Amount        float64 `json:"amount"`
 	EffectiveFrom string  `json:"effective_from"`
 
-	// Spent is the month-to-date spend against this category, as a positive
-	// number, net of any refunds filed against it.
+	// Spent is the month-to-date actual, as a positive number: spend net of
+	// refunds on an expense budget, income received on an income budget.
 	Spent float64 `json:"spent"`
 
-	// Scheduled is recurring expenses in this category that fall in the month but
-	// have not posted yet, as a positive number. Always 0 for past months.
+	// Scheduled is recurring expenses (or, on an income budget, recurring
+	// income) in this category that fall in the month but have not posted yet,
+	// as a positive number. Always 0 for past months.
 	Scheduled float64 `json:"scheduled"`
 }
 
@@ -387,6 +392,12 @@ type BudgetMonth struct {
 	// UnbudgetedSpent is the month's expense spend in categories with no budget,
 	// including uncategorized transactions, as a positive number.
 	UnbudgetedSpent float64 `json:"unbudgeted_spent"`
+
+	// IncomeReceived is all income in the month, budgeted or not.
+	IncomeReceived float64 `json:"income_received"`
+	// UnplannedIncome is the part of IncomeReceived in categories with no
+	// expected-income budget, uncategorized included.
+	UnplannedIncome float64 `json:"unplanned_income"`
 }
 
 type Goal struct {

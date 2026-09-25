@@ -463,20 +463,16 @@ func TestStopBudgetKeepsEarlierMonths(t *testing.T) {
 	}
 }
 
-func TestSetBudgetRejectsNonExpenseCategories(t *testing.T) {
+func TestSetBudgetRejectsArchivedCategories(t *testing.T) {
 	f := newFixture(t)
 	checking := f.account("Checking", models.AccountChecking, 1000)
-	salary := f.category("Salary", models.KindIncome)
 	old := f.category("Old", models.KindExpense)
-
-	_, err := f.svc.SetBudget(f.ctx, f.hh, ledger.BudgetInput{CategoryID: salary.ID, Amount: 100})
-	wantInvalid(t, err)
 
 	f.txn(checking.ID, models.KindExpense, "2026-02-03", 10, &old.ID) // in use, so delete archives
 	if err := f.svc.DeleteCategory(f.ctx, f.hh, old.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.svc.SetBudget(f.ctx, f.hh, ledger.BudgetInput{CategoryID: old.ID, Amount: 100})
+	_, err := f.svc.SetBudget(f.ctx, f.hh, ledger.BudgetInput{CategoryID: old.ID, Amount: 100})
 	wantInvalid(t, err)
 }
 
@@ -752,4 +748,61 @@ func TestTransactionCategoryKindMustMatch(t *testing.T) {
 		CategoryID: &salary.ID, Amount: 1200, Frequency: "monthly", StartDate: "2026-03-01",
 	})
 	wantInvalid(t, err)
+}
+
+// A budget on an income category is income expected: its actual is income
+// received, recurring income still to arrive is scheduled, and income nobody
+// planned for is reported separately from spending.
+func TestExpectedIncomeBudget(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	food := f.category("Food", models.KindExpense)
+	salary := f.category("Salary", models.KindIncome)
+	gifts := f.category("Gifts", models.KindIncome)
+
+	f.setBudget(food.ID, 400, "2026-02")
+	f.setBudget(salary.ID, 5000, "2026-02")
+	f.txn(checking.ID, models.KindIncome, "2026-02-01", 2500, &salary.ID)
+	f.txn(checking.ID, models.KindIncome, "2026-02-09", 100, &gifts.ID)
+	f.txn(checking.ID, models.KindIncome, "2026-02-10", 20, nil)
+	f.txn(checking.ID, models.KindExpense, "2026-02-03", 120, &food.ID)
+
+	bm, err := f.svc.BudgetMonth(f.ctx, f.hh, "2026-02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bm.Budgets) != 2 {
+		t.Fatalf("got %d budgets, want 2", len(bm.Budgets))
+	}
+	byKind := map[string]models.Budget{}
+	for _, b := range bm.Budgets {
+		byKind[b.Kind] = b
+	}
+	money(t, "salary received", byKind[models.KindIncome].Spent, 2500)
+	money(t, "salary expected", byKind[models.KindIncome].Amount, 5000)
+	money(t, "food spent", byKind[models.KindExpense].Spent, 120)
+	money(t, "income received", bm.IncomeReceived, 2620)
+	money(t, "unplanned income", bm.UnplannedIncome, 120)
+	money(t, "unbudgeted spend ignores income budgets", bm.UnbudgetedSpent, 0)
+
+	// A paycheck still to come this month counts as scheduled income.
+	today := ledger.Household{Timezone: "America/Denver"}.Today()
+	thisMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	f.setBudget(salary.ID, 5000, thisMonth.Format("2006-01"))
+	last := thisMonth.AddDate(0, 1, -1).Day()
+	if _, err := f.svc.CreateRule(f.ctx, f.hh, ledger.RuleInput{
+		Name: "paycheck", Kind: models.KindIncome, AccountID: checking.ID, CategoryID: &salary.ID,
+		Amount: 2500, Frequency: "monthly", DayOfMonth: &last, StartDate: thisMonth.Format(models.DateOnly),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	budgets, err := f.svc.ListBudgets(f.ctx, f.hh, thisMonth.Format("2006-01"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range budgets {
+		if b.Kind == models.KindIncome {
+			money(t, "paycheck scheduled", b.Scheduled, 2500)
+		}
+	}
 }

@@ -58,3 +58,13 @@ export function budgetPace(
 	}
 	return { status, elapsed, projected };
 }
+
+/**
+ * Expected income has no "over": more arriving than planned is good news, and
+ * less so far is usually a paycheck still to come. Its bar only marks how far
+ * through the month it is.
+ */
+export function incomePace(month: string, on: string = today()): BudgetPace {
+	const inProgress = month === on.slice(0, 7) + '-01';
+	return { status: 'ok', elapsed: inProgress ? monthElapsed(month, on) : null, projected: null };
+}

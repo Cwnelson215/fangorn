@@ -244,16 +244,22 @@ export interface Occurrence {
 	transaction_id: number | null;
 }
 
+/**
+ * A monthly amount planned for a category: a spending limit on an expense
+ * category, or the income expected on an income category.
+ */
 export interface Budget {
 	id: number;
 	category_id: number;
 	category_name?: string;
 	category_color?: string | null;
+	kind: CategoryKind;
 	period: 'monthly';
 	amount: number;
 	effective_from: string;
+	/** The month's actual: spend net of refunds, or income received. */
 	spent: number;
-	/** Recurring expenses in the month not posted yet. Always 0 for past months. */
+	/** Recurring expenses (or income) in the month not posted yet. Always 0 for past months. */
 	scheduled: number;
 }
 
@@ -263,6 +269,10 @@ export interface BudgetMonth {
 	budgets: Budget[];
 	/** Expense spend in categories with no budget, uncategorized included. */
 	unbudgeted_spent: number;
+	/** All income in the month. */
+	income_received: number;
+	/** Income in categories with no expected-income budget, uncategorized included. */
+	unplanned_income: number;
 }
 
 export interface Goal {

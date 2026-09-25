@@ -20,6 +20,8 @@
 	import { grouping } from '$lib/grouping.svelte';
 
 	let data = $state<Dashboard | null>(null);
+	// Expected income lives on the budgets page; the dashboard tracks spending.
+	let spendingBudgets = $derived(data?.budgets.filter((b) => b.kind === 'expense') ?? []);
 	let accountGroups = $derived(data ? groupAccounts(data.accounts, grouping.by) : []);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
@@ -198,14 +200,14 @@
 				{/if}
 			</div>
 
-			{#if data.budgets.length > 0}
+			{#if spendingBudgets.length > 0}
 				<div class="card">
 					<div class="card-head">
 						<h2>This Month's Budgets</h2>
 						<a class="link" href="/budgets">Manage</a>
 					</div>
 					<div class="budget-list">
-						{#each data.budgets as budget (budget.id)}
+						{#each spendingBudgets as budget (budget.id)}
 							{@const pace = budgetPace(budget, monthStart())}
 							<div class="budget">
 								<div class="budget-head">
