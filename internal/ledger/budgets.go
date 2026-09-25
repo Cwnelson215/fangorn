@@ -61,13 +61,25 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
+	var expected float64
+	for _, b := range budgets {
+		if b.Kind == models.KindIncome {
+			expected += b.Amount
+		}
+	}
+	thisMonth := today.Format("2006-01") + "-01"
+	shortfall, err := s.savingsShortfallFor(ctx, householdID, monthStart, monthStart >= thisMonth, expected, savings)
+	if err != nil {
+		return models.BudgetMonth{}, err
+	}
 	return models.BudgetMonth{
-		Month:           monthStart,
-		Budgets:         budgets,
-		UnbudgetedSpent: round2(unbudgeted),
-		IncomeReceived:  round2(income),
-		UnplannedIncome: round2(unplanned),
-		Savings:         savings,
+		Month:            monthStart,
+		Budgets:          budgets,
+		UnbudgetedSpent:  round2(unbudgeted),
+		IncomeReceived:   round2(income),
+		UnplannedIncome:  round2(unplanned),
+		Savings:          savings,
+		SavingsShortfall: shortfall,
 	}, nil
 }
 

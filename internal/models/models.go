@@ -401,6 +401,9 @@ type BudgetMonth struct {
 
 	// Savings is each open goal with a monthly amount: planned vs put toward it.
 	Savings []SavingsLine `json:"savings"`
+	// SavingsShortfall is how much of the month's planned savings was spent
+	// from the income account instead, split across Savings by monthly amount.
+	SavingsShortfall float64 `json:"savings_shortfall"`
 }
 
 type Goal struct {
@@ -435,6 +438,10 @@ type SavingsLine struct {
 	Moved  float64 `json:"moved"`
 	Saved  float64 `json:"saved"`
 	Target float64 `json:"target_amount"`
+	// Overspent is this goal's share of the month's savings shortfall: money
+	// meant for savings that left the income account as spending instead. It
+	// lowers the month, not the goal — that money never reached its account.
+	Overspent float64 `json:"overspent"`
 }
 
 // Trade is one entry in an investment account's trade log. Side is one of the

@@ -105,3 +105,68 @@ func TestIncomeAccountSetting(t *testing.T) {
 	_, err = f.svc.UpdateSettings(f.ctx, f.hh, ledger.Settings{IncomeAccountID: &checking.ID})
 	wantInvalid(t, err)
 }
+
+// Money meant for savings that leaves the income account as spending counts
+// against the month's savings, split by monthly amount — once, even when it
+// was first pulled back out of savings.
+func TestSavingsShortfallFromIncomeAccount(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 0)
+	emergency := f.account("Emergency", models.AccountSavings, 0)
+	vacation := f.account("Vacation", models.AccountSavings, 0)
+	pay := f.category("Pay", models.KindIncome)
+	food := f.category("Food", models.KindExpense)
+	day := ledger.Household{Timezone: "America/Denver"}.Today().Format(models.DateOnly)
+
+	if _, err := f.svc.UpdateSettings(f.ctx, f.hh, ledger.Settings{IncomeAccountID: &checking.ID}); err != nil {
+		t.Fatal(err)
+	}
+	five, twoFifty := 500.0, 250.0
+	for _, g := range []ledger.GoalInput{
+		{Name: "Emergency", TargetAmount: 5000, AccountID: &emergency.ID, MonthlyAmount: &five},
+		{Name: "Vacation", TargetAmount: 3000, AccountID: &vacation.ID, MonthlyAmount: &twoFifty},
+	} {
+		if _, err := f.svc.CreateGoal(f.ctx, f.hh, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// $3,000 in and $750 planned for savings leaves $2,250 to spend.
+	f.txn(checking.ID, models.KindIncome, day, 3000, &pay.ID)
+	f.transfer(checking.ID, emergency.ID, 500, day)
+	f.txn(checking.ID, models.KindExpense, day, 2400, &food.ID)
+
+	type view struct {
+		Total float64
+		Lines map[string][2]float64 // moved, overspent
+	}
+	month := func() view {
+		t.Helper()
+		bm, err := f.svc.BudgetMonth(f.ctx, f.hh, day)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := view{Total: bm.SavingsShortfall, Lines: map[string][2]float64{}}
+		for _, l := range bm.Savings {
+			out.Lines[l.Name] = [2]float64{l.Moved, l.Overspent}
+		}
+		return out
+	}
+
+	got := month()
+	money(t, "shortfall", got.Total, 150)
+	money(t, "emergency's share", got.Lines["Emergency"][1], 100)
+	money(t, "vacation's share", got.Lines["Vacation"][1], 50)
+
+	// Pulling $100 back out of savings lowers Emergency's month by $100 — and
+	// only that: it isn't also counted as spending from the income account.
+	f.transfer(emergency.ID, checking.ID, 100, day)
+	got = month()
+	money(t, "emergency moved after pulling back", got.Lines["Emergency"][0], 400)
+	money(t, "shortfall after pulling back", got.Total, 50)
+
+	// Expected income counts for the current month, so a paycheck still to come
+	// isn't read as overspending.
+	f.setBudget(pay.ID, 6000, day[:7])
+	money(t, "shortfall with more income expected", month().Total, 0)
+}

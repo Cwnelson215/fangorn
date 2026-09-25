@@ -40,6 +40,7 @@
 	let incomeReceived = $state(0);
 	let unplannedIncome = $state(0);
 	let savings: SavingsLine[] = $state([]);
+	let shortfall = $state(0);
 	// Where income lands, and savings are moved from.
 	let incomeAccountId = $state(0);
 	let budgetsLoading = $state(false);
@@ -115,6 +116,7 @@
 			incomeReceived = data.income_received;
 			unplannedIncome = data.unplanned_income;
 			savings = data.savings;
+			shortfall = data.savings_shortfall;
 		} finally {
 			if (requested === month) budgetsLoading = false;
 		}
@@ -401,7 +403,10 @@
 					<div>
 						<span class="plan-label">Savings</span>
 						<span class="plan-value">{formatCurrency(totalSavingsPlanned)}</span>
-						<span class="muted small">{formatCurrency(totalMoved)} put away</span>
+						<span class="muted small">
+							{formatCurrency(Math.max(0, totalMoved - shortfall))} saved
+							{#if shortfall > 0.005}·&nbsp;<span class="neg">{formatCurrency(shortfall)} spent</span>{/if}
+						</span>
 					</div>
 					<span class="plan-op" aria-hidden="true">=</span>
 					<div>
@@ -466,6 +471,14 @@
 
 			{#if savings.length > 0}
 				<h3 class="sub-head">Savings</h3>
+				{#if shortfall > 0.005}
+					<p class="muted small shortfall">
+						More went out of {accounts.find((a) => a.id === incomeAccountId)?.name ?? 'the income account'}
+						than this month's income less the savings planned, so
+						<strong class="neg">{formatCurrency(shortfall)}</strong> of this month's savings was spent. It's
+						split across the goals by their monthly amounts.
+					</p>
+				{/if}
 				<div class="list">
 					{#each savings as line (line.goal_id)}
 						{@const toGo = line.monthly_amount - line.moved}
@@ -497,6 +510,10 @@
 							/>
 							<div class="item-foot muted">
 								{formatCurrency(line.moved)} of {formatCurrency(line.monthly_amount)} this month
+								{#if line.overspent > 0.005}
+									· <span class="neg">−{formatCurrency(line.overspent)} spent from savings</span>
+									{#if line.moved > 0.005}= {formatCurrency(Math.max(0, line.moved - line.overspent))} saved{/if}
+								{/if}
 								{#if toGo > 0.005}· {formatCurrency(toGo)} to go{/if}
 								· {formatCurrency(line.saved)} of {formatCurrency(line.target_amount)} overall
 							</div>
@@ -899,6 +916,10 @@
 		font: inherit;
 		background: var(--surface);
 		color: var(--ink);
+	}
+
+	.shortfall {
+		margin: 0 0 0.5rem;
 	}
 
 	.sub-head {

@@ -275,6 +275,8 @@ export interface BudgetMonth {
 	unplanned_income: number;
 	/** Open goals with a monthly amount: planned vs put toward them this month. */
 	savings: SavingsLine[];
+	/** Planned savings spent from the income account instead, split across `savings`. */
+	savings_shortfall: number;
 }
 
 export interface Goal {
@@ -309,6 +311,8 @@ export interface SavingsLine {
 	moved: number;
 	saved: number;
 	target_amount: number;
+	/** This goal's share of money meant for savings that was spent from the income account. */
+	overspent: number;
 }
 
 /** Household-wide choices. */

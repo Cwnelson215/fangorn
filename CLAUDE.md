@@ -201,6 +201,16 @@ line is a real transfer from the income account, so one action fills the month a
 transfer made anywhere else counts the same way. A goal with no account still takes hand-logged
 `goal_contributions`.
 
+**Spending from savings.** When more leaves the income account in a month than the income there was
+to plan on less the savings planned, the difference was money meant for savings
+(`SavingsShortfall`, `ledger/shortfall.go`). Savings transfers themselves aren't spending, and only
+transfers *out to* goal accounts are set aside — pulling money back from savings already lowers
+that goal's month, so counting it again would double it. For the current month the income to plan
+on is the higher of expected and received (rent goes out before the paycheck lands); a past month
+uses what was received. The shortfall is capped at what was planned, split across the lines by
+monthly amount (`overspent`, the last line taking the rounding), and lowers the month only — the
+goal's overall progress still moves only when money moves in or out of its account.
+
 ## The Recurring Engine
 
 `internal/recurring` computes occurrence dates by **index from a fixed anchor**, never by adding an
