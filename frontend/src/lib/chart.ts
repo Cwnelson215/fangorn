@@ -158,6 +158,12 @@ export function addCrosshair(
 		show(Math.max(0, Math.min(dates.length - 1, i)));
 	}
 
+	// Vertical swipes still scroll the page on a phone; horizontal ones scrub.
+	// Set on the HTML container too: iOS Safari ignores touch-action on SVG
+	// elements, so there the page kept every drag for scrolling and the chart
+	// never saw one.
+	container.style.touchAction = 'pan-y';
+
 	g.append('rect')
 		.attr('width', width)
 		.attr('height', height)
@@ -165,13 +171,19 @@ export function addCrosshair(
 		.attr('tabindex', 0)
 		.attr('role', 'img')
 		.attr('aria-label', 'Chart. Use the left and right arrow keys to read values.')
-		// Vertical swipes still scroll the page on a phone; horizontal ones scrub.
 		.style('touch-action', 'pan-y')
 		.style('outline', 'none')
 		.on('pointermove pointerdown', at)
 		.on('pointerleave', hide)
+		// The browser took the gesture over to scroll the page.
+		.on('pointercancel', hide)
 		.on('blur', hide)
-		.on('focus', () => show(dates.length - 1))
+		// Keyboard focus starts at the latest date. A tap focuses the chart too,
+		// and without this check it jumped the readout from the point touched to
+		// the last one.
+		.on('focus', (event: FocusEvent) => {
+			if ((event.target as Element).matches(':focus-visible')) show(dates.length - 1);
+		})
 		.on('keydown', (event: KeyboardEvent) => {
 			if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 			event.preventDefault();

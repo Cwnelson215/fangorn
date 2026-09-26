@@ -1,8 +1,8 @@
 <script lang="ts">
 	import * as d3 from 'd3';
 	import type { WeekSpend } from '$lib/types';
-	import { parseDate } from '$lib/format';
-	import { ACCENT, AXIS_TEXT } from '$lib/chart';
+	import { formatCurrency, formatDate, parseDate } from '$lib/format';
+	import { ACCENT, AXIS_TEXT, addCrosshair } from '$lib/chart';
 
 	// Weekly totals arrive already bucketed from the dashboard endpoint, with
 	// empty weeks as zeros. Summing raw transactions here instead would silently
@@ -78,6 +78,17 @@
 			.attr('stroke', ACCENT)
 			.attr('stroke-width', 2)
 			.attr('d', line);
+
+		addCrosshair(svg, container, {
+			dates: data.map((d) => d.date),
+			x,
+			width,
+			height,
+			margin,
+			title: (i) => `Week of ${formatDate(weeks[i].week)}`,
+			rows: (i) => [{ label: 'spent', value: formatCurrency(data[i].amount), color: ACCENT }],
+			dots: (i) => [{ y: y(data[i].amount), color: ACCENT }]
+		});
 	}
 
 	$effect(() => { weeks; boxWidth; render(); });
@@ -87,6 +98,7 @@
 
 <style>
 	.chart {
+		position: relative;
 		width: 100%;
 		min-height: 250px;
 	}
