@@ -37,6 +37,27 @@ type HoldingPosition struct {
 
 	PriceTime  *string `json:"price_time"`
 	FetchError *string `json:"fetch_error"`
+
+	// Accounts splits a merged position by the accounts holding it. Only the
+	// household summary fills it in; an account's own view leaves it out.
+	Accounts []PositionAccount `json:"accounts,omitempty"`
+}
+
+// PositionAccount is one account's part of a position in the household summary,
+// taken as is from that account's own view so the parts add up to the whole.
+type PositionAccount struct {
+	AccountID         int      `json:"account_id"`
+	AccountName       string   `json:"account_name"`
+	Shares            float64  `json:"shares"`
+	AvgCost           float64  `json:"avg_cost"`
+	CostBasis         float64  `json:"cost_basis"`
+	MarketValue       float64  `json:"market_value"`
+	DayChange         *float64 `json:"day_change"`
+	UnrealizedGain    float64  `json:"unrealized_gain"`
+	UnrealizedGainPct *float64 `json:"unrealized_gain_pct"`
+	// Weight is this part's share of the whole summary's holdings value, like
+	// the merged position's own Weight.
+	Weight float64 `json:"weight"`
 }
 
 // Holdings is an investment account's positions plus its cash.
@@ -200,6 +221,7 @@ func (s *Service) InvestmentsSummary(ctx context.Context, householdID int) (Inve
 	}
 
 	var views []Holdings
+	names := map[int]string{}
 	for _, a := range accounts {
 		if !models.HoldsSecurities(a.Type) {
 			continue
@@ -209,18 +231,20 @@ func (s *Service) InvestmentsSummary(ctx context.Context, householdID int) (Inve
 			return out, err
 		}
 		views = append(views, h)
+		names[a.ID] = a.Name
 		out.Accounts = append(out.Accounts, InvestmentAccountValue{
 			ID: a.ID, Name: a.Name, InstitutionName: a.InstitutionName,
 			Cash: h.Cash, HoldingsValue: h.HoldingsValue, TotalValue: h.TotalValue,
 			DayChange: h.DayChange, DayChangePct: h.DayChangePct,
 		})
 	}
-	out.Holdings = mergeHoldings(views)
+	out.Holdings = mergeHoldings(views, names)
 	return out, nil
 }
 
-// mergeHoldings adds several accounts' holdings views into one.
-func mergeHoldings(views []Holdings) Holdings {
+// mergeHoldings adds several accounts' holdings views into one, keeping each
+// account's part of every position. names labels the parts by account id.
+func mergeHoldings(views []Holdings, names map[int]string) Holdings {
 	merged := Holdings{Positions: []HoldingPosition{}}
 	bySymbol := map[string]*HoldingPosition{}
 	var order []string
@@ -246,6 +270,7 @@ func mergeHoldings(views []Holdings) Holdings {
 				cp.DayChange = nil
 				cp.Shares, cp.CostBasis, cp.MarketValue = 0, 0, 0
 				cp.UnrealizedGain, cp.RealizedGain = 0, 0
+				cp.Accounts = nil
 				m = &cp
 				bySymbol[p.Symbol] = m
 				order = append(order, p.Symbol)
@@ -257,6 +282,12 @@ func mergeHoldings(views []Holdings) Holdings {
 			if p.DayChange != nil {
 				m.DayChange = ptr(derefOr(m.DayChange) + *p.DayChange)
 			}
+			m.Accounts = append(m.Accounts, PositionAccount{
+				AccountID: v.AccountID, AccountName: names[v.AccountID],
+				Shares: p.Shares, AvgCost: p.AvgCost, CostBasis: p.CostBasis,
+				MarketValue: p.MarketValue, DayChange: p.DayChange,
+				UnrealizedGain: p.UnrealizedGain, UnrealizedGainPct: p.UnrealizedGainPct,
+			})
 		}
 	}
 
@@ -298,6 +329,9 @@ func mergeHoldings(views []Holdings) Holdings {
 		}
 		if merged.HoldingsValue > 0 {
 			p.Weight = p.MarketValue / merged.HoldingsValue
+			for i := range p.Accounts {
+				p.Accounts[i].Weight = p.Accounts[i].MarketValue / merged.HoldingsValue
+			}
 		}
 		merged.Positions = append(merged.Positions, *p)
 	}

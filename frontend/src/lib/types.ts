@@ -453,6 +453,23 @@ export interface HoldingPosition {
 	weight: number;
 	price_time: string | null;
 	fetch_error: string | null;
+	/** Each account's part of the position — the household summary only. */
+	accounts?: PositionAccount[];
+}
+
+/** One account's part of a position held across accounts. */
+export interface PositionAccount {
+	account_id: number;
+	account_name: string;
+	shares: number;
+	avg_cost: number;
+	cost_basis: number;
+	market_value: number;
+	day_change: number | null;
+	unrealized_gain: number;
+	unrealized_gain_pct: number | null;
+	/** Share of the whole summary's holdings value, like the position's weight. */
+	weight: number;
 }
 
 export interface Holdings {

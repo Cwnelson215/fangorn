@@ -606,6 +606,42 @@ func TestInvestmentsSummaryMergesAccounts(t *testing.T) {
 		t.Errorf("weights sum to %v", weights)
 	}
 
+	// Each account's part is its own page's figures, and the parts add up.
+	if len(p.Accounts) != 2 {
+		t.Fatalf("fund held in two accounts: parts = %+v", p.Accounts)
+	}
+	byID := map[int]ledger.PositionAccount{}
+	var gain, partWeights float64
+	for _, part := range p.Accounts {
+		byID[part.AccountID] = part
+		gain += part.UnrealizedGain
+		partWeights += part.Weight
+	}
+	if byID[a.ID].AccountName != "Brokerage" || byID[b.ID].AccountName != "Roth IRA" {
+		t.Errorf("parts labelled %+v", p.Accounts)
+	}
+	for _, own := range []struct {
+		id  int
+		pos ledger.HoldingPosition
+	}{{a.ID, ha.Positions[0]}, {b.ID, hb.Positions[0]}} {
+		part := byID[own.id]
+		if part.Shares != own.pos.Shares {
+			t.Errorf("account %d shares = %v, want %v", own.id, part.Shares, own.pos.Shares)
+		}
+		money(t, "part gain", part.UnrealizedGain, own.pos.UnrealizedGain)
+		if part.UnrealizedGainPct == nil || own.pos.UnrealizedGainPct == nil ||
+			*part.UnrealizedGainPct != *own.pos.UnrealizedGainPct {
+			t.Errorf("account %d gain pct = %v, want %v", own.id, part.UnrealizedGainPct, own.pos.UnrealizedGainPct)
+		}
+	}
+	money(t, "parts' gain", gain, p.UnrealizedGain)
+	if math.Abs(partWeights-p.Weight) > 1e-9 {
+		t.Errorf("parts' weights sum to %v, want %v", partWeights, p.Weight)
+	}
+	if len(s.Positions[1].Accounts) != 1 {
+		t.Errorf("etf held in one account: parts = %+v", s.Positions[1].Accounts)
+	}
+
 	d := f.dashboard("", "")
 	if d.Investments == nil {
 		t.Fatal("dashboard should show investments")
