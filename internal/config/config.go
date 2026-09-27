@@ -41,6 +41,9 @@ type Config struct {
 	AnthropicWorkspaceID string
 	// ReceiptsModel is the Claude model receipts are read with.
 	ReceiptsModel string
+	// ChatModel is the Claude model the assistant answers with. The assistant
+	// is on whenever AnthropicAPIKey is set.
+	ChatModel string
 }
 
 func Load() *Config {
@@ -61,6 +64,7 @@ func Load() *Config {
 		AnthropicAPIKey:      os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicWorkspaceID: strings.TrimSpace(os.Getenv("ANTHROPIC_WORKSPACE_ID")),
 		ReceiptsModel:        getEnv("RECEIPTS_MODEL", "claude-opus-5"),
+		ChatModel:            getEnv("CHAT_MODEL", "claude-opus-5"),
 	}
 }
 

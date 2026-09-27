@@ -498,6 +498,16 @@ type DeviceKey struct {
 	LastUsedAt  *time.Time `json:"last_used_at"`
 }
 
+// Chat is one conversation with the assistant. Its transcript is not part of
+// this type: it is the raw Messages API history, read and appended through
+// ledger.ChatTranscript and ledger.AppendChat.
+type Chat struct {
+	ID        int    `json:"id"`
+	Title     string `json:"title"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type NetWorthPoint struct {
 	Date             string  `json:"date"`
 	TotalAssets      float64 `json:"total_assets"`

@@ -8,6 +8,8 @@ import type {
 	BudgetMonth,
 	Category,
 	CategoryInput,
+	Chat,
+	ChatMessage,
 	Dashboard,
 	DeviceKey,
 	DeviceKeyCreated,
@@ -276,4 +278,76 @@ export async function testDeviceKey(token: string): Promise<string[]> {
 	});
 	if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
 	return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// assistant
+// ---------------------------------------------------------------------------
+
+export const getChats = () => request<{ enabled: boolean; chats: Chat[] }>('/api/chats');
+export const createChat = () => send<Chat>('POST', '/api/chats');
+export const getChat = (id: number) =>
+	request<{ chat: Chat; messages: ChatMessage[] }>(`/api/chats/${id}`);
+export const deleteChat = (id: number) => send<void>('DELETE', `/api/chats/${id}`);
+
+export interface ChatStreamHandlers {
+	/** The next piece of the answer. */
+	onText: (text: string) => void;
+	/** Something is being looked up, e.g. "Adding up spending". */
+	onTool: (label: string) => void;
+}
+
+/**
+ * Asks a question and streams the answer. Resolves with the saved chat once the
+ * turn is stored; rejects if it failed, in which case nothing was saved and any
+ * text already streamed should be thrown away.
+ */
+export async function askChat(
+	id: number,
+	text: string,
+	handlers: ChatStreamHandlers,
+	signal?: AbortSignal
+): Promise<Chat> {
+	const res = await fetch(`${BASE}/api/chats/${id}/messages`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ text }),
+		signal
+	});
+	if (!res.ok || !res.body) {
+		const body = await res.json().catch(() => ({ error: res.statusText }));
+		throw new Error(body.error || res.statusText);
+	}
+
+	const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+	let buffer = '';
+	for (;;) {
+		const { value, done } = await reader.read();
+		if (done) break;
+		buffer += value;
+		// Events end with a blank line; the last piece may be incomplete.
+		const events = buffer.split('\n\n');
+		buffer = events.pop() ?? '';
+		for (const raw of events) {
+			const event = parseEvent(raw);
+			if (!event) continue;
+			if (event.name === 'text') handlers.onText(event.data.text);
+			else if (event.name === 'tool') handlers.onTool(event.data.label);
+			else if (event.name === 'error') throw new Error(event.data.error);
+			else if (event.name === 'done') return event.data.chat as Chat;
+		}
+	}
+	throw new Error('The answer was cut off. Try asking again.');
+}
+
+/** Parses one server-sent event; comments (keep-alive pings) come back null. */
+export function parseEvent(raw: string): { name: string; data: any } | null {
+	let name = 'message';
+	const data: string[] = [];
+	for (const line of raw.split('\n')) {
+		if (line.startsWith('event:')) name = line.slice(6).trim();
+		else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+	}
+	if (data.length === 0) return null;
+	return { name, data: JSON.parse(data.join('\n')) };
 }

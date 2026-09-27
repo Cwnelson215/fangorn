@@ -10,7 +10,9 @@ and running balances, categorized income and spending, transfers between your ow
 recurring subscriptions and scheduled transfers that post themselves, monthly category budgets,
 savings goals, net worth over time, and investment accounts whose holdings (stocks, ETFs, mutual
 funds) are priced automatically. A photographed receipt is read by Claude and posts itself as an
-expense when it can be matched unambiguously, or waits for review when it can't. Go backend, SvelteKit frontend with D3 visualizations.
+expense when it can be matched unambiguously, or waits for review when it can't. The **Ask** page
+is a chat with Claude that answers questions about all of it through read-only lookups. Go backend,
+SvelteKit frontend with D3 visualizations.
 
 It **used** to sync real accounts through the Teller API, import CSV statements, and scrape bank
 notification emails out of Gmail. That code is not deleted — it lives in `_deprecated/`, which the
@@ -158,6 +160,7 @@ internal/quotes/          price Provider interface + Yahoo client (network, no D
 internal/prices/          Refresher: decides when a price is stale, fetches, saves, backs off
 internal/vision/          receipt Extractor interface + Anthropic Messages API client (network, no DB)
 internal/receipts/        Decide (pure: extraction -> post or hold) + Processor (claim, read, finish)
+internal/assistant/       the Ask chat: streaming Messages API client, read-only ledger tools, the tool loop
 internal/ledger/          every read and write against the ledger
 internal/scheduler/       posts due recurring items, refreshes prices, snapshots net worth
 internal/handlers/        HTTP layer
@@ -350,6 +353,42 @@ nothing about accounts. The schema (`output_config.format`, a byte-stable const 
 `vision/anthropic.go`) constrains shape only; `Decide` cleans and bounds every string and matches
 every id against the household's own lists. Categories are never put in the schema as an enum.
 
+## The Assistant (Ask)
+
+`/chat` (**Ask** in the top bar, first under More on phones) is a conversation with Claude about the
+household's money. It is **read-only by design**: the model gets nine tools in
+`internal/assistant/tools.go` (accounts, categories, transaction search, `spending_breakdown`,
+budget month, goals, recurring, investments, net worth history), each a thin wrapper over a ledger
+method the pages already use, so its numbers are the pages' numbers. `ledger.SpendingBreakdown`
+is the one query added for it: totals grouped by category/merchant/month/week/account, with the
+same kind rules as the dashboard (refunds net against spending; transfers and trades never count).
+Tool results over 80 KB are refused with a "narrow it" hint rather than truncated — a cut-off
+list would be summed as if complete.
+
+- **Transport.** Raw HTTP like `vision`, but **streamed** (`assistant/anthropic.go` rebuilds each
+  content block from SSE deltas). `POST /api/chats/{id}/messages` answers as server-sent events
+  (`text`, `tool`, `done`, `error`) and lifts the 15s `WriteTimeout` for that response through
+  `http.ResponseController` — which is why `middleware.statusWriter` has `Unwrap`; without it the
+  stream dies mid-answer (`handlers/chat_test.go` guards this). A `: ping` comment every 15s and
+  `X-Accel-Buffering: no` keep the nginx in front from buffering or idling it out.
+- **Storage.** `chats.messages` is the Messages API transcript **verbatim** — thinking blocks
+  (with signatures), tool calls and tool results — replayed as-is each turn and only ever appended
+  to. A turn is saved only once it finishes, guarded by the transcript length it was built on
+  (`ErrChatChanged` if two devices answer the same chat at once); a failed turn saves nothing and
+  the app puts the question back in the box. What the app shows is derived on read
+  (`assistant.Display`). Chats with no messages (first question failed) aren't listed.
+- **Request.** `CHAT_MODEL` (default `claude-opus-5`), adaptive thinking at effort `medium`,
+  `fallbacks: "default"` (after a mid-answer fallback, `replayable` drops the declined model's
+  thinking/tool blocks before the `fallback` marker, as the API requires), top-level
+  `cache_control` so the fixed system prompt + tools + history are cached across rounds. The
+  system prompt and tool list are **constants** — anything that varies (today's date, in the
+  household's timezone) goes in the user turn as its own text block, so the cache holds.
+- **Rendering.** `src/lib/markdown.ts` is a small escape-first renderer (paragraphs, lists, tables,
+  bold/italic/code; no links or images). Model text can quote what the family typed, so never feed
+  it to `{@html}` any other way.
+- Enabled whenever `ANTHROPIC_API_KEY` is set (independent of `RECEIPTS_PROVIDER`); otherwise
+  `GET /api/chats` reports `enabled: false` and the page says so.
+
 ## Migrations
 
 `internal/database/migrations/NNN_snake_case.{up,down}.sql`, embedded and applied at every boot.
@@ -370,6 +409,7 @@ the `interest` transaction source.
 `016_goal_kinds` adds `goals.month` (monthly goals) and `goal_plans` (long-term monthly shares by
 month), replacing `goals.monthly_amount`: a goal whose monthly amount equalled its target became a
 monthly goal for the month after it was created; any other became a plan starting that month.
+`017_chats` adds `chats` (the assistant's conversations; `messages` is the raw API transcript).
 
 ## Conventions
 
@@ -418,7 +458,8 @@ monthly goal for the month after it was created; any other became a plan startin
   or `none`), `QUOTES_MARKET_TTL`, `RECEIPTS_PROVIDER` (`none` default, or `anthropic`),
   `ANTHROPIC_API_KEY` (required with `anthropic`), `ANTHROPIC_WORKSPACE_ID` (`wrkspc_…`, sent as
   `anthropic-workspace-id`; needed only when the key isn't scoped to one workspace — the API 400s
-  without it), `RECEIPTS_MODEL` (default `claude-opus-5`)
+  without it), `RECEIPTS_MODEL` (default `claude-opus-5`), `CHAT_MODEL` (default `claude-opus-5`;
+  the assistant is on whenever `ANTHROPIC_API_KEY` is set)
 
 ## Auth
 

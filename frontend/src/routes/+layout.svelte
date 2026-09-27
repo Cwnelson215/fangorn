@@ -11,10 +11,11 @@
 	let authChecked = $state(false);
 	let isLoginPage = $derived(page.url.pathname === '/login');
 
-	type Icon = 'leaf' | 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear' | 'chevron' | 'trend';
+	type Icon = 'leaf' | 'home' | 'list' | 'plus' | 'target' | 'menu' | 'wallet' | 'chart' | 'receipt' | 'swap' | 'repeat' | 'tag' | 'phone' | 'camera' | 'gear' | 'chevron' | 'trend' | 'chat';
 
 	const NAV: { href: string; label: string; icon: Icon }[] = [
 		{ href: '/', label: 'Dashboard', icon: 'home' },
+		{ href: '/chat', label: 'Ask', icon: 'chat' },
 		{ href: '/accounts', label: 'Accounts', icon: 'wallet' },
 		{ href: '/investments', label: 'Investments', icon: 'chart' },
 		{ href: '/whatif', label: 'What if', icon: 'trend' },
@@ -27,7 +28,7 @@
 	];
 
 	// On a wider screen the pages are grouped into three menus instead of nine
-	// links in a row. Dashboard stays a plain link; Settings is the gear.
+	// links in a row. Dashboard and Ask stay plain links; Settings is the gear.
 	type NavItem = (typeof NAV)[number];
 	const pick = (href: string, label?: string): NavItem => {
 		const item = NAV.find((n) => n.href === href)!;
@@ -219,6 +220,8 @@
 			/>
 		{:else if name === 'phone'}
 			<rect x="6" y="2" width="12" height="20" rx="2.5" /><path d="M11 18h2" />
+		{:else if name === 'chat'}
+			<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12zM8.5 12h.01M12 12h.01M15.5 12h.01" />
 		{:else if name === 'tag'}
 			<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 7.5h.01" />
 		{/if}
@@ -235,6 +238,7 @@
 			<a class="nav-brand" href="/">{@render glyph('leaf')}Fangorn</a>
 			<div class="nav-links">
 				<a href="/" class:active={isActive('/')}>Dashboard</a>
+				<a href="/chat" class:active={isActive('/chat')}>Ask</a>
 				{#each GROUPS as group (group.id)}
 					<div class="menu-wrap" data-menu onfocusout={onMenuFocusout}>
 						<button

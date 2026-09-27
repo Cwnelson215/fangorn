@@ -17,6 +17,7 @@ import (
 	_ "time/tzdata"
 
 	fangorn "github.com/cwnelson/fangorn"
+	"github.com/cwnelson/fangorn/internal/assistant"
 	"github.com/cwnelson/fangorn/internal/config"
 	"github.com/cwnelson/fangorn/internal/database"
 	"github.com/cwnelson/fangorn/internal/handlers"
@@ -84,11 +85,22 @@ func main() {
 	}
 	receiptProc := receipts.New(svc, extractor)
 
+	// The assistant answers questions about the ledger. It needs only the API
+	// key, and is off (hidden in the app) without one.
+	var chatAssistant *assistant.Assistant
+	if cfg.AnthropicAPIKey != "" {
+		chatAssistant = assistant.New(svc, cfg.AnthropicAPIKey, cfg.AnthropicWorkspaceID, cfg.ChatModel)
+		log.Printf("Assistant answers with %s", cfg.ChatModel)
+	} else {
+		log.Println("Assistant disabled (no ANTHROPIC_API_KEY)")
+	}
+
 	authH := handlers.NewAuthHandler(cfg.AppPassword)
 	ledgerH := handlers.NewLedgerHandler(svc, refresher, householdID)
 	investmentH := handlers.NewInvestmentHandler(svc, refresher, householdID)
 	receiptH := handlers.NewReceiptHandler(svc, receiptProc, householdID)
 	shortcutH := handlers.NewShortcutHandler(svc, receiptH, householdID)
+	chatH := handlers.NewChatHandler(svc, chatAssistant, householdID)
 
 	mux := http.NewServeMux()
 
@@ -102,6 +114,7 @@ func main() {
 	investmentH.Register(mux)
 	receiptH.Register(mux)
 	shortcutH.Register(mux)
+	chatH.Register(mux)
 
 	// The scheduler posts recurring items, refreshes prices and snapshots net
 	// worth. It runs a pass immediately on boot, which is what backfills anything

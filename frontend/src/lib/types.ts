@@ -651,3 +651,21 @@ export interface DeviceKeyCreated {
 	key: DeviceKey;
 	token: string;
 }
+
+// ---------------------------------------------------------------------------
+// assistant
+// ---------------------------------------------------------------------------
+
+export interface Chat {
+	id: number;
+	title: string;
+	created_at: string;
+	updated_at: string;
+}
+
+/** One bubble in a conversation. Tools lists what was looked up for an answer. */
+export interface ChatMessage {
+	role: 'user' | 'assistant';
+	text: string;
+	tools?: string[];
+}
