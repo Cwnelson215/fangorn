@@ -43,6 +43,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/accounts/{id}", h.DeleteAccount)
 	mux.HandleFunc("POST /api/accounts/{id}/archive", h.ArchiveAccount)
 	mux.HandleFunc("POST /api/accounts/{id}/unarchive", h.UnarchiveAccount)
+	mux.HandleFunc("POST /api/accounts/{id}/drop-balance", h.DropBalance)
 	mux.HandleFunc("GET /api/accounts/{id}/savings", h.SavingsOutlook)
 	mux.HandleFunc("POST /api/accounts/{id}/rates", h.AddSavingsRate)
 	mux.HandleFunc("DELETE /api/accounts/{id}/rates/{rateID}", h.DeleteSavingsRate)
@@ -224,6 +225,26 @@ func (h *LedgerHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DropBalance zeroes an account's cash without recording where it went.
+func (h *LedgerHandler) DropBalance(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	var in struct {
+		Date string `json:"date"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	t, err := h.svc.DropBalance(r.Context(), h.householdID, id, in.Date)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, t)
 }
 
 func (h *LedgerHandler) ArchiveAccount(w http.ResponseWriter, r *http.Request) {

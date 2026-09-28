@@ -76,6 +76,17 @@ own money is neither earning nor spending it. Mutations go through `ledger.Creat
 `UpdateTransfer` / `DeleteTransfer`, which operate on the whole group in one transaction. Editing a
 single leg through `/api/transactions` is rejected; deleting one leg deletes both.
 
+**Closing an account** is the "Close this account" card on its page (`CloseAccountCard.svelte`).
+*Remove remaining balance* records a transfer of the cash balance to (or, for a debt or overdraft,
+from) another account, so net worth doesn't drop by money that only moved; securities have to be
+sold first. Picking **No account — drop it** (after a second confirmation) calls
+`ledger.DropBalance` instead: one `kind = 'adjustment'` row for −cash, uncategorized, which changes
+the balance and net worth and nothing else — no income/spending total lists that kind, and the
+savings shortfall excludes it explicitly. Adjustments can't be edited. *Delete account* asks for the institution to be typed (the name if none is recorded;
+case and spacing ignored, `lib/closeAccount.ts`) and cascades the account's own rows, but the
+other leg of each of its transfers stays on the surviving account — its balance is still true —
+and lists with the missing side as `ledger.DeletedAccountName`.
+
 **3. A trade is a `trades` row plus a cash leg.** In an `investment` or `retirement` account, a buy or sell also
 writes one `kind = 'trade'` transaction on the same account (`transactions.trade_id`, composite FK
 so it can't sit on another account). Cash therefore stays `starting_balance + SUM(amount)`, and
@@ -410,6 +421,7 @@ the `interest` transaction source.
 month), replacing `goals.monthly_amount`: a goal whose monthly amount equalled its target became a
 monthly goal for the month after it was created; any other became a plan starting that month.
 `017_chats` adds `chats` (the assistant's conversations; `messages` is the raw API transcript).
+`018_adjustments` adds the `adjustment` transaction kind (a dropped balance; any sign, no category).
 
 ## Conventions
 

@@ -37,7 +37,8 @@ export type Kind = 'income' | 'expense' | 'transfer';
  * already spent in — positive like income, but it reduces that category's
  * spending rather than adding to what the household earned.
  */
-export type TransactionKind = Kind | 'trade' | 'refund';
+/** adjustment: a balance dropped when closing an account — not income or spending. */
+export type TransactionKind = Kind | 'trade' | 'refund' | 'adjustment';
 export type CategoryKind = 'income' | 'expense';
 
 export type Frequency =

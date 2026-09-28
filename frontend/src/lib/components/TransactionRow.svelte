@@ -17,9 +17,10 @@
 	let isTransfer = $derived(transaction.kind === 'transfer');
 	let isTrade = $derived(transaction.kind === 'trade');
 	let isRefund = $derived(transaction.kind === 'refund');
-	// Transfers and trades move money without earning or spending it, so neither
-	// is coloured like income or an expense.
-	let isNeutral = $derived(isTransfer || isTrade);
+	let isAdjustment = $derived(transaction.kind === 'adjustment');
+	// Transfers, trades and dropped balances move money without earning or
+	// spending it, so none is coloured like income or an expense.
+	let isNeutral = $derived(isTransfer || isTrade || isAdjustment);
 	let isIncome = $derived(transaction.amount > 0 && !isNeutral);
 	let isExpense = $derived(transaction.amount < 0 && !isNeutral);
 </script>
@@ -45,6 +46,8 @@
 			<span class="tag transfer">Transfer</span>
 		{:else if isTrade}
 			<span class="tag trade">Trade</span>
+		{:else if isAdjustment}
+			<span class="tag">Balance dropped</span>
 		{:else if isRefund}
 			<!-- A refund reads as money in, so the tag has to say which spending it
 			     came back from or the row looks like a windfall. -->

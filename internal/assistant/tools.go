@@ -75,7 +75,8 @@ var tools = []tool{
 		name: "search_transactions",
 		description: "Individual transactions, newest first, matching every filter given. " +
 			"Amounts are signed relative to the account: positive is money in, negative money out. " +
-			"kind is income, expense, refund, transfer or trade. A transfer appears as two rows, one per account. " +
+			"kind is income, expense, refund, transfer, trade or adjustment (a balance dropped when closing an account; " +
+			"neither spending nor income). A transfer appears as two rows, one per account. " +
 			"Returns at most `limit` rows (default 50, max 200) and says whether more matched; " +
 			"to total money over many transactions use spending_breakdown instead of adding these up.",
 		schema: `{"type":"object","properties":{
@@ -83,7 +84,7 @@ var tools = []tool{
 			"to":{"type":"string","description":"Last date, YYYY-MM-DD, inclusive."},
 			"account_id":{"type":"integer"},
 			"category_id":{"type":"integer"},
-			"kind":{"type":"string","enum":["income","expense","refund","transfer","trade"]},
+			"kind":{"type":"string","enum":["income","expense","refund","transfer","trade","adjustment"]},
 			"search":{"type":"string","description":"Case-insensitive text matched against description and merchant."},
 			"limit":{"type":"integer","minimum":1,"maximum":200}
 		},"additionalProperties":false}`,

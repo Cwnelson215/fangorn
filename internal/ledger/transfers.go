@@ -21,6 +21,10 @@ import (
 // Income and expense totals exclude kind = 'transfer' so moving your own money
 // never registers as earning or spending it.
 
+// DeletedAccountName stands in for the side of a transfer whose account was
+// deleted.
+const DeletedAccountName = "Deleted account"
+
 const transferSelect = `
 	SELECT t.transfer_group_id,
 	       MIN(t.date) AS date,
@@ -55,8 +59,16 @@ func scanTransfer(rows interface{ Scan(...any) error }) (models.Transfer, error)
 	if toID.Valid {
 		tr.ToAccountID = int(toID.Int64)
 	}
-	tr.FromAccount = fromName.String
-	tr.ToAccount = toName.String
+	// Deleting an account takes its legs with it but leaves the other side on
+	// the account that still exists, so its balance stays true. The missing
+	// side is named rather than left blank.
+	tr.FromAccount, tr.ToAccount = fromName.String, toName.String
+	if !fromName.Valid {
+		tr.FromAccount = DeletedAccountName
+	}
+	if !toName.Valid {
+		tr.ToAccount = DeletedAccountName
+	}
 	return tr, nil
 }
 

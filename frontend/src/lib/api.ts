@@ -101,6 +101,9 @@ export const createAccount = (input: AccountInput) => send<Account>('POST', '/ap
 export const updateAccount = (id: number, input: AccountInput) =>
 	send<Account>('PATCH', `/api/accounts/${id}`, input);
 export const deleteAccount = (id: number) => send<void>('DELETE', `/api/accounts/${id}`);
+/** Zeroes an account's cash without recording where it went (an adjustment). */
+export const dropBalance = (id: number, date: string) =>
+	send<Transaction>('POST', `/api/accounts/${id}/drop-balance`, { date });
 export const archiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/archive`);
 export const unarchiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/unarchive`);
 

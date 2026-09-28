@@ -72,6 +72,10 @@ const (
 	// counts as negative spending, so it reduces that category's totals instead of
 	// raising what the household earned. It always carries an expense category.
 	KindRefund = "refund"
+	// KindAdjustment takes money off (or puts it back on) an account's books
+	// without earning, spending or moving it — dropping what's left in an account
+	// being closed. It changes the balance and net worth only, never a total.
+	KindAdjustment = "adjustment"
 )
 
 // CategoryKindFor reports which category kind a transaction of this kind must

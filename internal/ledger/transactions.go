@@ -263,6 +263,9 @@ func (s *Service) UpdateTransaction(ctx context.Context, householdID, id int, in
 	if existing.Kind == models.KindTrade {
 		return models.Transaction{}, invalid("this is the cash side of a trade; edit the trade from its account page")
 	}
+	if existing.Kind == models.KindAdjustment {
+		return models.Transaction{}, invalid("a dropped balance can't be edited")
+	}
 
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE transactions SET

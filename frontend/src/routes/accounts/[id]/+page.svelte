@@ -27,6 +27,7 @@
 	import PayoffCard from '$lib/components/PayoffCard.svelte';
 	import DonutChart from '$lib/components/DonutChart.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import CloseAccountCard from '$lib/components/CloseAccountCard.svelte';
 	import { monthlyInflow } from '$lib/projection';
 
 	// Prices are refreshed server-side at most once a minute during market hours,
@@ -333,6 +334,8 @@
 				</div>
 			{/if}
 		</div>
+
+		<CloseAccountCard {account} holdingsValue={holdings?.holdings_value ?? 0} onchanged={load} />
 
 		{#if isInvestment}
 			<TradeModal {accountId} trade={editingTrade} bind:open={tradeModalOpen} onsaved={load} />

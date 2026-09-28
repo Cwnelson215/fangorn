@@ -83,7 +83,7 @@ func (s *Service) savingsShortfallFor(ctx context.Context, householdID int, mont
 	var m incomeAccountMonth
 	err = s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.kind = 'income'), 0),
-		        COALESCE(-SUM(t.amount) FILTER (WHERE t.kind <> 'income'), 0),
+		        COALESCE(-SUM(t.amount) FILTER (WHERE t.kind NOT IN ('income','adjustment')), 0),
 		        COALESCE(-SUM(t.amount) FILTER (
 		          WHERE t.kind = 'transfer' AND t.amount < 0 AND EXISTS (
 		            SELECT 1 FROM transactions o
