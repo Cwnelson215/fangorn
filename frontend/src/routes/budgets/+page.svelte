@@ -14,6 +14,7 @@
 		getGoals,
 		getSettings,
 		reopenGoal,
+		reorderGoals,
 		setBudget,
 		stopBudget,
 		updateGoal,
@@ -361,6 +362,21 @@
 		}
 	}
 
+	// Swap a goal with its neighbour in a list shown in priority order. Money
+	// added to an account fills its goals top to bottom.
+	async function moveGoal(ids: number[], index: number, by: -1 | 1) {
+		const j = index + by;
+		if (j < 0 || j >= ids.length) return;
+		const next = [...ids];
+		[next[index], next[j]] = [next[j], next[index]];
+		try {
+			await reorderGoals(next);
+			await load();
+		} catch (e) {
+			loadError = e instanceof Error ? e.message : 'Could not reorder the goals';
+		}
+	}
+
 	// "Oct" for a month's first day, for the "Oct only" tag on a monthly goal.
 	const monthShort = (m: string) =>
 		new Date(m + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' });
@@ -519,8 +535,12 @@
 						split across the goals by their monthly amounts.
 					</p>
 				{/if}
+				<p class="muted small">
+					Money added to an account fills its goals top to bottom, each up to its share of the
+					month. Spending that dips into savings comes off the bottom first.
+				</p>
 				<div class="list">
-					{#each savings as line (line.goal_id)}
+					{#each savings as line, i (line.goal_id)}
 						{@const toGo = line.monthly_amount - line.moved}
 						<div class="item">
 							<div class="item-head">
@@ -530,22 +550,41 @@
 									{#if line.account_name}<span class="muted small">→ {line.account_name}</span>{/if}
 								</span>
 								<span class="item-actions">
+									{#if savings.length > 1}
+										<Button
+											variant="ghost"
+											size="sm"
+											label="Move up"
+											disabled={i === 0}
+											onclick={() => moveGoal(savings.map((l) => l.goal_id), i, -1)}>↑</Button
+										>
+										<Button
+											variant="ghost"
+											size="sm"
+											label="Move down"
+											disabled={i === savings.length - 1}
+											onclick={() => moveGoal(savings.map((l) => l.goal_id), i, 1)}>↓</Button
+										>
+									{/if}
 									{#if line.month}
 										<Button variant="ghost" size="sm" onclick={() => editMonthlyGoal(line.goal_id)}>
 											Edit
 										</Button>
 									{/if}
-									<Button
-										variant="ghost"
-										size="sm"
-										onclick={() =>
-											openContribute(
-												{ id: line.goal_id, name: line.name, account_id: line.account_id },
-												Math.max(0, toGo)
-											)}
-									>
-										Add money
-									</Button>
+									<!-- Income already lands where this goal's money lives; it fills by itself. -->
+									{#if !line.account_id || line.account_id !== incomeAccountId}
+										<Button
+											variant="ghost"
+											size="sm"
+											onclick={() =>
+												openContribute(
+													{ id: line.goal_id, name: line.name, account_id: line.account_id },
+													Math.max(0, toGo)
+												)}
+										>
+											Add money
+										</Button>
+									{/if}
 								</span>
 							</div>
 							<BudgetBar
@@ -674,7 +713,7 @@
 				</p>
 			{:else}
 				<div class="list">
-					{#each goals as goal (goal.id)}
+					{#each goals as goal, i (goal.id)}
 						<div class="item" class:achieved={goal.achieved}>
 							<div class="item-head">
 								<span class="item-name">
@@ -682,7 +721,23 @@
 									{#if goal.achieved}<span class="chip">Reached</span>{/if}
 								</span>
 								<span class="item-actions">
-									{#if !goal.achieved}
+									{#if goals.length > 1}
+										<Button
+											variant="ghost"
+											size="sm"
+											label="Move up"
+											disabled={i === 0}
+											onclick={() => moveGoal(goals.map((g) => g.id), i, -1)}>↑</Button
+										>
+										<Button
+											variant="ghost"
+											size="sm"
+											label="Move down"
+											disabled={i === goals.length - 1}
+											onclick={() => moveGoal(goals.map((g) => g.id), i, 1)}>↓</Button
+										>
+									{/if}
+									{#if !goal.achieved && goal.account_id !== incomeAccountId}
 										<Button variant="ghost" size="sm" onclick={() => openContribute(goal)}>
 											Add money
 										</Button>

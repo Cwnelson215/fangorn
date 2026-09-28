@@ -21,16 +21,22 @@ type incomeAccountMonth struct {
 	// going out counts: pulling money back from savings already lowers that
 	// goal's month by itself, so offsetting it here too would count it twice.
 	ToGoals float64
+	// Drained is what spending took from goals kept on the income account
+	// itself (goalFills). Those goals already show it as money gone, so it isn't
+	// charged to the others as well.
+	Drained float64
 }
 
 // savingsShortfall is how much of the month's planned savings was spent
 // instead of saved: whatever left the income account, other than the savings
 // themselves, beyond the income there was to plan on less the savings planned.
-// It can't be more than was planned.
-func savingsShortfall(m incomeAccountMonth, planOn, planned float64) float64 {
+// Goals kept on the income account are drained directly as the money is spent,
+// so this is only what reached the savings planned elsewhere — after what those
+// goals already gave up — and it can't be more than that was.
+func savingsShortfall(m incomeAccountMonth, planOn, planned, elsewhere float64) float64 {
 	spent := m.Out - m.ToGoals
-	over := spent - (planOn - planned)
-	return round2(math.Max(0, math.Min(planned, over)))
+	over := spent - (planOn - planned) - m.Drained
+	return round2(math.Max(0, math.Min(elsewhere, over)))
 }
 
 // splitShortfall charges a shortfall to the savings lines in proportion to
@@ -58,13 +64,14 @@ func splitShortfall(total float64, lines []models.SavingsLine) {
 
 // savingsShortfallFor fills in each savings line's share of what was spent
 // from savings this month. It needs an income account to measure against; with
-// none chosen there's nothing to say.
+// none chosen there's nothing to say. Lines for goals on the income account
+// take no share: their Moved already went down (see savingsShortfall).
 //
 // The income to plan on is what was received — but for the current or a future
 // month, the expected income when that's higher, since rent goes out on the 1st
 // and the paycheck lands on the 15th. A past month has had its paychecks.
 func (s *Service) savingsShortfallFor(ctx context.Context, householdID int, monthStart string, current bool,
-	expected float64, lines []models.SavingsLine) (float64, error) {
+	expected float64, lines []models.SavingsLine, fills map[int]goalFill) (float64, error) {
 	settings, err := s.GetSettings(ctx, householdID)
 	if err != nil || settings.IncomeAccountID == nil || len(lines) == 0 {
 		return 0, err
@@ -72,10 +79,17 @@ func (s *Service) savingsShortfallFor(ctx context.Context, householdID int, mont
 	incomeAccount := *settings.IncomeAccountID
 
 	var goalAccounts []int64
-	var planned float64
-	for _, l := range lines {
+	var planned, elsewhere, drained float64
+	var charged []int
+	for i, l := range lines {
 		planned += l.Monthly
-		if l.AccountID != nil && *l.AccountID != incomeAccount {
+		if l.AccountID != nil && *l.AccountID == incomeAccount {
+			drained += fills[l.GoalID].DrainedIn(monthStart)
+			continue
+		}
+		elsewhere += l.Monthly
+		charged = append(charged, i)
+		if l.AccountID != nil {
 			goalAccounts = append(goalAccounts, int64(*l.AccountID))
 		}
 	}
@@ -102,7 +116,15 @@ func (s *Service) savingsShortfallFor(ctx context.Context, householdID int, mont
 	if current && expected > planOn {
 		planOn = expected
 	}
-	total := savingsShortfall(m, planOn, planned)
-	splitShortfall(total, lines)
+	m.Drained = drained
+	total := savingsShortfall(m, planOn, planned, elsewhere)
+	shares := make([]models.SavingsLine, len(charged))
+	for j, i := range charged {
+		shares[j] = lines[i]
+	}
+	splitShortfall(total, shares)
+	for j, i := range charged {
+		lines[i].Overspent = shares[j].Overspent
+	}
 	return total, nil
 }

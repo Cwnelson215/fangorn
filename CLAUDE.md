@@ -165,6 +165,7 @@ internal/config/          env -> Config
 internal/database/        Connect, RunMigrations, embedded migrations/
 internal/models/          domain types + the enum constants; ClassForType
 internal/recurring/       PURE date engine — no DB, no clock. The best-tested code here.
+internal/goalfill/        PURE goal fill/drain replay — which goals on an account hold how much of its money
 internal/interest/        PURE monthly interest for high-yield savings — month-end balance × day-weighted rate
 internal/portfolio/       PURE trade-log math — replay, average cost, cent rounding, daily value series
 internal/quotes/          price Provider interface + Yahoo client (network, no DB)
@@ -205,25 +206,44 @@ no "over" (`incomePace` in `lib/budget.ts`). The dashboard's budget widget shows
 
 **The monthly flow:** income lands in one account (`households.income_account_id`, "Income lands
 in" on the budgets page, `GET/PUT /api/settings`) — `/add` switches to it for Money in, unless the
-income category names its own account. From there it's distributed to savings goals. A goal's
-target is how much to **add**, not a balance to reach: progress (`goalSelect`) is the money moved
-into its account since `started_on` (`goalMoney`) — transfers in less transfers out, plus income
-deposited there directly; interest and money market dividends (`source = 'interest'`) and market
-growth don't count.
+income category names its own account. A goal's target is how much to **add**, not a balance to
+reach.
 
-Goals come in **two kinds**. A **long-term** goal counts from `started_on`; its share of each
+**Goals share accounts by priority.** Every goal has a `priority` (1 first; one order per household,
+set with the ↑/↓ buttons, `PUT /api/goals/order`, which keeps the goals in the places they held among
+the rest). A linked goal's progress is its share of the account's money, worked out by replaying the
+account (`internal/goalfill`, pure, in cents; `ledger.goalFills` loads it):
+
+- Money **added** — a transfer in, or income there other than interest (`goalMoney`) — fills the
+  account's open goals in priority order, each up to what is left of its **share of that month** (a
+  monthly goal's target; a long-term goal's plan in force, none without one), never past its target.
+  Off the income account, what's left then fills the goals up to their targets in the same order
+  (money moved into savings is being saved); **on the income account it stays free** for the bills,
+  so a paycheck landing there sets aside each goal's month and no more.
+- Any other money in — the starting balance, interest, refunds, money from before a goal started —
+  is **free**. Trades count neither way (the cash is still in the account as shares).
+- Money **leaving** comes out of free money first; only past that does it come off the goals,
+  **lowest priority first**. Within a day money in counts before money out, so a paycheck and a bill
+  on the same date don't dip into savings.
+- A monthly goal closes with its month: what it held then is what it saved, and its money becomes
+  free. A reached goal takes no more but keeps what it holds.
+
+Nothing is stored: `goalSelect` leaves `saved` at 0 for linked goals and `withFills` /
+`savingsLines` fill it in, so editing or deleting any transaction just replays. Goals come in **two
+kinds**. A **long-term** goal counts from `started_on`; its share of each
 month's budget is a plan versioned by month in `goal_plans` (`effective_from`, like budgets; a NULL
 amount stops it), set with `setGoalPlan`: saving what's already in force writes nothing, and a
 change applies "from here on", dropping later rows. A **monthly** goal has `goals.month` set: it
 applies to that month only, counts only money added inside it, closes with the month, and its
 target is the month's amount. `ListGoals` (the Long-term Goals card and the dashboard) returns
-long-term goals only; monthly goals are created and edited from the month's Savings section
-(`GET /api/goals/{id}` fetches one). A goal can't switch kinds. Each month's Savings lines
-(`BudgetMonth.savings`, `moved` = that month's money added) are the long-term goals whose plan in
-force has an amount plus the monthly goals for that month. "Add money" on the
-line is a real transfer from the income account, so one action fills the month and the goal; a
-transfer made anywhere else counts the same way. A goal with no account still takes hand-logged
-`goal_contributions`.
+long-term goals only, in priority order; monthly goals are created and edited from the month's
+Savings section (`GET /api/goals/{id}` fetches one). A goal can't switch kinds. Each month's Savings
+lines (`BudgetMonth.savings`, in priority order, `moved` = that month's change in what the goal
+holds) are the long-term goals whose plan in force has an amount plus the monthly goals for that
+month. "Add money" on the line is a real transfer from the income account into the goal's account —
+which then fills that account's goals in order, so on a shared account it isn't aimed at one goal —
+and is hidden for goals on the income account, which fill from income by themselves. A goal with no
+account still takes hand-logged `goal_contributions`.
 
 **Spending from savings.** When more leaves the income account in a month than the income there was
 to plan on less the savings planned, the difference was money meant for savings
@@ -233,7 +253,10 @@ that goal's month, so counting it again would double it. For the current month t
 on is the higher of expected and received (rent goes out before the paycheck lands); a past month
 uses what was received. The shortfall is capped at what was planned, split across the lines by
 monthly amount (`overspent`, the last line taking the rounding), and lowers the month only — the
-goal's overall progress still moves only when money moves in or out of its account.
+goal's overall progress still moves only when money moves in or out of its account. Goals kept **on
+the income account** take no share: spending that reaches their money already drained them, so
+what they lost that month (`goalFill.DrainedIn`) is taken off the shortfall before it's charged to
+the goals planned elsewhere.
 
 ## The Recurring Engine
 
@@ -422,6 +445,8 @@ month), replacing `goals.monthly_amount`: a goal whose monthly amount equalled i
 monthly goal for the month after it was created; any other became a plan starting that month.
 `017_chats` adds `chats` (the assistant's conversations; `messages` is the raw API transcript).
 `018_adjustments` adds the `adjustment` transaction kind (a dropped balance; any sign, no category).
+`019_goal_priority` adds `goals.priority` (existing goals numbered in the order the list showed them,
+monthly goals after).
 
 ## Conventions
 

@@ -12,9 +12,10 @@ import (
 )
 
 // goalMoney is which of a goal account's transactions count as money added:
-// transfers in and out, and income deposited there directly — but not interest
-// or money market dividends (source 'interest'), which the account earned by
-// itself, and not market growth, which isn't a transaction at all.
+// transfers in, and income deposited there directly — but not interest or money
+// market dividends (source 'interest'), which the account earned by itself, and
+// not market growth, which isn't a transaction at all. Only its positive rows
+// matter; everything leaving the account is replayed the same way.
 const goalMoney = `(t.kind = 'transfer' OR (t.kind = 'income' AND t.source <> 'interest'))`
 
 // A goal's target is how much to ADD, not a balance to reach. There are two
@@ -22,10 +23,12 @@ const goalMoney = `(t.kind = 'transfer' OR (t.kind = 'income' AND t.source <> 'i
 // (goals.month set) counts only inside its month. Progress comes from one of two
 // places depending on how the goal is set up:
 //
-//   - Linked to an account: the money added to that account in the goal's
-//     window (goalMoney) — transfers in less transfers out, plus income
-//     deposited there. Distributing income from the income account to savings
-//     is a transfer, so the goal tracks itself.
+//   - Linked to an account: its share of that account's money, from replaying
+//     the account against every goal linked to it (goalFills, internal/goalfill).
+//     Money added fills the goals in priority order, and money leaving comes off
+//     the lowest priority first once the account's free money runs out. So
+//     several goals can share an account, including the one income lands in.
+//     goalSelect leaves saved at 0 for these; withFills fills it in.
 //   - Unlinked: the sum of explicit contributions, for goals spread across
 //     accounts or held partly in cash.
 //
@@ -35,14 +38,7 @@ const goalSelect = `
 	SELECT g.id, g.name, g.target_amount, g.target_date, g.account_id, a.name AS account_name,
 	       g.notes, g.achieved_at IS NOT NULL AS achieved,
 	       CASE
-	         WHEN g.account_id IS NOT NULL
-	           THEN COALESCE((
-	                  SELECT SUM(t.amount) FROM transactions t
-	                  WHERE t.household_id = g.household_id AND t.account_id = g.account_id
-	                    AND ` + goalMoney + `
-	                    AND t.date >= COALESCE(g.month, g.started_on)
-	                    AND (g.month IS NULL OR t.date < g.month + INTERVAL '1 month')
-	                ), 0)
+	         WHEN g.account_id IS NOT NULL THEN 0
 	         ELSE COALESCE((
 	                SELECT SUM(gc.amount) FROM goal_contributions gc
 	                WHERE gc.goal_id = g.id
@@ -50,7 +46,8 @@ const goalSelect = `
 	                       OR (gc.date >= g.month AND gc.date < g.month + INTERVAL '1 month'))
 	              ), 0)
 	       END AS saved,
-	       g.started_on, p.amount AS monthly_amount, p.effective_from AS monthly_from, g.month
+	       g.started_on, p.amount AS monthly_amount, p.effective_from AS monthly_from, g.month,
+	       g.priority
 	FROM goals g
 	LEFT JOIN accounts a ON a.id = g.account_id
 	LEFT JOIN LATERAL (
@@ -68,7 +65,7 @@ func scanGoal(rows interface{ Scan(...any) error }) (models.Goal, error) {
 	var monthlyFrom, month sql.NullTime
 
 	err := rows.Scan(&g.ID, &g.Name, &g.TargetAmount, &targetDate, &accountID,
-		&accountName, &notes, &g.Achieved, &g.Saved, &startedOn, &monthly, &monthlyFrom, &month)
+		&accountName, &notes, &g.Achieved, &g.Saved, &startedOn, &monthly, &monthlyFrom, &month, &g.Priority)
 	if err != nil {
 		return g, err
 	}
@@ -92,7 +89,7 @@ func scanGoal(rows interface{ Scan(...any) error }) (models.Goal, error) {
 func (s *Service) ListGoals(ctx context.Context, householdID int) ([]models.Goal, error) {
 	rows, err := s.db.QueryContext(ctx,
 		goalSelect+` WHERE g.household_id = $1 AND g.month IS NULL
-		 ORDER BY g.achieved_at IS NOT NULL, g.target_date NULLS LAST, g.name`,
+		 ORDER BY g.achieved_at IS NOT NULL, g.priority, g.id`,
 		householdID)
 	if err != nil {
 		return nil, fmt.Errorf("listing goals: %w", err)
@@ -107,7 +104,24 @@ func (s *Service) ListGoals(ctx context.Context, householdID int) ([]models.Goal
 		}
 		out = append(out, g)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, s.withFills(ctx, householdID, out)
+}
+
+// withFills sets Saved on the goals linked to an account.
+func (s *Service) withFills(ctx context.Context, householdID int, goals []models.Goal) error {
+	fills, err := s.goalFills(ctx, householdID)
+	if err != nil {
+		return err
+	}
+	for i := range goals {
+		if f, ok := fills[goals[i].ID]; ok {
+			goals[i].Saved = f.Saved
+		}
+	}
+	return nil
 }
 
 func (s *Service) GetGoal(ctx context.Context, householdID, id int) (models.Goal, error) {
@@ -121,7 +135,9 @@ func (s *Service) GetGoal(ctx context.Context, householdID, id int) (models.Goal
 	if err != nil {
 		return g, fmt.Errorf("fetching goal: %w", err)
 	}
-	return g, nil
+	one := []models.Goal{g}
+	err = s.withFills(ctx, householdID, one)
+	return one[0], err
 }
 
 type GoalInput struct {
@@ -174,7 +190,8 @@ func (s *Service) CreateGoal(ctx context.Context, householdID int, in GoalInput)
 		}
 	}
 
-	// A goal counts what's added from today, in the household's calendar.
+	// A goal counts what's added from today, in the household's calendar, and
+	// comes last in the order until moved up.
 	household, err := s.household(ctx, householdID)
 	if err != nil {
 		return models.Goal{}, err
@@ -189,8 +206,10 @@ func (s *Service) CreateGoal(ctx context.Context, householdID int, in GoalInput)
 	err = s.inTx(func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx,
 			`INSERT INTO goals (household_id, name, target_amount, target_date, account_id, notes,
-			                    started_on, month)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+			                    started_on, month, priority)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+			         (SELECT COALESCE(MAX(priority), 0) + 1 FROM goals WHERE household_id = $1))
+			 RETURNING id`,
 			householdID, in.Name, in.TargetAmount, nullStr(in.TargetDate),
 			nullInt(in.AccountID), nullStr(in.Notes), today.Format(models.DateOnly), nullStr(month),
 		).Scan(&id); err != nil {
@@ -306,6 +325,63 @@ func setGoalPlan(ctx context.Context, tx *sql.Tx, goalID int, from string, amoun
 		return fmt.Errorf("saving goal plan: %w", err)
 	}
 	return nil
+}
+
+// ReorderGoals puts the given goals in the given order, first = highest
+// priority. The goals keep the places they already held among the household's
+// goals — so reordering one month's savings lines, or just the long-term goals,
+// leaves every other goal where it was — and the whole order is renumbered.
+func (s *Service) ReorderGoals(ctx context.Context, householdID int, ids []int) error {
+	if len(ids) == 0 {
+		return invalid("ids is required")
+	}
+	moving := map[int]bool{}
+	for _, id := range ids {
+		if moving[id] {
+			return invalid("goal %d is listed twice", id)
+		}
+		moving[id] = true
+	}
+	return s.inTx(func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx,
+			`SELECT id FROM goals WHERE household_id = $1 ORDER BY priority, id FOR UPDATE`, householdID)
+		if err != nil {
+			return fmt.Errorf("loading goal order: %w", err)
+		}
+		var order []int
+		for rows.Next() {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return fmt.Errorf("scanning goal order: %w", err)
+			}
+			order = append(order, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		found, next := 0, 0
+		for i, id := range order {
+			if moving[id] {
+				order[i] = ids[next]
+				next++
+				found++
+			}
+		}
+		if found != len(ids) {
+			return ErrNotFound
+		}
+		for i, id := range order {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE goals SET priority = $1 WHERE household_id = $2 AND id = $3`,
+				i+1, householdID, id); err != nil {
+				return fmt.Errorf("saving goal order: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Service) SetGoalAchieved(ctx context.Context, householdID, id int, achieved bool) error {

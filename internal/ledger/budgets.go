@@ -57,7 +57,7 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 			unbudgeted -= b.Spent
 		}
 	}
-	savings, err := s.savingsLines(ctx, householdID, monthStart)
+	savings, fills, err := s.savingsLines(ctx, householdID, monthStart)
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
@@ -68,7 +68,7 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 		}
 	}
 	thisMonth := today.Format("2006-01") + "-01"
-	shortfall, err := s.savingsShortfallFor(ctx, householdID, monthStart, monthStart >= thisMonth, expected, savings)
+	shortfall, err := s.savingsShortfallFor(ctx, householdID, monthStart, monthStart >= thisMonth, expected, savings, fills)
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
@@ -85,12 +85,12 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 
 // savingsLines is the month's savings: each open long-term goal whose plan in
 // force that month (goal_plans, newest row on or before it) has an amount, and
-// each monthly goal belonging to the month, whose amount is its whole target.
-// Moved is what went toward it inside the month — money added to its account
-// (goalMoney; for a long-term goal only from the day it started), or
+// each monthly goal belonging to the month, whose amount is its whole target,
+// in priority order. Moved is what the goal's share of its account changed by
+// inside the month (goalFills: money added less money drained back out), or
 // contributions for a goal with no account. A transfer counts toward the month
 // and the goal alike, so "Add money" on the budgets page is one transfer.
-func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart string) ([]models.SavingsLine, error) {
+func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart string) ([]models.SavingsLine, map[int]goalFill, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`WITH g AS (`+goalSelect+` WHERE g.household_id = $1
 		              AND (g.month = $2::date OR (g.month IS NULL AND g.achieved_at IS NULL))),
@@ -102,12 +102,7 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 		 SELECT g.id, g.name, g.month, g.account_id, g.account_name,
 		        CASE WHEN g.month IS NOT NULL THEN g.target_amount ELSE plan.amount END,
 		        g.target_amount, g.saved,
-		        CASE WHEN g.account_id IS NOT NULL THEN COALESCE((
-		               SELECT SUM(t.amount) FROM transactions t
-		               WHERE t.household_id = $1 AND t.account_id = g.account_id AND `+goalMoney+`
-		                 AND t.date >= CASE WHEN g.month IS NULL
-		                                    THEN GREATEST(g.started_on, $2::date) ELSE $2::date END
-		                 AND t.date < ($2::date + INTERVAL '1 month')), 0)
+		        CASE WHEN g.account_id IS NOT NULL THEN 0
 		             ELSE COALESCE((
 		               SELECT SUM(gc.amount) FROM goal_contributions gc
 		               WHERE gc.goal_id = g.id
@@ -115,10 +110,10 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 		        END
 		 FROM g LEFT JOIN plan ON plan.goal_id = g.id
 		 WHERE g.month IS NOT NULL OR plan.amount IS NOT NULL
-		 ORDER BY g.month IS NULL, g.name`,
+		 ORDER BY g.priority, g.id`,
 		householdID, monthStart)
 	if err != nil {
-		return nil, fmt.Errorf("loading savings lines: %w", err)
+		return nil, nil, fmt.Errorf("loading savings lines: %w", err)
 	}
 	defer rows.Close()
 	out := []models.SavingsLine{}
@@ -129,14 +124,28 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 		var month sql.NullTime
 		if err := rows.Scan(&l.GoalID, &l.Name, &month, &accountID, &accountName, &l.Monthly, &l.Target,
 			&l.Saved, &l.Moved); err != nil {
-			return nil, fmt.Errorf("scanning savings line: %w", err)
+			return nil, nil, fmt.Errorf("scanning savings line: %w", err)
 		}
 		l.GoalMonth = dateStrPtr(month)
 		l.AccountID = intPtr(accountID)
 		l.AccountName = strPtr(accountName)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	fills, err := s.goalFills(ctx, householdID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range out {
+		if f, ok := fills[out[i].GoalID]; ok {
+			out[i].Saved = f.Saved
+			out[i].Moved = f.MovedIn(monthStart)
+		}
+	}
+	return out, fills, nil
 }
 
 // listBudgets finds, per category, the newest row whose effective_from is on or

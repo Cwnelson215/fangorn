@@ -11,6 +11,7 @@ import (
 // A linked goal counts money added to its account from the day it starts —
 // transfers and income deposited there — but not the balance already there,
 // not interest the account earned, and not money moved in before it began.
+// Money taken back out comes from that free money first.
 func TestGoalCountsMoneyMovedIn(t *testing.T) {
 	f := newFixture(t)
 	checking := f.account("Checking", models.AccountChecking, 5000)
@@ -46,7 +47,9 @@ func TestGoalCountsMoneyMovedIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	money(t, "moved in, less moved out, plus income deposited", goal.Saved, 275)
+	// $2,999 was there before it and $7.50 of interest is free: the $50
+	// withdrawal comes out of that, not the goal.
+	money(t, "moved in plus income deposited", goal.Saved, 325)
 
 	bm, err := f.svc.BudgetMonth(f.ctx, f.hh, day)
 	if err != nil {
@@ -57,8 +60,8 @@ func TestGoalCountsMoneyMovedIn(t *testing.T) {
 	}
 	line := bm.Savings[0]
 	money(t, "planned", line.Monthly, 200)
-	money(t, "moved this month", line.Moved, 275)
-	money(t, "saved overall", line.Saved, 275)
+	money(t, "moved this month", line.Moved, 325)
+	money(t, "saved overall", line.Saved, 325)
 
 	// A goal without a monthly amount isn't in the budget.
 	if _, err := f.svc.UpdateGoal(f.ctx, f.hh, goal.ID, ledger.GoalInput{
@@ -316,4 +319,112 @@ func TestMonthlyGoal(t *testing.T) {
 		Name: "Both", TargetAmount: 1000, Month: &nextYM, MonthlyAmount: &amount,
 	})
 	wantInvalid(t, err)
+}
+
+// Goals sharing the income account fill from income in priority order, each up
+// to its share of the month, and spending past the free money drains them from
+// the lowest priority up.
+func TestGoalsShareTheIncomeAccount(t *testing.T) {
+	f := newFixture(t)
+	joint := f.account("Joint", models.AccountChecking, 0)
+	pay := f.category("Pay", models.KindIncome)
+	food := f.category("Food", models.KindExpense)
+	day := ledger.Household{Timezone: "America/Denver"}.Today().Format(models.DateOnly)
+	if _, err := f.svc.UpdateSettings(f.ctx, f.hh, ledger.Settings{IncomeAccountID: &joint.ID}); err != nil {
+		t.Fatal(err)
+	}
+	five, three := 500.0, 300.0
+	var ids []int
+	for _, g := range []ledger.GoalInput{
+		{Name: "Emergency", TargetAmount: 5000, AccountID: &joint.ID, MonthlyAmount: &five},
+		{Name: "Vacation", TargetAmount: 3000, AccountID: &joint.ID, MonthlyAmount: &three},
+	} {
+		created, err := f.svc.CreateGoal(f.ctx, f.hh, g)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, created.ID)
+	}
+	saved := func() map[string][2]float64 { // saved, overspent
+		t.Helper()
+		bm, err := f.svc.BudgetMonth(f.ctx, f.hh, day)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string][2]float64{}
+		for _, l := range bm.Savings {
+			out[l.Name] = [2]float64{l.Saved, l.Overspent}
+		}
+		return out
+	}
+
+	f.txn(joint.ID, models.KindIncome, day, 600, &pay.ID)
+	got := saved()
+	money(t, "emergency first", got["Emergency"][0], 500)
+	money(t, "vacation gets the rest", got["Vacation"][0], 100)
+
+	f.txn(joint.ID, models.KindIncome, day, 3000, &pay.ID)
+	got = saved()
+	money(t, "emergency's month is full", got["Emergency"][0], 500)
+	money(t, "vacation's month is full", got["Vacation"][0], 300)
+
+	// $2,800 is free; spending $3,000 takes $200 from Vacation, the lower one.
+	f.txn(joint.ID, models.KindExpense, day, 3000, &food.ID)
+	got = saved()
+	money(t, "emergency untouched", got["Emergency"][0], 500)
+	money(t, "vacation drained", got["Vacation"][0], 100)
+	money(t, "no shortfall charged on top", got["Vacation"][1], 0)
+
+	// Swap them: now Emergency is drained first.
+	if err := f.svc.ReorderGoals(f.ctx, f.hh, []int{ids[1], ids[0]}); err != nil {
+		t.Fatal(err)
+	}
+	got = saved()
+	money(t, "vacation keeps its share now", got["Vacation"][0], 300)
+	money(t, "emergency drained instead", got["Emergency"][0], 300)
+
+	goals, err := f.svc.ListGoals(f.ctx, f.hh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(goals) != 2 || goals[0].ID != ids[1] || goals[0].Priority >= goals[1].Priority {
+		t.Errorf("goals not listed in the new order: %+v", goals)
+	}
+}
+
+// Reordering a few goals keeps them in the places they held among the rest.
+func TestReorderGoals(t *testing.T) {
+	f := newFixture(t)
+	var ids []int
+	for _, name := range []string{"A", "B", "C", "D"} {
+		g, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{Name: name, TargetAmount: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, g.ID)
+	}
+	if err := f.svc.ReorderGoals(f.ctx, f.hh, []int{ids[3], ids[1]}); err != nil {
+		t.Fatal(err)
+	}
+	goals, err := f.svc.ListGoals(f.ctx, f.hh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names string
+	for _, g := range goals {
+		names += g.Name
+	}
+	if names != "ADCB" {
+		t.Errorf("order = %s, want ADCB", names)
+	}
+
+	wantInvalid(t, f.svc.ReorderGoals(f.ctx, f.hh, []int{ids[0], ids[0]}))
+	other := newFixture(t)
+	theirs, err := other.svc.CreateGoal(other.ctx, other.hh, ledger.GoalInput{Name: "X", TargetAmount: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.ReorderGoals(f.ctx, f.hh, []int{ids[0], theirs.ID}); err != ledger.ErrNotFound {
+		t.Errorf("another household's goal: err = %v, want not found", err)
+	}
 }

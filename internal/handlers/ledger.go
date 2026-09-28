@@ -83,6 +83,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/goals", h.ListGoals)
 	mux.HandleFunc("POST /api/goals", h.CreateGoal)
+	mux.HandleFunc("PUT /api/goals/order", h.ReorderGoals)
 	mux.HandleFunc("GET /api/goals/{id}", h.GetGoal)
 	mux.HandleFunc("PATCH /api/goals/{id}", h.UpdateGoal)
 	mux.HandleFunc("DELETE /api/goals/{id}", h.DeleteGoal)
@@ -640,6 +641,22 @@ func (h *LedgerHandler) CreateGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, goal)
+}
+
+// ReorderGoals takes {"ids": [...]}, highest priority first — see
+// ledger.ReorderGoals.
+func (h *LedgerHandler) ReorderGoals(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IDs []int `json:"ids"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := h.svc.ReorderGoals(r.Context(), h.householdID, in.IDs); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GetGoal returns one goal of either kind; the list only has long-term goals.

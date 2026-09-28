@@ -7,6 +7,7 @@
 		disabled = false,
 		size = 'md',
 		onclick,
+		label,
 		children
 	}: {
 		variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -14,11 +15,13 @@
 		disabled?: boolean;
 		size?: 'sm' | 'md';
 		onclick?: (event: MouseEvent) => void;
+		/** Accessible name (and tooltip) for a button whose content is only a symbol. */
+		label?: string;
 		children: Snippet;
 	} = $props();
 </script>
 
-<button {type} {disabled} {onclick} class="btn {variant} {size}">
+<button {type} {disabled} {onclick} aria-label={label} title={label} class="btn {variant} {size}">
 	{@render children()}
 </button>
 

@@ -23,9 +23,27 @@ func TestSavingsShortfall(t *testing.T) {
 		{"nothing planned", incomeAccountMonth{Out: 9000}, 6200, 0, 0},
 	}
 	for _, c := range cases {
-		if got := savingsShortfall(c.m, c.planOn, c.planned); got != c.want {
+		if got := savingsShortfall(c.m, c.planOn, c.planned, c.planned); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// Goals on the income account are drained as the money is spent; only what's
+// left over reaches the savings planned elsewhere.
+func TestSavingsShortfallWithGoalsOnIncomeAccount(t *testing.T) {
+	// $6,200 in, $500 planned on the income account and $300 elsewhere, and
+	// $5,900 spent: $500 over the $5,400 there was to spend.
+	m := incomeAccountMonth{Out: 5900}
+	if got := savingsShortfall(m, 6200, 800, 300); got != 300 {
+		t.Errorf("nothing drained yet: got %v, want 300 (capped at what's elsewhere)", got)
+	}
+	m.Drained = 400
+	if got := savingsShortfall(m, 6200, 800, 300); got != 100 {
+		t.Errorf("$400 already drained: got %v, want 100", got)
+	}
+	if got := savingsShortfall(m, 6200, 800, 0); got != 0 {
+		t.Errorf("every goal on the income account: got %v, want 0", got)
 	}
 }
 

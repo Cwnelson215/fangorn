@@ -290,12 +290,16 @@ export interface Goal {
 	notes: string | null;
 	achieved: boolean;
 	/**
-	 * Progress toward the target, which is how much to ADD: money added to the
-	 * linked account since started_on (transfers in less out, plus income
-	 * deposited there, not interest), or contributions logged by hand when
-	 * there's no account.
+	 * Progress toward the target, which is how much to ADD: the goal's share of
+	 * the linked account's money since started_on — money added (transfers in,
+	 * income deposited there, not interest) fills the account's goals in
+	 * priority order, and money going out past the free money drains them from
+	 * the lowest priority up — or contributions logged by hand when there's no
+	 * account.
 	 */
 	saved: number;
+	/** 1 first: the order money added to an account fills its goals. */
+	priority: number;
 	started_on: string;
 	/**
 	 * Set on a monthly goal: the first of the one month it applies to (it counts

@@ -419,10 +419,14 @@ type Goal struct {
 	AccountName  *string `json:"account_name,omitempty"`
 	Notes        *string `json:"notes"`
 	Achieved     bool    `json:"achieved"`
-	// Saved is progress toward the target: for a goal linked to an account, the
-	// money moved into it since StartedOn (transfers in less transfers out);
+	// Saved is progress toward the target: for a goal linked to an account, its
+	// share of the account's money since StartedOn — money added fills goals in
+	// Priority order and money leaving drains them in reverse (internal/goalfill);
 	// otherwise the contributions logged by hand.
 	Saved float64 `json:"saved"`
+	// Priority orders the household's goals, 1 first: money added to an account
+	// fills its goals in this order.
+	Priority int `json:"priority"`
 	// StartedOn is when the goal began counting.
 	StartedOn string `json:"started_on"`
 	// Month, the first of it, makes this a monthly goal: it applies to that month
@@ -446,14 +450,16 @@ type SavingsLine struct {
 	AccountID   *int    `json:"account_id"`
 	AccountName *string `json:"account_name"`
 	Monthly     float64 `json:"monthly_amount"`
-	// Moved is what went toward the goal in the month: transfers into its
-	// account, or contributions for a goal with none.
+	// Moved is what went toward the goal in the month, net of what was drained
+	// back out of it (see Goal.Saved), or contributions for a goal with none.
 	Moved  float64 `json:"moved"`
 	Saved  float64 `json:"saved"`
 	Target float64 `json:"target_amount"`
 	// Overspent is this goal's share of the month's savings shortfall: money
 	// meant for savings that left the income account as spending instead. It
 	// lowers the month, not the goal — that money never reached its account.
+	// Always 0 for a goal on the income account itself: spending that reaches
+	// its money already lowers Moved.
 	Overspent float64 `json:"overspent"`
 }
 

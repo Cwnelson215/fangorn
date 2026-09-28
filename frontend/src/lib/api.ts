@@ -252,6 +252,8 @@ export const getSettings = () => request<Settings>('/api/settings');
 export const updateSettings = (input: Settings) => send<Settings>('PUT', '/api/settings', input);
 
 export const getGoals = () => request<Goal[]>('/api/goals');
+/** Highest priority first; the goals keep the places they held among the rest. */
+export const reorderGoals = (ids: number[]) => send<void>('PUT', '/api/goals/order', { ids });
 export const getGoal = (id: number) => request<Goal>(`/api/goals/${id}`);
 export const createGoal = (input: GoalInput) => send<Goal>('POST', '/api/goals', input);
 export const updateGoal = (id: number, input: GoalInput) =>

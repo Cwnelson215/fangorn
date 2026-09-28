@@ -72,7 +72,7 @@ How the ledger works:
 - Amounts are signed relative to their account: positive is money in, negative is money out. Credit card and loan balances are negative — that is what is owed. Net worth is the sum of every balance.
 - A transfer between the family's own accounts is not income or spending. Neither is buying or selling an investment. Totals from spending_breakdown already leave both out.
 - A refund is money back from something already bought; it reduces spending in its category rather than counting as income.
-- A savings goal's target is how much to add, not a balance to reach; its progress is money moved into its account since it started. Interest and market growth don't count toward it.
+- A savings goal's target is how much to add, not a balance to reach. Several goals can share an account: money added to it (transfers in, income deposited there) fills its goals in priority order, each up to its share of the month, and money leaving the account beyond what isn't set aside comes off the lowest-priority goal first. Interest and market growth don't count toward any goal.
 - Investment values use the latest prices the app has stored, which can be minutes or (on weekends) days old.
 
 How to answer:
