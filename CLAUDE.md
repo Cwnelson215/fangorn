@@ -122,8 +122,9 @@ reports `retirement_value`, the part of net worth that can't be spent without pe
 rate history (`savings_rates`: an APY in percent from a date; the opening rate starts on the
 account's `starting_balance_date`). Once a month is over, the scheduler posts its interest as an
 `income` transaction (`source = 'interest'`, dated the month's last day, category **Interest**,
-created if missing): month-end balance × the month's rate, each rate weighted by the days it was in
-effect. The math is pure, in `internal/interest`. Posting is idempotent like the recurring engine:
+created if missing): accrued a day at a time — each day's closing balance × the rate in effect that
+day (the APY's monthly rate ÷ the days in the month), so a deposit on the 20th earns from the 20th
+and a level balance earns exactly balance × the monthly rate. The math is pure, in `internal/interest`. Posting is idempotent like the recurring engine:
 `interest_postings` has `UNIQUE (account_id, month)`, is written in the same database transaction
 as the interest, and keeps its row when the transaction is deleted, so deleting a month's interest
 skips that month rather than reposting it. Rate changes go through `AddSavingsRate`, never the
@@ -132,7 +133,7 @@ can't change to a type that doesn't earn on cash.
 
 The same machinery gives an `investment` or `retirement` account an optional **cash yield** — the
 money market fund its uninvested cash sits in (SPAXX at Fidelity) pays a monthly dividend. It posts
-on the **cash balance only** (`cashBalanceOn`: starting balance + transactions, trade legs
+on the **cash balance only** (`dailyCashBalances`: starting balance + transactions, trade legs
 included, so holdings never earn the cash rate), described "Money market dividend" under
 **Dividends**. `models.EarnsOnCash` decides which types can keep rates; a high-yield savings account
 must keep at least one, an investment account may remove its last to turn the dividend off.
@@ -170,7 +171,7 @@ internal/database/        Connect, RunMigrations, embedded migrations/
 internal/models/          domain types + the enum constants; ClassForType
 internal/recurring/       PURE date engine — no DB, no clock. The best-tested code here.
 internal/goalfill/        PURE goal fill/drain replay — which goals on an account hold how much of its money
-internal/interest/        PURE monthly interest for high-yield savings — month-end balance × day-weighted rate
+internal/interest/        PURE monthly interest on cash — each day's balance × that day's rate
 internal/portfolio/       PURE trade-log math — replay, average cost, cent rounding, daily value series
 internal/quotes/          price Provider interface + Yahoo client (network, no DB)
 internal/prices/          Refresher: decides when a price is stale, fetches, saves, backs off

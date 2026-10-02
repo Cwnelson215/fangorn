@@ -58,6 +58,37 @@ func TestRateChangeMidMonth(t *testing.T) {
 	near(t, "blended October", ForMonth(day("2026-10-01"), 10000, rates, day("2026-01-01")), round2(want), 0.001)
 }
 
+func TestEachDayEarnsOnItsOwnBalance(t *testing.T) {
+	rates := []Rate{{From: day("2026-01-01"), APY: 4.00}}
+	// September: $1,000 until a $9,000 deposit on the 21st.
+	balances := make([]float64, 30)
+	for i := range balances {
+		balances[i] = 1000
+		if i >= 20 {
+			balances[i] = 10000
+		}
+	}
+	want := (20*1000 + 10*10000) * MonthlyRate(4.00) / 30
+	near(t, "20 days at $1,000, 10 at $10,000", ForDays(day("2026-09-01"), balances, rates, day("2026-01-01")), round2(want), 0.001)
+
+	// A balance that never moves earns what the month's rate says.
+	level := make([]float64, 30)
+	for i := range level {
+		level[i] = 10000
+	}
+	near(t, "level balance", ForDays(day("2026-09-01"), level, rates, day("2026-01-01")),
+		round2(10000*MonthlyRate(4.00)), 0.001)
+
+	// Overdrawn days earn nothing; they don't take interest back.
+	balances[0], balances[1] = -500, 0
+	want = (18*1000 + 10*10000) * MonthlyRate(4.00) / 30
+	near(t, "two days at or below zero", ForDays(day("2026-09-01"), balances, rates, day("2026-01-01")), round2(want), 0.001)
+
+	// Fewer balances than days: the missing days earn nothing.
+	near(t, "ten days of balances", ForDays(day("2026-09-01"), level[:10], rates, day("2026-01-01")),
+		round2(10*10000*MonthlyRate(4.00)/30), 0.001)
+}
+
 func TestNothingEarned(t *testing.T) {
 	rates := []Rate{{From: day("2026-01-01"), APY: 4.35}}
 	if got := ForMonth(day("2026-09-01"), 0, rates, day("2026-01-01")); got != 0 {

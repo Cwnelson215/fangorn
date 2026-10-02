@@ -1,16 +1,18 @@
-// Package interest works out a high-yield savings account's monthly interest.
-// It is pure: no database, no clock. The ledger supplies the month-end balance
-// and the account's rate history; this decides what the month earned.
+// Package interest works out a month's interest on an account's cash.
+// It is pure: no database, no clock. The ledger supplies each day's closing
+// balance and the account's rate history; this decides what the month earned.
 //
-// The method is deliberately simple and checkable by hand:
+// It accrues a day at a time, the way a bank or a money market fund does:
 //
-//	interest = month-end balance × the month's rate
+//	interest = the sum, over the month's days, of that day's balance × that day's rate
 //
-// where the month's rate is the monthly equivalent of the APY, weighted by the
-// days each rate was in effect. A rate that changes from 4.00% to 4.35% on the
-// 12th counts 11 days at 4.00% and the rest at 4.35%. Days before the first
-// rate (or before the account existed) earn nothing, which is also what makes a
-// first, partial month come out right.
+// where a day's rate is the monthly equivalent of the APY in effect that day,
+// divided by the days in the month. So a balance that never moves earns exactly
+// balance × the monthly rate, money deposited on the 20th earns from the 20th,
+// and a rate that changes from 4.00% to 4.35% on the 12th counts 11 days at
+// 4.00% and the rest at 4.35%. Days before the first rate (or before the
+// account existed) earn nothing, which is also what makes a first, partial
+// month come out right.
 package interest
 
 import (
@@ -42,35 +44,40 @@ func MonthEnd(monthStart time.Time) time.Time {
 	return monthStart.AddDate(0, 1, -1)
 }
 
-// ForMonth is the interest earned in the month starting at monthStart, on a
-// month-end balance, rounded to the cent. accruesFrom is the first day that can
-// earn anything (the account's starting-balance date). A balance at or below
-// zero earns nothing.
+// ForMonth is the interest earned in the month starting at monthStart by a
+// balance that stays the same all month, rounded to the cent.
 func ForMonth(monthStart time.Time, balance float64, rates []Rate, accruesFrom time.Time) float64 {
-	if balance <= 0 || len(rates) == 0 {
-		return 0
+	balances := make([]float64, MonthEnd(monthStart).Day())
+	for i := range balances {
+		balances[i] = balance
 	}
-	return round2(balance * WeightedMonthlyRate(monthStart, rates, accruesFrom))
+	return ForDays(monthStart, balances, rates, accruesFrom)
 }
 
-// WeightedMonthlyRate is the month's rate: each day contributes the monthly
-// rate in effect that day divided by the days in the month.
-func WeightedMonthlyRate(monthStart time.Time, rates []Rate, accruesFrom time.Time) float64 {
+// ForDays is the interest earned in the month starting at monthStart, rounded
+// to the cent. balances holds each day's closing balance, the 1st first; a day
+// past its end earns nothing. accruesFrom is the first day that can earn
+// anything (the account's starting-balance date). A day whose balance is at or
+// below zero earns nothing rather than costing interest.
+func ForDays(monthStart time.Time, balances []float64, rates []Rate, accruesFrom time.Time) float64 {
+	if len(rates) == 0 {
+		return 0
+	}
 	sorted := append([]Rate(nil), rates...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].From.Before(sorted[j].From) })
 
 	end := MonthEnd(monthStart)
-	days := end.Day()
+	days := float64(end.Day())
 	var total float64
-	for d := monthStart; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if d.Before(accruesFrom) {
+	for i, d := 0, monthStart; !d.After(end) && i < len(balances); i, d = i+1, d.AddDate(0, 0, 1) {
+		if d.Before(accruesFrom) || balances[i] <= 0 {
 			continue
 		}
 		if r, ok := rateOn(sorted, d); ok {
-			total += MonthlyRate(r.APY)
+			total += balances[i] * MonthlyRate(r.APY) / days
 		}
 	}
-	return total / float64(days)
+	return round2(total)
 }
 
 // rateOn is the latest rate starting on or before d.

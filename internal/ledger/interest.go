@@ -278,19 +278,51 @@ func (s *Service) CashFundsDue(ctx context.Context, householdID int, staleBefore
 	return out, rows.Err()
 }
 
-// cashBalanceOn is starting_balance plus every transaction dated on or before d.
-func cashBalanceOn(ctx context.Context, q interface {
+// dailyCashBalances is the account's closing cash balance on each day of the
+// month starting at month, the 1st first: starting_balance plus every
+// transaction dated on or before that day. Trade legs are transactions, so what
+// is invested isn't in it.
+func dailyCashBalances(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, accountID int, d time.Time) (float64, error) {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, accountID int, month time.Time) ([]float64, error) {
+	end := interest.MonthEnd(month)
 	var balance float64
 	err := q.QueryRowContext(ctx,
 		`SELECT a.starting_balance + COALESCE(
-		   (SELECT SUM(t.amount) FROM transactions t WHERE t.account_id = a.id AND t.date <= $2), 0)
-		 FROM accounts a WHERE a.id = $1`, accountID, dateStr(d)).Scan(&balance)
+		   (SELECT SUM(t.amount) FROM transactions t WHERE t.account_id = a.id AND t.date < $2), 0)
+		 FROM accounts a WHERE a.id = $1`, accountID, dateStr(month)).Scan(&balance)
 	if err != nil {
-		return 0, fmt.Errorf("balance on %s: %w", dateStr(d), err)
+		return nil, fmt.Errorf("balance before %s: %w", dateStr(month), err)
 	}
-	return balance, nil
+
+	rows, err := q.QueryContext(ctx,
+		`SELECT date, SUM(amount) FROM transactions
+		 WHERE account_id = $1 AND date BETWEEN $2 AND $3
+		 GROUP BY date`, accountID, dateStr(month), dateStr(end))
+	if err != nil {
+		return nil, fmt.Errorf("loading %s's transactions: %w", month.Format("2006-01"), err)
+	}
+	defer rows.Close()
+	moved := make([]float64, end.Day())
+	for rows.Next() {
+		var d time.Time
+		var sum float64
+		if err := rows.Scan(&d, &sum); err != nil {
+			return nil, fmt.Errorf("scanning a day's transactions: %w", err)
+		}
+		moved[d.Day()-1] = sum
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	balances := make([]float64, len(moved))
+	for i, m := range moved {
+		balance += m
+		balances[i] = balance
+	}
+	return balances, nil
 }
 
 // PostInterest posts every finished month's interest that hasn't been worked
@@ -414,17 +446,18 @@ func earningLabel(accountType, fund string) (description, category string) {
 
 // postInterestMonth works out one month and records it. The postings row and
 // the transaction go in together; a row that already exists means another pass
-// got there first, and nothing is written. The balance is the cash balance, so
-// an investment account's holdings don't earn the cash rate.
+// got there first, and nothing is written. It earns on each day's cash balance,
+// so an investment account's holdings don't earn the cash rate and money that
+// arrived on the 20th earns from the 20th.
 func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, label earning, month time.Time, rates []interest.Rate, accruesFrom time.Time) (bool, error) {
 	end := interest.MonthEnd(month)
 	wrote := false
 	err := s.inTx(func(tx *sql.Tx) error {
-		balance, err := cashBalanceOn(ctx, tx, accountID, end)
+		balances, err := dailyCashBalances(ctx, tx, accountID, month)
 		if err != nil {
 			return err
 		}
-		amount := interest.ForMonth(month, balance, rates, accruesFrom)
+		amount := interest.ForDays(month, balances, rates, accruesFrom)
 
 		var postingID int
 		err = tx.QueryRowContext(ctx,
@@ -494,8 +527,8 @@ func incomeCategory(ctx context.Context, tx *sql.Tx, householdID int, name strin
 }
 
 // SavingsOutlook is what the account page shows: the rate history and roughly
-// what this month will earn if the cash balance stays where it is. Rates is
-// empty on an investment account whose cash yield was never set.
+// what this month will earn if the cash balance stays where it is from today.
+// Rates is empty on an investment account whose cash yield was never set.
 type SavingsOutlook struct {
 	Rates []models.SavingsRate `json:"rates"`
 	// ProjectedDate is the last day of this month, when the interest posts.
@@ -533,11 +566,11 @@ func (s *Service) SavingsOutlookFor(ctx context.Context, householdID, accountID 
 	if err != nil {
 		return out, err
 	}
-	balance, err := cashBalanceOn(ctx, s.db, accountID, interest.MonthEnd(month))
+	balances, err := dailyCashBalances(ctx, s.db, accountID, month)
 	if err != nil {
 		return out, err
 	}
-	out.ProjectedAmount = interest.ForMonth(month, balance, calc, accruesFrom)
+	out.ProjectedAmount = interest.ForDays(month, balances, calc, accruesFrom)
 
 	var fund sql.NullString
 	var since sql.NullTime

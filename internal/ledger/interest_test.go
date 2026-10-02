@@ -107,20 +107,29 @@ func TestInterestPostsFinishedMonths(t *testing.T) {
 	}
 }
 
-func TestInterestUsesMonthEndBalance(t *testing.T) {
+// Interest accrues on each day's balance: money that arrives on the 20th earns
+// from the 20th, and money that leaves stops earning the day it goes.
+func TestInterestAccruesOnEachDaysBalance(t *testing.T) {
 	f := newFixture(t)
 	hysa := f.highYield("HYSA", 1000, "2026-08-01", 4.00)
 	income := f.category("Paycheck", models.KindIncome)
-	// Deposited on the last day: month-end balance counts it for the whole month.
-	f.txn(hysa.ID, models.KindIncome, "2026-08-31", 9000, &income.ID)
+	bills := f.category("Bills", models.KindExpense)
+	f.txn(hysa.ID, models.KindIncome, "2026-08-20", 9000, &income.ID)
+	f.txn(hysa.ID, models.KindExpense, "2026-08-31", 4000, &bills.ID)
 
 	f.postInterest("2026-09-02")
 	txns := f.interestTxns(hysa.ID)
 	if len(txns) != 1 {
 		t.Fatalf("interest = %+v", txns)
 	}
-	money(t, "August on $10,000", txns[0].Amount, interest.ForMonth(day("2026-08-01"), 10000,
-		[]interest.Rate{{From: day("2026-08-01"), APY: 4.00}}, day("2026-08-01")))
+	// 19 days at $1,000, 11 at $10,000, the last at $6,000.
+	want := (19*1000 + 11*10000 + 1*6000) * interest.MonthlyRate(4.00) / 31
+	money(t, "August, day by day", txns[0].Amount, math.Round(want*100)/100)
+
+	rates := []interest.Rate{{From: day("2026-08-01"), APY: 4.00}}
+	if monthEnd := interest.ForMonth(day("2026-08-01"), 6000, rates, day("2026-08-01")); txns[0].Amount == monthEnd {
+		t.Errorf("earned %.2f, what the month-end balance alone would", monthEnd)
+	}
 }
 
 func TestInterestRateChangeMidMonth(t *testing.T) {

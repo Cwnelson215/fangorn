@@ -136,15 +136,17 @@
 				{formatDate(outlook.cash_fund_since ?? '')} — the whole of that month, unless a rate entered
 				by hand covers its first days. When a month ends, an
 				<strong>{outlook.cash_fund} dividend</strong> is added under <strong>Dividends</strong>: the
-				month-end cash × the month's average yield ÷ 12. It lands close to the statement; edit it if
-				it's off.
+				each day's cash × that day's yield, so money earns from the day it arrives. It lands close
+				to the statement; edit it if it's off.
 			{:else if isCash}
 				Once a month ends, a <strong>Money market dividend</strong> is added under
-				<strong>Dividends</strong>: the month-end cash × the month's yield. Money market yields move a
-				little every day, so check it against the statement and edit it if it's off.
+				<strong>Dividends</strong>: each day's cash × the yield, so money earns from the day it
+				arrives. Money market yields move a little every day, so check it against the statement and
+				edit it if it's off.
 			{:else}
-				Once a month ends, its interest is added as an <strong>Interest</strong> income entry: the
-				month-end balance × the month's rate. A rate change mid-month counts from its date.
+				Once a month ends, its interest is added as an <strong>Interest</strong> income entry: each
+				day's balance × the rate, so money earns from the day it arrives. A rate change mid-month
+				counts from its date.
 			{/if}
 		</p>
 
