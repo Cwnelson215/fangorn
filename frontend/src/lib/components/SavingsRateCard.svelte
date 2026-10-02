@@ -133,7 +133,8 @@
 		<p class="muted note">
 			{#if linked}
 				{outlook.cash_fund}'s published yield is looked up every day, and counts from
-				{formatDate(outlook.cash_fund_since ?? '')}. When a month ends, an
+				{formatDate(outlook.cash_fund_since ?? '')} — the whole of that month, unless a rate entered
+				by hand covers its first days. When a month ends, an
 				<strong>{outlook.cash_fund} dividend</strong> is added under <strong>Dividends</strong>: the
 				month-end cash × the month's average yield ÷ 12. It lands close to the statement; edit it if
 				it's off.

@@ -145,7 +145,11 @@ handlers fetch its first quote and yield. The scheduler then looks the yield up 
 market data like `security_prices`, one row per day. The fund governs from `cash_fund_since`: the
 starting-balance date on a new account, but **today** when a fund is added to an existing one (its
 earlier months may have been entered by hand), and unchanged when the account is re-saved with the
-same fund. Hand-entered rates still cover the time before, and can't be added while a fund is set. A money market yield is a simple annual rate, so `fundYields` converts
+same fund. Hand-entered rates still cover the time before, and can't be added while a fund is set.
+With none before it, the fund pays its **whole first month** rather than the days from that date
+(`interestRates` moves both the fund's rate and the first earning day to the month's start): the
+fund pays the month to whoever holds it on the last day, and a balance entered mid-month doesn't
+include what had accrued. A high-yield savings account's first month is still prorated. A money market yield is a simple annual rate, so `fundYields` converts
 it to the APY whose monthly rate is exactly yield ÷ 12. The dividend is described "SPAXX dividend".
 
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net

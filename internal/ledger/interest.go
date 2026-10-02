@@ -148,26 +148,33 @@ func (s *Service) DeleteSavingsRate(ctx context.Context, householdID, accountID,
 // Usually that is the account's own savings_rates. An account linked to a cash
 // fund switches to the fund's published yields on the day it was linked:
 // hand-entered rates still cover the time before, the fund everything after.
-func (s *Service) interestRates(ctx context.Context, accountID int) ([]interest.Rate, error) {
+//
+// It also returns the first day that earns, which is normally start, the
+// account's starting-balance date. A fund with no hand-entered rate before it
+// earns its whole first month instead: a money market fund pays the month's
+// dividend to whoever holds it on the last day, and a balance entered as of
+// the 24th doesn't include what had accrued by then. Paying only the days
+// from the 24th left the first dividend at a quarter of the statement's.
+func (s *Service) interestRates(ctx context.Context, accountID int, start time.Time) ([]interest.Rate, time.Time, error) {
 	var fund sql.NullString
 	var since sql.NullTime
 	err := s.db.QueryRowContext(ctx,
 		`SELECT cash_fund, cash_fund_since FROM accounts WHERE id = $1`, accountID).Scan(&fund, &since)
 	if err != nil {
-		return nil, fmt.Errorf("loading the cash fund: %w", err)
+		return nil, start, fmt.Errorf("loading the cash fund: %w", err)
 	}
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT effective_from, apy FROM savings_rates WHERE account_id = $1`, accountID)
 	if err != nil {
-		return nil, fmt.Errorf("loading rates: %w", err)
+		return nil, start, fmt.Errorf("loading rates: %w", err)
 	}
 	var rates []interest.Rate
 	for rows.Next() {
 		var r interest.Rate
 		if err := rows.Scan(&r.From, &r.APY); err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("scanning rate: %w", err)
+			return nil, start, fmt.Errorf("scanning rate: %w", err)
 		}
 		if !fund.Valid || r.From.Before(since.Time) {
 			rates = append(rates, r)
@@ -175,12 +182,16 @@ func (s *Service) interestRates(ctx context.Context, accountID int) ([]interest.
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil || !fund.Valid {
-		return rates, err
+		return rates, start, err
 	}
 
 	yields, err := s.fundYields(ctx, fund.String)
 	if err != nil {
-		return nil, err
+		return nil, start, err
+	}
+	fundFrom, accruesFrom := since.Time, start
+	if len(rates) == 0 {
+		fundFrom, accruesFrom = interest.MonthStart(since.Time), interest.MonthStart(start)
 	}
 	// The fund's rate on the day it was linked: the latest yield on or before
 	// it, or — if the first lookup came after — the first one there is.
@@ -195,14 +206,14 @@ func (s *Service) interestRates(ctx context.Context, accountID int) ([]interest.
 		atLink = &yields[0].APY
 	}
 	if atLink != nil {
-		rates = append(rates, interest.Rate{From: since.Time, APY: *atLink})
+		rates = append(rates, interest.Rate{From: fundFrom, APY: *atLink})
 	}
 	for _, y := range yields {
 		if y.From.After(since.Time) {
 			rates = append(rates, y)
 		}
 	}
-	return rates, nil
+	return rates, accruesFrom, nil
 }
 
 // fundYields is a fund's yield history, oldest first, as rates. A money market
@@ -336,7 +347,7 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 type earning struct{ description, category string }
 
 func (s *Service) postAccountInterest(ctx context.Context, householdID, accountID int, label earning, start, today time.Time) (int, error) {
-	rates, err := s.interestRates(ctx, accountID)
+	rates, accruesFrom, err := s.interestRates(ctx, accountID, start)
 	if err != nil || len(rates) == 0 {
 		return 0, err
 	}
@@ -376,7 +387,7 @@ func (s *Service) postAccountInterest(ctx context.Context, householdID, accountI
 		if done[dateStr(m)] {
 			continue
 		}
-		wrote, err := s.postInterestMonth(ctx, householdID, accountID, label, m, rates, start)
+		wrote, err := s.postInterestMonth(ctx, householdID, accountID, label, m, rates, accruesFrom)
 		if err != nil {
 			return posted, fmt.Errorf("%s: %w", m.Format("2006-01"), err)
 		}
@@ -405,7 +416,7 @@ func earningLabel(accountType, fund string) (description, category string) {
 // the transaction go in together; a row that already exists means another pass
 // got there first, and nothing is written. The balance is the cash balance, so
 // an investment account's holdings don't earn the cash rate.
-func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, label earning, month time.Time, rates []interest.Rate, start time.Time) (bool, error) {
+func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, label earning, month time.Time, rates []interest.Rate, accruesFrom time.Time) (bool, error) {
 	end := interest.MonthEnd(month)
 	wrote := false
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -413,7 +424,7 @@ func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID 
 		if err != nil {
 			return err
 		}
-		amount := interest.ForMonth(month, balance, rates, start)
+		amount := interest.ForMonth(month, balance, rates, accruesFrom)
 
 		var postingID int
 		err = tx.QueryRowContext(ctx,
@@ -518,7 +529,7 @@ func (s *Service) SavingsOutlookFor(ctx context.Context, householdID, accountID 
 	if err != nil {
 		return out, err
 	}
-	calc, err := s.interestRates(ctx, accountID)
+	calc, accruesFrom, err := s.interestRates(ctx, accountID, start)
 	if err != nil {
 		return out, err
 	}
@@ -526,7 +537,7 @@ func (s *Service) SavingsOutlookFor(ctx context.Context, householdID, accountID 
 	if err != nil {
 		return out, err
 	}
-	out.ProjectedAmount = interest.ForMonth(month, balance, calc, start)
+	out.ProjectedAmount = interest.ForMonth(month, balance, calc, accruesFrom)
 
 	var fund sql.NullString
 	var since sql.NullTime

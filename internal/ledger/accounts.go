@@ -118,6 +118,7 @@ type AccountInput struct {
 	// symbol (SPAXX); nil for none. On a new account the fund counts from
 	// StartingBalanceDate. Linking one to an existing account counts from
 	// today, so months that may have been entered by hand aren't posted again.
+	// Either way the month it starts in is paid whole (see interestRates).
 	// The handler makes sure the symbol is a known security first.
 	CashFund *string `json:"cash_fund"`
 }

@@ -380,6 +380,28 @@ func TestCashFundOnNewAccount(t *testing.T) {
 	}
 }
 
+// A balance entered mid-month doesn't include the dividend accrued by then,
+// and the fund pays the whole month on its last day: the first month isn't cut
+// down to the days since the account was added.
+func TestCashFundPaysItsWholeFirstMonth(t *testing.T) {
+	f := newFixture(t)
+	fund := f.sym("SPAXX")
+	f.price(fund, 1, 1)
+	brokerage := f.investment("Fidelity", "2026-09-24", 10350.74, &fund)
+	if err := f.svc.SaveFundYield(f.ctx, fund, day("2026-09-24"), 3.33); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := f.postInterest("2026-10-02"); n != 1 {
+		t.Fatalf("posted %d, want September", n)
+	}
+	txns := f.interestTxns(brokerage.ID)
+	if len(txns) != 1 || txns[0].Date != "2026-09-30" {
+		t.Fatalf("dividends = %+v", txns)
+	}
+	money(t, "September in full: 10350.74 × 3.33% ÷ 12", txns[0].Amount, 28.72)
+}
+
 // Saving the account again keeps the fund's original date; naming a fund on
 // an account that already exists counts from today, so months that may have
 // been entered by hand stay as they were; clearing it unlinks.
