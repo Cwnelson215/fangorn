@@ -74,7 +74,9 @@ leg on the source, a positive leg on the destination. Each side appears in its o
 register for free, and income/expense totals everywhere exclude `kind = 'transfer'` — moving your
 own money is neither earning nor spending it. Mutations go through `ledger.CreateTransfer` /
 `UpdateTransfer` / `DeleteTransfer`, which operate on the whole group in one transaction. Editing a
-single leg through `/api/transactions` is rejected; deleting one leg deletes both.
+single leg through `/api/transactions` is rejected; deleting one leg deletes both. The form is
+`TransferModal.svelte`, opened from `/transfers` and from a transfer row in Activity (which loads
+the pair with `GET /api/transfers/{groupId}`).
 
 **Closing an account** is the "Close this account" card on its page (`CloseAccountCard.svelte`).
 *Remove remaining balance* records a transfer of the cash balance to (or, for a debt or overdraft,
@@ -262,6 +264,18 @@ goal's overall progress still moves only when money moves in or out of its accou
 the income account** take no share: spending that reaches their money already drained them, so
 what they lost that month (`goalFill.DrainedIn`) is taken off the shortfall before it's charged to
 the goals planned elsewhere.
+
+**Debt payments.** A transfer into a credit card or loan from an account that isn't one is a debt
+payment (`debtPaymentGroup` in `ledger/debts.go`; `Transaction.debt_payment` marks both legs, and
+the rows read "Debt payment"). It is still a transfer — no kind, balance or total changes. What
+counts toward the month is the **paydown**: paid beyond what was newly charged to that account in
+the month (purchases net of refunds, interest, fees, money moved off it), never below zero —
+purchases on a card already count in their own categories, so paying them off isn't counted twice.
+`BudgetMonth.debts` has a line per open card and loan (paid, charged, paydown, owed now) with an
+optional planned monthly paydown, versioned by month in `debt_plans` like `goal_plans`
+(`PUT /api/debt-plans`; a blank amount stops it). The plan becomes expected income − budgeted
+spending − savings − planned paydown = left over. The savings shortfall is unchanged: a card payment
+is money that left the income account without going to savings, same as before.
 
 ## The Recurring Engine
 
@@ -452,6 +466,7 @@ monthly goal for the month after it was created; any other became a plan startin
 `018_adjustments` adds the `adjustment` transaction kind (a dropped balance; any sign, no category).
 `019_goal_priority` adds `goals.priority` (existing goals numbered in the order the list showed them,
 monthly goals after).
+`020_debt_plans` adds `debt_plans` (a card or loan's planned monthly paydown, by month).
 
 ## Conventions
 

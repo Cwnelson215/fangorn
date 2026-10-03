@@ -42,6 +42,12 @@
 		}
 	}
 
+	// Paying a card or loan from an account that isn't one, as the ledger marks it.
+	function isDebtPayment(transfer: Transfer): boolean {
+		const cls = (id: number) => accounts.find((a) => a.id === id)?.class;
+		return cls(transfer.to_account_id) === 'liability' && cls(transfer.from_account_id) !== 'liability';
+	}
+
 	function openCreate() {
 		editing = null;
 		modalOpen = true;
@@ -89,6 +95,7 @@
 								<span class="accounts">
 									{transfer.from_account} <span class="arrow">→</span>
 									{transfer.to_account}
+									{#if isDebtPayment(transfer)}· debt payment{/if}
 								</span>
 							</span>
 							<span class="amount">{formatCurrency(transfer.amount)}</span>

@@ -15,7 +15,8 @@ import (
 const txnSelect = `
 	SELECT t.id, t.account_id, a.name, t.date, t.amount, t.kind, t.description,
 	       t.merchant, t.category_id, c.name, t.notes, t.transfer_group_id,
-	       t.recurring_rule_id, t.trade_id, t.source, t.created_at, r.id
+	       t.recurring_rule_id, t.trade_id, t.source, t.created_at, r.id,
+	       ` + debtPaymentGroup + `
 	FROM transactions t
 	JOIN accounts a ON a.id = t.account_id
 	LEFT JOIN categories c ON c.id = t.category_id
@@ -30,7 +31,7 @@ func scanTxn(rows interface{ Scan(...any) error }) (models.Transaction, error) {
 	err := rows.Scan(
 		&t.ID, &t.AccountID, &t.AccountName, &date, &t.Amount, &t.Kind, &t.Description,
 		&merchant, &categoryID, &categoryName, &notes, &groupID, &ruleID, &tradeID,
-		&t.Source, &createdAt, &receiptID,
+		&t.Source, &createdAt, &receiptID, &t.DebtPayment,
 	)
 	if err != nil {
 		return t, err

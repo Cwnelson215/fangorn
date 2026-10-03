@@ -43,7 +43,7 @@
 
 	<span class="tags">
 		{#if isTransfer}
-			<span class="tag transfer">Transfer</span>
+			<span class="tag transfer">{transaction.debt_payment ? 'Debt payment' : 'Transfer'}</span>
 		{:else if isTrade}
 			<span class="tag trade">Trade</span>
 		{:else if isAdjustment}

@@ -248,6 +248,10 @@ type Transaction struct {
 	// ReceiptID is the photographed receipt this transaction was posted from.
 	ReceiptID *int `json:"receipt_id"`
 
+	// DebtPayment marks either leg of a transfer that pays a credit card or
+	// loan from an account that isn't one.
+	DebtPayment bool `json:"debt_payment"`
+
 	// RunningBalance is only populated by the per-account register view.
 	RunningBalance *float64 `json:"running_balance,omitempty"`
 }
@@ -408,6 +412,30 @@ type BudgetMonth struct {
 	// SavingsShortfall is how much of the month's planned savings was spent
 	// from the income account instead, split across Savings by monthly amount.
 	SavingsShortfall float64 `json:"savings_shortfall"`
+
+	// Debts is every credit card and loan: what was paid to it in the month and
+	// how much of that counts toward the budget.
+	Debts []DebtLine `json:"debts"`
+}
+
+// DebtLine is one credit card or loan in a month's budget.
+type DebtLine struct {
+	AccountID   int    `json:"account_id"`
+	AccountName string `json:"account_name"`
+	AccountType string `json:"account_type"`
+	// Monthly is the paydown planned for the month, 0 when none is.
+	Monthly float64 `json:"monthly_amount"`
+	// Paid is what was transferred in from accounts that aren't debts.
+	Paid float64 `json:"paid"`
+	// Charged is what the month added to the debt: purchases net of refunds,
+	// interest and fees, cash taken out. Negative when more came back than went on.
+	Charged float64 `json:"charged"`
+	// Paydown is Paid beyond Charged, never below zero — the part that counts
+	// toward the month's budget. What was charged already counted as spending
+	// in its own category.
+	Paydown float64 `json:"paydown"`
+	// Owed is what the account owes today, whatever month is being shown.
+	Owed float64 `json:"owed"`
 }
 
 type Goal struct {

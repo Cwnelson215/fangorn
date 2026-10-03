@@ -390,11 +390,13 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, account_id, date, amount, kind, description, merchant,
 		        category_id, category_name, notes, transfer_group_id,
-		        recurring_rule_id, trade_id, source, created_at, receipt_id, running_balance
+		        recurring_rule_id, trade_id, source, created_at, receipt_id, running_balance,
+		        debt_payment
 		 FROM (
 		   SELECT t.id, t.account_id, t.date, t.amount, t.kind, t.description, t.merchant,
 		          t.category_id, c.name AS category_name, t.notes, t.transfer_group_id,
 		          t.recurring_rule_id, t.trade_id, t.source, t.created_at, r.id AS receipt_id,
+		          `+debtPaymentGroup+` AS debt_payment,
 		          a.starting_balance + SUM(t.amount) OVER (
 		              ORDER BY t.date, t.id ROWS UNBOUNDED PRECEDING
 		          ) AS running_balance
@@ -423,7 +425,7 @@ func (s *Service) Register(ctx context.Context, householdID, accountID, limit in
 		if err := rows.Scan(
 			&t.ID, &t.AccountID, &date, &t.Amount, &t.Kind, &t.Description, &merchant,
 			&categoryID, &categoryName, &notes, &groupID, &ruleID, &tradeID, &t.Source,
-			&createdAt, &receiptID, &running,
+			&createdAt, &receiptID, &running, &t.DebtPayment,
 		); err != nil {
 			return nil, fmt.Errorf("scanning register row: %w", err)
 		}

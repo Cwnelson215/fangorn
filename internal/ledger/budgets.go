@@ -72,6 +72,10 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
+	debts, err := s.debtLines(ctx, householdID, monthStart)
+	if err != nil {
+		return models.BudgetMonth{}, err
+	}
 	return models.BudgetMonth{
 		Month:            monthStart,
 		Budgets:          budgets,
@@ -80,6 +84,7 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 		UnplannedIncome:  round2(unplanned),
 		Savings:          savings,
 		SavingsShortfall: shortfall,
+		Debts:            debts,
 	}, nil
 }
 

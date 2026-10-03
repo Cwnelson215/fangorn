@@ -78,6 +78,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/budgets", h.ListBudgets)
 	mux.HandleFunc("POST /api/budgets", h.SetBudget)
 	mux.HandleFunc("DELETE /api/budgets/{id}", h.StopBudget)
+	mux.HandleFunc("PUT /api/debt-plans", h.SetDebtPlan)
 
 	mux.HandleFunc("GET /api/settings", h.GetSettings)
 	mux.HandleFunc("PUT /api/settings", h.UpdateSettings)
@@ -621,6 +622,19 @@ func (h *LedgerHandler) StopBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.StopBudget(r.Context(), h.householdID, id, r.URL.Query().Get("month")); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetDebtPlan sets a card or loan's planned monthly paydown from a month on.
+func (h *LedgerHandler) SetDebtPlan(w http.ResponseWriter, r *http.Request) {
+	var in ledger.DebtPlanInput
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := h.svc.SetDebtPlan(r.Context(), h.householdID, in); err != nil {
 		fail(w, err)
 		return
 	}

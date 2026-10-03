@@ -139,6 +139,8 @@ export interface Transaction {
 	created_at: string;
 	/** The photographed receipt this was posted from, if any. */
 	receipt_id: number | null;
+	/** Either leg of a transfer that pays a credit card or loan. */
+	debt_payment: boolean;
 	/** Only present in the per-account register view. */
 	running_balance?: number;
 }
@@ -278,6 +280,25 @@ export interface BudgetMonth {
 	savings: SavingsLine[];
 	/** Planned savings spent from the income account instead, split across `savings`. */
 	savings_shortfall: number;
+	/** Every credit card and loan: what was paid in the month and what of it counts. */
+	debts: DebtLine[];
+}
+
+/** One credit card or loan in a month's budget. */
+export interface DebtLine {
+	account_id: number;
+	account_name: string;
+	account_type: AccountType;
+	/** Paydown planned for the month, 0 when none is. */
+	monthly_amount: number;
+	/** Transferred in from accounts that aren't debts. */
+	paid: number;
+	/** What the month added to the debt: purchases net of refunds, interest, fees. */
+	charged: number;
+	/** Paid beyond what was charged, never below zero: the part that counts toward the month. */
+	paydown: number;
+	/** What the account owes today. */
+	owed: number;
 }
 
 export interface Goal {

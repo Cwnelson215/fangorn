@@ -16,11 +16,12 @@
 		reopenGoal,
 		reorderGoals,
 		setBudget,
+		setDebtPlan,
 		stopBudget,
 		updateGoal,
 		updateSettings
 	} from '$lib/api';
-	import type { Account, Budget, Category, Goal, GoalInput, SavingsLine } from '$lib/types';
+	import type { Account, Budget, Category, DebtLine, Goal, GoalInput, SavingsLine } from '$lib/types';
 	import {
 		formatCurrency,
 		formatDate,
@@ -43,6 +44,7 @@
 	let unplannedIncome = $state(0);
 	let savings: SavingsLine[] = $state([]);
 	let shortfall = $state(0);
+	let debts: DebtLine[] = $state([]);
 	// Where income lands, and savings are moved from.
 	let incomeAccountId = $state(0);
 	let budgetsLoading = $state(false);
@@ -123,6 +125,7 @@
 			unplannedIncome = data.unplanned_income;
 			savings = data.savings;
 			shortfall = data.savings_shortfall;
+			debts = data.debts;
 		} finally {
 			if (requested === month) budgetsLoading = false;
 		}
@@ -156,10 +159,44 @@
 	let incomeScheduled = $derived(incomeBudgets.reduce((sum, b) => sum + b.scheduled, 0));
 	let totalSavingsPlanned = $derived(savings.reduce((sum, l) => sum + l.monthly_amount, 0));
 	let totalMoved = $derived(savings.reduce((sum, l) => sum + l.moved, 0));
-	// What the plan leaves over: expected income less budgeted spending and the
-	// month's savings.
-	let planLeft = $derived(totalExpected - totalBudget - totalSavingsPlanned);
-	let showPlan = $derived(incomeBudgets.length > 0 || savings.length > 0);
+	let totalDebtPlanned = $derived(debts.reduce((sum, l) => sum + l.monthly_amount, 0));
+	let totalPaydown = $derived(debts.reduce((sum, l) => sum + l.paydown, 0));
+	let showDebt = $derived(totalDebtPlanned > 0.005 || totalPaydown > 0.005);
+	// What the plan leaves over: expected income less budgeted spending, the
+	// month's savings and the debt it means to pay down.
+	let planLeft = $derived(totalExpected - totalBudget - totalSavingsPlanned - totalDebtPlanned);
+	let showPlan = $derived(incomeBudgets.length > 0 || savings.length > 0 || totalDebtPlanned > 0.005);
+
+	// Planned paydown form
+	let debtModalOpen = $state(false);
+	let debtLine = $state<DebtLine | null>(null);
+	let debtAmount = $state('');
+	let debtSaving = $state(false);
+	let debtError = $state<string | null>(null);
+
+	function openDebtPlan(line: DebtLine) {
+		debtLine = line;
+		debtAmount = line.monthly_amount ? String(line.monthly_amount) : '';
+		debtError = null;
+		debtModalOpen = true;
+	}
+
+	// A blank amount stops the plan from this month on.
+	async function saveDebtPlan(event: Event) {
+		event.preventDefault();
+		if (!debtLine) return;
+		debtSaving = true;
+		debtError = null;
+		try {
+			await setDebtPlan(debtLine.account_id, Math.abs(parseFloat(debtAmount) || 0) || null, month);
+			debtModalOpen = false;
+			await loadBudgets();
+		} catch (e) {
+			debtError = e instanceof Error ? e.message : 'Could not save the plan';
+		} finally {
+			debtSaving = false;
+		}
+	}
 
 	async function chooseIncomeAccount(id: number) {
 		const previous = incomeAccountId;
@@ -432,7 +469,7 @@
 			</div>
 
 			{#if showPlan}
-				<div class="plan">
+				<div class="plan" class:with-debt={showDebt}>
 					<div>
 						<span class="plan-label">Expected income</span>
 						<span class="plan-value">{formatCurrency(totalExpected)}</span>
@@ -453,6 +490,14 @@
 							{#if shortfall > 0.005}·&nbsp;<span class="neg">{formatCurrency(shortfall)} spent</span>{/if}
 						</span>
 					</div>
+					{#if showDebt}
+						<span class="plan-op" aria-hidden="true">−</span>
+						<div>
+							<span class="plan-label">Debt</span>
+							<span class="plan-value">{formatCurrency(totalDebtPlanned)}</span>
+							<span class="muted small">{formatCurrency(totalPaydown)} paid down</span>
+						</div>
+					{/if}
 					<span class="plan-op" aria-hidden="true">=</span>
 					<div>
 						<span class="plan-label">{planLeft >= 0 ? 'Left over' : 'Short'}</span>
@@ -460,7 +505,7 @@
 							{formatCurrency(Math.abs(planLeft))}
 						</span>
 						<span class="muted small">
-							{formatCurrency(incomeReceived - totalSpent - unbudgeted - totalMoved)} actually left
+							{formatCurrency(incomeReceived - totalSpent - unbudgeted - totalMoved - totalPaydown)} actually left
 						</span>
 					</div>
 				</div>
@@ -603,6 +648,49 @@
 								{#if !line.month}
 									· {formatCurrency(line.saved)} of {formatCurrency(line.target_amount)} overall
 								{/if}
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			{#if debts.length > 0}
+				<h3 class="sub-head">Debt</h3>
+				<p class="muted small">
+					Paying a card or loan counts toward the month only beyond what was newly charged to it —
+					those purchases already count in their own categories.
+				</p>
+				<div class="list">
+					{#each debts as line (line.account_id)}
+						{@const toGo = line.monthly_amount - line.paydown}
+						<div class="item">
+							<div class="item-head">
+								<span class="item-name">{line.account_name}</span>
+								<span class="item-actions">
+									<Button variant="ghost" size="sm" onclick={() => openDebtPlan(line)}>
+										{line.monthly_amount > 0 ? 'Edit plan' : 'Plan a paydown'}
+									</Button>
+								</span>
+							</div>
+							{#if line.monthly_amount > 0}
+								<BudgetBar
+									spent={line.paydown}
+									amount={line.monthly_amount}
+									color="var(--info)"
+									pace={incomePace(month)}
+								/>
+							{/if}
+							<div class="item-foot muted">
+								{formatCurrency(line.paid)} paid
+								{#if line.charged > 0.005}
+									· {formatCurrency(line.charged)} new charges
+								{:else if line.charged < -0.005}
+									· {formatCurrency(-line.charged)} came back
+								{/if}
+								· {formatCurrency(line.paydown)}{#if line.monthly_amount > 0}
+										{' '}of {formatCurrency(line.monthly_amount)}{/if} paid down
+								{#if toGo > 0.005}· {formatCurrency(toGo)} to go{/if}
+								· {formatCurrency(line.owed)} owed now
 							</div>
 						</div>
 					{/each}
@@ -816,6 +904,36 @@
 	</form>
 </Modal>
 
+<Modal bind:open={debtModalOpen} title="Paydown for {debtLine?.account_name ?? 'this account'}">
+	<form onsubmit={saveDebtPlan}>
+		<Field
+			label="Pay down each month"
+			id="debtAmount"
+			hint="Beyond what's newly charged. Applies from {formatMonth(month)} until the next change; leave blank for no plan"
+		>
+			<input
+				id="debtAmount"
+				type="number"
+				inputmode="decimal"
+				step="0.01"
+				min="0"
+				placeholder="0.00"
+				bind:value={debtAmount}
+				disabled={debtSaving}
+			/>
+		</Field>
+
+		{#if debtError}
+			<p class="error-text">{debtError}</p>
+		{/if}
+
+		<div class="form-actions">
+			<Button variant="secondary" onclick={() => (debtModalOpen = false)}>Cancel</Button>
+			<Button type="submit" disabled={debtSaving}>{debtSaving ? 'Saving…' : 'Save Plan'}</Button>
+		</div>
+	</form>
+</Modal>
+
 <Modal
 	bind:open={goalModalOpen}
 	title={goalMonth
@@ -1001,6 +1119,12 @@
 		border-radius: var(--radius-sm);
 	}
 
+	.plan.with-debt {
+		grid-template-columns:
+			minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr)
+			auto minmax(0, 1fr);
+	}
+
 	.plan > div {
 		display: flex;
 		flex-direction: column;
@@ -1073,7 +1197,8 @@
 	}
 
 	@media (max-width: 639px) {
-		.plan {
+		.plan,
+		.plan.with-debt {
 			grid-template-columns: 1fr;
 			gap: 0.5rem;
 		}

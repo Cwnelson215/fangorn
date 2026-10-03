@@ -139,8 +139,9 @@ var tools = []tool{
 		name: "get_budget_month",
 		description: "One month's budget as the Budgets page shows it: each category's budget, what was spent (or, " +
 			"for income categories, received) and what is still scheduled; expected and received income; " +
-			"the savings goals planned for the month and how much has been moved to each; and any savings shortfall " +
-			"(planned savings that were spent instead).",
+			"the savings goals planned for the month and how much has been moved to each; any savings shortfall " +
+			"(planned savings that were spent instead); and each credit card and loan: paid, newly charged, and the " +
+			"paydown (paid beyond new charges) that counts toward the month.",
 		schema: `{"type":"object","properties":{
 			"month":{"type":"string","description":"YYYY-MM. Defaults to the current month."}
 		},"additionalProperties":false}`,
