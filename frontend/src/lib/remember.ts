@@ -32,6 +32,31 @@ export function pickRemembered(key: string, options: { id: number }[], fallback:
 	return id !== null && options.some((o) => o.id === id) ? id : fallback;
 }
 
+// The account a hand-logged entry starts on. Settings can pin one for this
+// device; without a pin (or once the pinned account is gone) it is whichever
+// account was logged to last.
+const DEFAULT_ACCOUNT = 'transaction.default';
+const LAST_ACCOUNT = 'transaction.account';
+
+export function startingAccount(accounts: { id: number }[]): number {
+	const last = pickRemembered(LAST_ACCOUNT, accounts, accounts[0]?.id ?? 0);
+	return pickRemembered(DEFAULT_ACCOUNT, accounts, last);
+}
+
+export function rememberLastAccount(id: number): void {
+	rememberId(LAST_ACCOUNT, id);
+}
+
+/** This device's pinned account, or null when it follows the last one used. */
+export function defaultAccount(): number | null {
+	return recallId(DEFAULT_ACCOUNT);
+}
+
+export function setDefaultAccount(id: number | null): void {
+	if (id === null) forget(DEFAULT_ACCOUNT);
+	else rememberId(DEFAULT_ACCOUNT, id);
+}
+
 /**
  * A remembered set of values — a projection's assumptions — or null. Only
  * fields whose type matches the fallback are taken, so a stale shape from an

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	// The quick-log screen: what the home-screen icon and the tab bar's + open.
-	// Everything that can be defaulted is — today, the last account used, a
+	// Everything that can be defaulted is — today, this device's usual account, a
 	// description from the category — so the common case is amount, category,
 	// Save. A receipt photo is the other way in and gets the same prominence:
 	// one tap on the camera and it logs itself. It also takes a prefill from the URL (?amount=&kind=&category=&note=)
@@ -19,7 +19,7 @@
 	} from '$lib/api';
 	import type { Account, Category, Transaction } from '$lib/types';
 	import { formatCurrency, formatDateShort, today } from '$lib/format';
-	import { pickRemembered, rememberId } from '$lib/remember';
+	import { rememberLastAccount, startingAccount } from '$lib/remember';
 	import { capture, openCamera } from '$lib/capture.svelte';
 
 	type Kind = 'expense' | 'income' | 'refund';
@@ -96,7 +96,7 @@
 				if (t.category_id) counts.set(t.category_id, (counts.get(t.category_id) ?? 0) + 1);
 			}
 			usage = counts;
-			accountId = pickRemembered('transaction.account', accounts, accounts[0]?.id ?? 0);
+			accountId = startingAccount(accounts);
 			applyPrefill();
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Could not load your accounts';
@@ -173,7 +173,7 @@
 				category_id: categoryId || null,
 				notes: null
 			});
-			if (routedFrom === null) rememberId('transaction.account', accountId);
+			if (routedFrom === null) rememberLastAccount(accountId);
 			// Ready for the next one; account, kind and date carry over — except
 			// an account the category chose, which goes back.
 			amountText = '';

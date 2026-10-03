@@ -13,7 +13,7 @@
 	import { onMount } from 'svelte';
 	import { createDeviceKey, getAccounts, testDeviceKey } from '$lib/api';
 	import type { Account, DeviceKey } from '$lib/types';
-	import { pickRemembered } from '$lib/remember';
+	import { startingAccount } from '$lib/remember';
 	import { isAppleMobile } from '$lib/device';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -47,7 +47,7 @@
 		onAppleMobile = isAppleMobile();
 		try {
 			accounts = await getAccounts();
-			accountId = pickRemembered('transaction.account', accounts, accounts[0]?.id ?? 0);
+			accountId = startingAccount(accounts);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load your phones';
 		} finally {

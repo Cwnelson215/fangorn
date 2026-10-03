@@ -496,8 +496,9 @@ monthly goals after).
 - **Logging is one screen.** `/add` is where the home-screen icon opens (`start_url`) and where the
   tab bar's **+** goes: amount, category chips sorted by recent use, Save, Undo. It fills in the
   description from the category, switches to the category's account when it names one (and back
-  when it's unpicked; a routed account isn't remembered), remembers the last account per device
-  (`lib/remember.ts`), scans
+  when it's unpicked; a routed account isn't remembered), starts on this device's default account
+  — the one pinned in Settings, else the last one used (`startingAccount` in `lib/remember.ts`,
+  localStorage; the Activity form and Shortcut setup use it too) — scans
   receipts, and takes a prefill from `?amount=&kind=&category=&note=`. `/transfers?new`
   opens the transfer form. Android long-press shortcuts are in the manifest.
 - **A receipt is one tap from anywhere.** The top bar's camera button (every page, phone and

@@ -1,11 +1,13 @@
 <script lang="ts">
-	// Household settings: the phones that can log through the iPhone Shortcut,
-	// and signing out. Setting a phone up happens on the phone itself (/shortcut,
+	// Settings: the account this device logs to by default, the phones that can
+	// log through the iPhone Shortcut, and signing out. Setting a phone up happens on the phone itself (/shortcut,
 	// offered only on iPhone and iPad); seeing and revoking phones works anywhere.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { authStatus, deleteDeviceKey, getDeviceKeys, logout } from '$lib/api';
-	import type { DeviceKey } from '$lib/types';
+	import { authStatus, deleteDeviceKey, getAccounts, getDeviceKeys, logout } from '$lib/api';
+	import type { Account, DeviceKey } from '$lib/types';
+	import { defaultAccount, setDefaultAccount } from '$lib/remember';
+	import AccountOptions from '$lib/components/AccountOptions.svelte';
 	import { isAppleMobile } from '$lib/device';
 	import Button from '$lib/components/Button.svelte';
 
@@ -15,12 +17,19 @@
 	let revoking = $state<number | null>(null);
 	let loginRequired = $state(false);
 	let onAppleMobile = $state(false);
+	let accounts = $state<Account[]>([]);
+	// 0 = no default: the log form starts on the account used last.
+	let defaultId = $state(0);
 
 	onMount(async () => {
 		onAppleMobile = isAppleMobile();
 		try {
-			const [k, auth] = await Promise.all([getDeviceKeys(), authStatus()]);
+			const [k, auth, a] = await Promise.all([getDeviceKeys(), authStatus(), getAccounts()]);
 			keys = k;
+			accounts = a;
+			// A default whose account has since been closed reads as none.
+			const pinned = defaultAccount();
+			defaultId = a.some((x) => x.id === pinned) ? (pinned ?? 0) : 0;
 			loginRequired = auth.required;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load settings';
@@ -40,6 +49,11 @@
 		} finally {
 			revoking = null;
 		}
+	}
+
+	function chooseDefault(id: number) {
+		defaultId = id;
+		setDefaultAccount(id || null);
 	}
 
 	async function signOut() {
@@ -63,6 +77,26 @@
 
 	{#if error}
 		<p class="error-text">{error}</p>
+	{/if}
+
+	{#if accounts.length > 0}
+		<section class="card">
+			<h2>Default account</h2>
+			<p class="muted small">
+				The account a transaction you log by hand starts on. It's kept on this device, so each
+				phone can have its own. A category that always goes on one account, and income, still go
+				where they're set to.
+			</p>
+			<select
+				class="default-account"
+				aria-label="Default account"
+				value={defaultId}
+				onchange={(e) => chooseDefault(Number(e.currentTarget.value))}
+			>
+				<option value={0}>Last account used</option>
+				<AccountOptions {accounts} />
+			</select>
+		</section>
 	{/if}
 
 	<section class="card">
@@ -140,6 +174,12 @@
 	.small {
 		font-size: 0.875rem;
 		line-height: 1.5;
+	}
+
+	.default-account {
+		margin-top: 0.75rem;
+		width: 100%;
+		max-width: 24rem;
 	}
 
 	.setup {
