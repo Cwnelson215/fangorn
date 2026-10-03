@@ -209,6 +209,7 @@ export const deleteReceipt = (id: number) => send<void>('DELETE', `/api/receipts
 export const getTransfers = (limit?: number) =>
 	request<Transfer[]>(`/api/transfers${qs({ limit })}`);
 
+export const getTransfer = (groupId: string) => request<Transfer>(`/api/transfers/${groupId}`);
 export const createTransfer = (input: TransferInput) =>
 	send<Transfer>('POST', '/api/transfers', input);
 export const updateTransfer = (groupId: string, input: TransferInput) =>

@@ -7,14 +7,16 @@
 		getAccounts,
 		getCategories,
 		getTransactions,
+		getTransfer,
 		receiptImageUrl,
 		updateTransaction,
 		type TransactionQuery
 	} from '$lib/api';
-	import type { Account, Category, Transaction, TransactionInput } from '$lib/types';
+	import type { Account, Category, Transaction, TransactionInput, Transfer } from '$lib/types';
 	import { formatDayHeading, groupByDate, today } from '$lib/format';
 	import { pickRemembered, rememberId } from '$lib/remember';
 	import TransactionRow from '$lib/components/TransactionRow.svelte';
+	import TransferModal from '$lib/components/TransferModal.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -105,18 +107,37 @@
 		modalOpen = true;
 	}
 
-	// Income, expenses and refunds are edited here. A transfer is a linked pair,
-	// and a trade's cash side belongs to its trade — both have their own screens.
+	// Income, expenses and refunds are edited here, and a transfer opens its own
+	// form, which edits both legs. A trade's cash side belongs to its trade, on
+	// the account's page.
 	function isEditable(transaction: Transaction): boolean {
 		return (
 			transaction.kind === 'income' ||
 			transaction.kind === 'expense' ||
-			transaction.kind === 'refund'
+			transaction.kind === 'refund' ||
+			(transaction.kind === 'transfer' && !!transaction.transfer_group_id)
 		);
+	}
+
+	let transferOpen = $state(false);
+	let editingTransfer = $state<Transfer | null>(null);
+
+	async function openTransfer(groupId: string) {
+		loadError = null;
+		try {
+			editingTransfer = await getTransfer(groupId);
+			transferOpen = true;
+		} catch (e) {
+			loadError = e instanceof Error ? e.message : 'Could not load the transfer';
+		}
 	}
 
 	function openEdit(transaction: Transaction) {
 		if (!isEditable(transaction)) return;
+		if (transaction.kind === 'transfer') {
+			openTransfer(transaction.transfer_group_id!);
+			return;
+		}
 
 		editing = transaction;
 		kind = transaction.kind as 'income' | 'expense' | 'refund';
@@ -295,6 +316,8 @@
 		</div>
 	{/if}
 </div>
+
+<TransferModal {accounts} transfer={editingTransfer} bind:open={transferOpen} onsaved={load} />
 
 <Modal bind:open={modalOpen} title={editing ? 'Edit Transaction' : 'Log Transaction'}>
 	<form onsubmit={handleSubmit}>

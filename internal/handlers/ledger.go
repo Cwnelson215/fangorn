@@ -60,6 +60,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/transactions/{id}", h.DeleteTransaction)
 
 	mux.HandleFunc("GET /api/transfers", h.ListTransfers)
+	mux.HandleFunc("GET /api/transfers/{groupId}", h.GetTransfer)
 	mux.HandleFunc("POST /api/transfers", h.CreateTransfer)
 	mux.HandleFunc("PATCH /api/transfers/{groupId}", h.UpdateTransfer)
 	mux.HandleFunc("DELETE /api/transfers/{groupId}", h.DeleteTransfer)
@@ -417,6 +418,15 @@ func (h *LedgerHandler) ListTransfers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, transfers)
+}
+
+func (h *LedgerHandler) GetTransfer(w http.ResponseWriter, r *http.Request) {
+	transfer, err := h.svc.GetTransfer(r.Context(), h.householdID, r.PathValue("groupId"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, transfer)
 }
 
 func (h *LedgerHandler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
