@@ -349,6 +349,16 @@ export interface SavingsLine {
 	overspent: number;
 }
 
+/** One thing that moved a goal in a month. */
+export interface GoalActivity {
+	date: string;
+	/** The goal's part of it: positive filled the goal, negative drained it. */
+	amount: number;
+	/** The row on the goal's account it came from; null for a contribution logged by hand. */
+	transaction: Transaction | null;
+	note: string;
+}
+
 /** Household-wide choices. */
 export interface Settings {
 	/** Where income is logged by default, and savings are moved from. */

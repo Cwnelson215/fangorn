@@ -375,6 +375,19 @@ func TestGoalsShareTheIncomeAccount(t *testing.T) {
 	money(t, "vacation drained", got["Vacation"][0], 100)
 	money(t, "no shortfall charged on top", got["Vacation"][1], 0)
 
+	// Vacation's month lists its part of each paycheck and of the spending.
+	activity, err := f.svc.GoalActivity(f.ctx, f.hh, ids[1], day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(activity) != 3 {
+		t.Fatalf("vacation's activity = %+v, want 3 rows", activity)
+	}
+	money(t, "newest first: the spending", activity[0].Amount, -200)
+	money(t, "the whole expense", activity[0].Transaction.Amount, -3000)
+	money(t, "second paycheck", activity[1].Amount, 200)
+	money(t, "first paycheck", activity[2].Amount, 100)
+
 	// Swap them: now Emergency is drained first.
 	if err := f.svc.ReorderGoals(f.ctx, f.hh, []int{ids[1], ids[0]}); err != nil {
 		t.Fatal(err)

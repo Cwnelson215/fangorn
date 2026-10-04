@@ -181,3 +181,29 @@ func TestPlanByMonth(t *testing.T) {
 	})
 	check(t, "goal", got[1].Saved, 600)
 }
+
+// Each goal's entries name the movements that filled and drained it, with only
+// its own part of each, and add up to its month.
+func TestEntriesNameTheMovements(t *testing.T) {
+	goals := []Goal{longTerm(1, 1, 5000, 500), longTerm(2, 2, 5000, 300)}
+	paycheck, groceries := in("2026-01-15", 600), other("2026-01-20", -100)
+	paycheck.ID, groceries.ID = 7, 8
+	got := Replay(Account{Income: true}, goals, []Movement{paycheck, groceries})
+
+	if e := got[1].Entries; len(e) != 1 || e[0].ID != 7 || e[0].Amount != 500*100 {
+		t.Errorf("first goal's entries = %+v, want $500 of movement 7", e)
+	}
+	e := got[2].Entries
+	if len(e) != 2 || e[0].ID != 7 || e[0].Amount != 100*100 || e[1].ID != 8 || e[1].Amount != -100*100 {
+		t.Errorf("second goal's entries = %+v, want $100 of 7 then -$100 of 8", e)
+	}
+
+	// Off the income account one transfer reaches a goal twice — its share,
+	// then the overflow toward its target — and still reads as one entry.
+	transfer := in("2026-01-15", 2000)
+	transfer.ID = 9
+	got = Replay(Account{}, []Goal{longTerm(1, 1, 5000, 500)}, []Movement{transfer})
+	if e := got[1].Entries; len(e) != 1 || e[0].Amount != 2000*100 {
+		t.Errorf("entries = %+v, want one of $2,000", e)
+	}
+}

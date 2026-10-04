@@ -55,8 +55,10 @@ type Plan struct {
 }
 
 // Movement is one transaction on the account. Saving marks money added toward
-// goals; it only matters when Amount is positive.
+// goals; it only matters when Amount is positive. ID is the caller's own name
+// for it, handed back in Result.Entries.
 type Movement struct {
+	ID     int
 	Date   time.Time
 	Amount int64
 	Saving bool
@@ -82,6 +84,17 @@ type Result struct {
 	// Drained is the part of each month's change that was money taken back
 	// out by spending or withdrawals.
 	Drained map[time.Time]int64
+	// Entries is what each movement did to the goal, in replay order: positive
+	// where it filled it, negative where it drained it. A month's entries sum
+	// to its Moved.
+	Entries []Entry
+}
+
+// Entry is one movement's effect on one goal.
+type Entry struct {
+	ID     int // the Movement's ID
+	Date   time.Time
+	Amount int64
 }
 
 // MonthStart returns the first day of t's month.
@@ -133,14 +146,14 @@ func Replay(account Account, goals []Goal, movements []Movement) map[int]*Result
 				continue
 			}
 			if m.Saving {
-				free += fill(states, day, m.Amount, !account.Income)
+				free += fill(states, m, !account.Income)
 			} else {
 				free += m.Amount
 			}
 		}
 		for _, m := range movements[i:j] {
 			if m.Amount < 0 {
-				free = drain(states, day, -m.Amount, free)
+				free = drain(states, m, free)
 			}
 		}
 		i = j
@@ -156,9 +169,10 @@ func Replay(account Account, goals []Goal, movements []Movement) map[int]*Result
 	return out
 }
 
-// fill hands money added on day to the goals in priority order and returns
-// what none of them took.
-func fill(states []*state, day time.Time, amount int64, overflow bool) int64 {
+// fill hands the money m added to the goals in priority order and returns what
+// none of them took.
+func fill(states []*state, m Movement, overflow bool) int64 {
+	day, amount := m.Date, m.Amount
 	month := MonthStart(day)
 	var open []*state
 	for _, s := range states {
@@ -168,20 +182,21 @@ func fill(states []*state, day time.Time, amount int64, overflow bool) int64 {
 	}
 	for _, s := range open {
 		room := min(s.share(month)-s.res.Moved[month], s.goal.Target-s.held)
-		amount -= s.take(month, min(room, amount))
+		amount -= s.take(m, min(room, amount))
 	}
 	if overflow {
 		for _, s := range open {
-			amount -= s.take(month, min(s.goal.Target-s.held, amount))
+			amount -= s.take(m, min(s.goal.Target-s.held, amount))
 		}
 	}
 	return amount
 }
 
-// drain takes money going out of free money first, then off the goals from
-// the lowest priority up. It returns what's free afterwards, which goes below
-// zero only when the goals are empty too.
-func drain(states []*state, day time.Time, amount, free int64) int64 {
+// drain takes the money m sent out from free money first, then off the goals
+// from the lowest priority up. It returns what's free afterwards, which goes
+// below zero only when the goals are empty too.
+func drain(states []*state, m Movement, free int64) int64 {
+	day, amount := m.Date, -m.Amount
 	fromFree := min(max(free, 0), amount)
 	free -= fromFree
 	amount -= fromFree
@@ -195,6 +210,7 @@ func drain(states []*state, day time.Time, amount, free int64) int64 {
 		s.held -= t
 		s.res.Moved[month] -= t
 		s.res.Drained[month] += t
+		s.res.Entries = append(s.res.Entries, Entry{ID: m.ID, Date: day, Amount: -t})
 		amount -= t
 	}
 	return free - amount
@@ -227,11 +243,18 @@ func (s *state) share(month time.Time) int64 {
 	return amount
 }
 
-func (s *state) take(month time.Time, amount int64) int64 {
+func (s *state) take(m Movement, amount int64) int64 {
 	if amount <= 0 {
 		return 0
 	}
 	s.held += amount
-	s.res.Moved[month] += amount
+	s.res.Moved[MonthStart(m.Date)] += amount
+	// One movement can reach a goal twice: its share of the month, then the
+	// overflow toward its target.
+	if n := len(s.res.Entries); n > 0 && s.res.Entries[n-1].ID == m.ID && s.res.Entries[n-1].Amount > 0 {
+		s.res.Entries[n-1].Amount += amount
+	} else {
+		s.res.Entries = append(s.res.Entries, Entry{ID: m.ID, Date: m.Date, Amount: amount})
+	}
 	return amount
 }

@@ -215,7 +215,7 @@
 									<span
 										class="muted"
 										class:neg={pace.status === 'over'}
-										class:warn-text={pace.status === 'committed' || pace.status === 'ahead'}
+										class:warn-text={pace.status === 'committed'}
 									>
 										{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)}
 									</span>
@@ -224,7 +224,7 @@
 									spent={budget.spent}
 									amount={budget.amount}
 									scheduled={budget.scheduled}
-									color={budget.category_color}
+									color="var(--pos)"
 									{pace}
 								/>
 							</div>

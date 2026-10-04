@@ -10,6 +10,7 @@ import (
 	"github.com/lib/pq"
 
 	"github.com/cwnelson/fangorn/internal/goalfill"
+	"github.com/cwnelson/fangorn/internal/models"
 )
 
 // goalFill is what a goal linked to an account holds, from replaying the
@@ -18,6 +19,9 @@ type goalFill struct {
 	Saved   float64
 	moved   map[time.Time]int64
 	drained map[time.Time]int64
+	// entries is what each transaction on the account did to the goal
+	// (goalfill.Entry, whose ID is the transaction's).
+	entries []goalfill.Entry
 }
 
 // MovedIn is the change in what the goal held during the month starting at
@@ -133,7 +137,7 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 			return nil, fmt.Errorf("totalling before the goals: %w", err)
 		}
 		mrows, err := s.db.QueryContext(ctx,
-			`SELECT t.date, t.amount, `+goalMoney+` FROM transactions t
+			`SELECT t.id, t.date, t.amount, `+goalMoney+` FROM transactions t
 			 WHERE t.household_id = $1 AND t.account_id = $2 AND t.kind <> 'trade' AND t.date >= $3
 			 ORDER BY t.date, t.id`,
 			householdID, accountID, a.from)
@@ -145,7 +149,7 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 			var m goalfill.Movement
 			var date time.Time
 			var amount float64
-			if err := mrows.Scan(&date, &amount, &m.Saving); err != nil {
+			if err := mrows.Scan(&m.ID, &date, &amount, &m.Saving); err != nil {
 				mrows.Close()
 				return nil, fmt.Errorf("scanning the goals' account: %w", err)
 			}
@@ -162,8 +166,92 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 			Opening: toCents(a.opening + before), Income: a.income,
 		}, a.goals, movements)
 		for id, r := range results {
-			out[id] = goalFill{Saved: cents(r.Saved), moved: r.Moved, drained: r.Drained}
+			out[id] = goalFill{Saved: cents(r.Saved), moved: r.Moved, drained: r.Drained, entries: r.Entries}
 		}
+	}
+	return out, nil
+}
+
+// GoalActivity is what moved a goal in a month, newest first: for a goal linked
+// to an account, each transaction on that account with the part of it the goal
+// took or gave up (goalFills — on a shared account that is often less than the
+// whole transaction); for one tracked by hand, its logged contributions. The
+// amounts sum to the month's SavingsLine.Moved.
+func (s *Service) GoalActivity(ctx context.Context, householdID, goalID int, month string) ([]models.GoalActivity, error) {
+	monthStart, _, err := s.resolveBudgetMonth(ctx, householdID, month)
+	if err != nil {
+		return nil, err
+	}
+	goal, err := s.GetGoal(ctx, householdID, goalID)
+	if err != nil {
+		return nil, err
+	}
+	out := []models.GoalActivity{}
+
+	if goal.AccountID == nil {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT date, amount, COALESCE(note, '') FROM goal_contributions
+			 WHERE goal_id = $1 AND date >= $2::date AND date < ($2::date + INTERVAL '1 month')
+			 ORDER BY date DESC, id DESC`, goalID, monthStart)
+		if err != nil {
+			return nil, fmt.Errorf("listing contributions: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a models.GoalActivity
+			var date time.Time
+			if err := rows.Scan(&date, &a.Amount, &a.Note); err != nil {
+				return nil, fmt.Errorf("scanning contribution: %w", err)
+			}
+			a.Date = dateStr(date)
+			out = append(out, a)
+		}
+		return out, rows.Err()
+	}
+
+	fills, err := s.goalFills(ctx, householdID)
+	if err != nil {
+		return nil, err
+	}
+	from := monthKey(monthStart)
+	to := from.AddDate(0, 1, 0)
+	var entries []goalfill.Entry
+	var ids []int64
+	for _, e := range fills[goalID].entries {
+		if !e.Date.Before(from) && e.Date.Before(to) {
+			entries = append(entries, e)
+			ids = append(ids, int64(e.ID))
+		}
+	}
+	if len(entries) == 0 {
+		return out, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		txnSelect+` WHERE t.household_id = $1 AND t.id = ANY($2)`, householdID, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("loading the goal's transactions: %w", err)
+	}
+	defer rows.Close()
+	txns := map[int]models.Transaction{}
+	for rows.Next() {
+		t, err := scanTxn(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning the goal's transaction: %w", err)
+		}
+		txns[t.ID] = t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// The replay runs oldest first.
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		a := models.GoalActivity{Date: e.Date.Format(models.DateOnly), Amount: cents(e.Amount)}
+		if t, ok := txns[e.ID]; ok {
+			a.Transaction = &t
+		}
+		out = append(out, a)
 	}
 	return out, nil
 }

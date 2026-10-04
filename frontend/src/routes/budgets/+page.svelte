@@ -11,8 +11,10 @@
 		getBudgets,
 		getCategories,
 		getGoal,
+		getGoalActivity,
 		getGoals,
 		getSettings,
+		getTransactions,
 		reopenGoal,
 		reorderGoals,
 		setBudget,
@@ -21,11 +23,22 @@
 		updateGoal,
 		updateSettings
 	} from '$lib/api';
-	import type { Account, Budget, Category, DebtLine, Goal, GoalInput, SavingsLine } from '$lib/types';
+	import type {
+		Account,
+		Budget,
+		Category,
+		DebtLine,
+		Goal,
+		GoalInput,
+		SavingsLine,
+		Transaction
+	} from '$lib/types';
 	import {
 		formatCurrency,
 		formatDate,
 		formatMonth,
+		formatSigned,
+		monthEnd,
 		monthStart,
 		shiftMonth,
 		today
@@ -34,6 +47,7 @@
 	import Field from '$lib/components/Field.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import BudgetBar from '$lib/components/BudgetBar.svelte';
+	import ActivityDropdown, { type ActivityRow } from '$lib/components/ActivityDropdown.svelte';
 	import { budgetPace, incomePace } from '$lib/budget';
 	import type { CategoryKind } from '$lib/types';
 
@@ -48,6 +62,9 @@
 	// Where income lands, and savings are moved from.
 	let incomeAccountId = $state(0);
 	let budgetsLoading = $state(false);
+	// Bumped each time the month's numbers reload, so an open list of
+	// transactions under a line reloads with them.
+	let loadedCount = $state(0);
 	let goals: Goal[] = $state([]);
 	let categories: Category[] = $state([]);
 	let accounts: Account[] = $state([]);
@@ -126,6 +143,7 @@
 			savings = data.savings;
 			shortfall = data.savings_shortfall;
 			debts = data.debts;
+			loadedCount++;
 		} finally {
 			if (requested === month) budgetsLoading = false;
 		}
@@ -414,6 +432,60 @@
 		}
 	}
 
+	// The transactions behind each line, for its dropdown. Each list adds up to
+	// the number on the line's bar.
+	const txnRow = (t: Transaction, ...detail: (string | null | undefined)[]): ActivityRow => ({
+		key: t.id,
+		date: t.date,
+		description: t.description,
+		detail: detail.filter(Boolean).join(' · '),
+		amount: t.amount
+	});
+
+	// A category's kind is its transactions' kind, so the category alone picks
+	// out exactly what the budget counted: expenses and refunds, or income.
+	async function budgetActivity(budget: Budget): Promise<ActivityRow[]> {
+		const txns = await getTransactions({
+			category_id: budget.category_id,
+			from: month,
+			to: monthEnd(month),
+			limit: 500
+		});
+		return txns.map((t) => txnRow(t, t.kind === 'refund' ? 'Refund' : '', t.merchant, t.account_name));
+	}
+
+	// A goal on a shared account often holds only part of a transaction; the
+	// row shows that part and says what it was part of.
+	async function savingsActivity(line: SavingsLine): Promise<ActivityRow[]> {
+		const activity = await getGoalActivity(line.goal_id, month);
+		return activity.map((a, i) => {
+			const t = a.transaction;
+			if (!t) {
+				return { key: `c${i}`, date: a.date, description: a.note || 'Added by hand', amount: a.amount };
+			}
+			const whole = Math.abs(a.amount - t.amount) < 0.005;
+			const kind = t.kind === 'transfer' ? 'Transfer' : t.kind === 'income' ? 'Income' : '';
+			return {
+				...txnRow(t, kind, t.merchant, whole ? '' : `of ${formatSigned(t.amount)}`),
+				amount: a.amount
+			};
+		});
+	}
+
+	// Everything on the card or loan in the month: payments in, and the charges
+	// they are measured against. A dropped balance counts as neither.
+	async function debtActivity(line: DebtLine): Promise<ActivityRow[]> {
+		const txns = await getTransactions({
+			account_id: line.account_id,
+			from: month,
+			to: monthEnd(month),
+			limit: 500
+		});
+		return txns
+			.filter((t) => t.kind !== 'adjustment')
+			.map((t) => txnRow(t, t.debt_payment ? 'Payment' : t.category_name, t.merchant));
+	}
+
 	// "Oct" for a month's first day, for the "Oct only" tag on a monthly goal.
 	const monthShort = (m: string) =>
 		new Date(m + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' });
@@ -551,6 +623,11 @@
 									· <span class="pos">{formatCurrency(budget.spent - budget.amount)} more than expected</span>
 								{/if}
 							</div>
+							<ActivityDropdown
+								load={() => budgetActivity(budget)}
+								stamp={loadedCount}
+								empty="No income here in {formatMonth(month)}."
+							/>
 						</div>
 					{/each}
 				</div>
@@ -649,6 +726,12 @@
 									· {formatCurrency(line.saved)} of {formatCurrency(line.target_amount)} overall
 								{/if}
 							</div>
+							<ActivityDropdown
+								load={() => savingsActivity(line)}
+								stamp={loadedCount}
+								label="Transactions & transfers"
+								empty="Nothing has gone toward this in {formatMonth(month)}."
+							/>
 						</div>
 					{/each}
 				</div>
@@ -692,6 +775,12 @@
 								{#if toGo > 0.005}· {formatCurrency(toGo)} to go{/if}
 								· {formatCurrency(line.owed)} owed now
 							</div>
+							<ActivityDropdown
+								load={() => debtActivity(line)}
+								stamp={loadedCount}
+								label="Payments & charges"
+								empty="No payments or charges in {formatMonth(month)}."
+							/>
 						</div>
 					{/each}
 				</div>
@@ -747,7 +836,7 @@
 								spent={budget.spent}
 								amount={budget.amount}
 								scheduled={budget.scheduled}
-								color={budget.category_color}
+								color="var(--pos)"
 								{pace}
 							/>
 							<div class="item-foot muted">
@@ -768,13 +857,12 @@
 								{:else}
 									· {formatCurrency(remaining)} left
 								{/if}
-								{#if pace.status === 'ahead' && pace.projected !== null}
-									·
-									<span class="warn-text">
-										ahead of pace, on track for {formatCurrency(pace.projected)}
-									</span>
-								{/if}
 							</div>
+							<ActivityDropdown
+								load={() => budgetActivity(budget)}
+								stamp={loadedCount}
+								empty="Nothing spent here in {formatMonth(month)}."
+							/>
 						</div>
 					{/each}
 				</div>

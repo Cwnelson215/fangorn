@@ -126,6 +126,12 @@ export function shiftMonth(month: string, delta: number): string {
 	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
 
+/** The last day of the month starting at `month` (YYYY-MM-01). */
+export function monthEnd(month: string): string {
+	const [y, m] = month.split('-').map(Number);
+	return `${month.slice(0, 8)}${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+}
+
 /** Describes how far away a date is, e.g. "in 3 days" or "2 days ago". */
 export function relativeDays(date: string): string {
 	const target = parseDate(date);

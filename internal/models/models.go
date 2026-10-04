@@ -491,6 +491,17 @@ type SavingsLine struct {
 	Overspent float64 `json:"overspent"`
 }
 
+// GoalActivity is one thing that moved a goal in a month. Amount is the goal's
+// part of it: positive filled the goal, negative drained it.
+type GoalActivity struct {
+	Date   string  `json:"date"`
+	Amount float64 `json:"amount"`
+	// Transaction is the row on the goal's account this came from; nil for a
+	// contribution logged by hand, which carries Note instead.
+	Transaction *Transaction `json:"transaction"`
+	Note        string       `json:"note"`
+}
+
 // Trade is one entry in an investment account's trade log. Side is one of the
 // portfolio.Side* constants. Amount is the dollar figure (see portfolio.CashAmount).
 type Trade struct {

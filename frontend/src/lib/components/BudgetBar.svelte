@@ -1,7 +1,7 @@
 <script lang="ts">
 	// A budget's progress bar, shared by the dashboard and the budgets page. While
-	// the month is in progress it also marks how much of the month has passed, so
-	// "$300 of $400" on the 10th reads as a warning rather than "$100 left".
+	// the month is in progress it also marks how much of the month has passed.
+	// The bar turns amber once half the amount is used and red past all of it.
 	// Recurring charges still to post show as a striped segment after the spend.
 	import type { BudgetPace } from '$lib/budget';
 
@@ -24,7 +24,7 @@
 	let fill = $derived(
 		pace.status === 'over'
 			? 'var(--neg)'
-			: pace.status === 'committed' || pace.status === 'ahead'
+			: pace.status === 'committed' || pace.status === 'half'
 				? 'var(--warn)'
 				: (color ?? 'var(--accent)')
 	);

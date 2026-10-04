@@ -2,11 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { budgetPace, incomePace, monthElapsed } from './budget';
 
 /**
- * These two functions decide what colour a budget bar is and what warning sits
- * under it, which makes them the most user-visible arithmetic in the app — and
- * the easiest to get subtly wrong, because every case is a date boundary. Every
- * test here pins `on` explicitly: a test that reads the clock would pass all
- * month and fail on the 31st.
+ * These functions decide what colour a budget bar is, what warning sits under
+ * it and where its "today" mark goes. Every test here pins `on` explicitly: a
+ * test that reads the clock would pass all month and fail on the 31st.
  */
 
 /** The shape budgetPace destructures, so cases read as money rather than args. */
@@ -41,17 +39,13 @@ describe('monthElapsed', () => {
 
 describe('budgetPace', () => {
 	it('flags a budget that is already over', () => {
-		const pace = budgetPace(budget(450, 400), '2026-03-01', '2026-03-10');
-		expect(pace.status).toBe('over');
+		expect(budgetPace(budget(450, 400), '2026-03-01', '2026-03-10').status).toBe('over');
 	});
 
 	it('flags a budget that scheduled charges will take over', () => {
-		// $300 spent of $400 is fine on its own; the $150 subscription still to
-		// post this month is what makes it certain to bust. That is a fact, not a
-		// projection, so it must not be reported as mere pace.
+		// $300 spent of $400 is under the limit; the $150 subscription still to
+		// post this month is what makes it certain to bust.
 		expect(budgetPace(budget(300, 400, 150), '2026-03-01', '2026-03-10').status).toBe('committed');
-		// Without the commitment the same spend is simply fine.
-		expect(budgetPace(budget(300, 400), '2026-03-01', '2026-03-02').status).toBe('ahead');
 	});
 
 	it('reports over rather than committed once the limit is actually passed', () => {
@@ -59,57 +53,42 @@ describe('budgetPace', () => {
 		expect(budgetPace(budget(450, 400, 150), '2026-03-01', '2026-03-10').status).toBe('over');
 	});
 
-	it('flags spending that outruns the calendar', () => {
-		// Half the month gone, 75% of the limit spent: on this trajectory the month
-		// ends at $600 against a $400 budget.
-		const pace = budgetPace(budget(300, 400), '2026-03-01', '2026-03-16');
-		expect(pace.status).toBe('ahead');
-		expect(pace.projected).toBeCloseTo(300 / (16 / 31));
+	it('turns at half the limit, and stays there up to the limit itself', () => {
+		expect(budgetPace(budget(199.99, 400), '2026-03-01', '2026-03-16').status).toBe('ok');
+		expect(budgetPace(budget(200, 400), '2026-03-01', '2026-03-16').status).toBe('half');
+		// Spending exactly the limit isn't over it.
+		expect(budgetPace(budget(400, 400), '2026-03-01', '2026-03-16').status).toBe('half');
 	});
 
-	it('allows ten points of slack before calling it ahead', () => {
-		// One big shop early in the month shouldn't light up the whole page, so the
-		// threshold is elapsed + 0.1, and it is strictly greater — landing exactly
-		// on the line is still fine. Against a $1 budget the spend *is* the
-		// fraction, which keeps the boundary exact instead of nearly-exact.
-		const elapsed = 16 / 31; // asking on the 16th of a 31-day month
-		expect(budgetPace(budget(elapsed + 0.1, 1), '2026-03-01', '2026-03-16').status).toBe('ok');
-		expect(budgetPace(budget(elapsed + 0.101, 1), '2026-03-01', '2026-03-16').status).toBe(
-			'ahead'
-		);
+	it('does not care how far through the month it is', () => {
+		// 75% spent on the 2nd used to be "ahead of pace"; now it is the same as
+		// 75% spent on the 30th, or in a month already over.
+		for (const on of ['2026-03-02', '2026-03-30', '2026-05-15']) {
+			expect(budgetPace(budget(300, 400), '2026-03-01', on).status).toBe('half');
+		}
+		expect(budgetPace(budget(100, 400), '2026-03-01', '2026-03-02').status).toBe('ok');
 	});
 
-	it('says nothing about pace outside the current month', () => {
-		// A finished month can't be "ahead of pace" — it's simply what happened —
-		// and a future month hasn't had the chance.
-		const past = budgetPace(budget(390, 400), '2026-01-01', '2026-03-15');
-		expect(past.status).toBe('ok');
-		expect(past.elapsed).toBeNull();
-		expect(past.projected).toBeNull();
-
-		const future = budgetPace(budget(0, 400), '2026-06-01', '2026-03-15');
-		expect(future.status).toBe('ok');
-		expect(future.projected).toBeNull();
+	it('marks the month only while it is in progress', () => {
+		expect(budgetPace(budget(0, 400), '2026-03-01', '2026-03-16').elapsed).toBeCloseTo(16 / 31);
+		expect(budgetPace(budget(0, 400), '2026-01-01', '2026-03-15').elapsed).toBeNull();
+		expect(budgetPace(budget(0, 400), '2026-06-01', '2026-03-15').elapsed).toBeNull();
 	});
 
 	it('still reports over and committed outside the current month', () => {
-		// Those two are facts about the money, not about the calendar.
 		expect(budgetPace(budget(450, 400), '2026-01-01', '2026-03-15').status).toBe('over');
 		expect(budgetPace(budget(0, 400, 500), '2026-06-01', '2026-03-15').status).toBe('committed');
 	});
 
-	it('does not divide by a zero budget', () => {
-		// SetBudget rejects a zero amount, but the bar must not render NaN if one
-		// ever reaches it.
-		const pace = budgetPace(budget(0, 0), '2026-03-01', '2026-03-16');
-		expect(pace.status).toBe('ok');
-		expect(Number.isNaN(pace.projected ?? 0)).toBe(false);
+	it('calls a zero budget with nothing spent ok', () => {
+		// SetBudget rejects a zero amount, but one must not read as half used.
+		expect(budgetPace(budget(0, 0), '2026-03-01', '2026-03-16').status).toBe('ok');
 	});
 });
 
 describe('incomePace', () => {
 	it('is never over and marks the month only while it is in progress', () => {
-		expect(incomePace('2026-09-01', '2026-09-15')).toEqual({ status: 'ok', elapsed: 0.5, projected: null });
+		expect(incomePace('2026-09-01', '2026-09-15')).toEqual({ status: 'ok', elapsed: 0.5 });
 		expect(incomePace('2026-08-01', '2026-09-15').elapsed).toBeNull();
 	});
 });

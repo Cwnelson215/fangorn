@@ -87,6 +87,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/goals", h.CreateGoal)
 	mux.HandleFunc("PUT /api/goals/order", h.ReorderGoals)
 	mux.HandleFunc("GET /api/goals/{id}", h.GetGoal)
+	mux.HandleFunc("GET /api/goals/{id}/activity", h.GoalActivity)
 	mux.HandleFunc("PATCH /api/goals/{id}", h.UpdateGoal)
 	mux.HandleFunc("DELETE /api/goals/{id}", h.DeleteGoal)
 	mux.HandleFunc("POST /api/goals/{id}/contribute", h.ContributeToGoal)
@@ -695,6 +696,20 @@ func (h *LedgerHandler) GetGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, goal)
+}
+
+// GoalActivity lists what moved a goal in ?month= (default: this month).
+func (h *LedgerHandler) GoalActivity(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	activity, err := h.svc.GoalActivity(r.Context(), h.householdID, id, r.URL.Query().Get("month"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, activity)
 }
 
 func (h *LedgerHandler) UpdateGoal(w http.ResponseWriter, r *http.Request) {

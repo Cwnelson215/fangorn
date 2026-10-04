@@ -36,7 +36,7 @@ source .env && go run ./cmd/server   # backend on :3000
 go test ./...                 # DB-backed ledger/scheduler tests skip unless FANGORN_TEST_DSN is set
 cd frontend && npm run dev    # Vite on :5173, proxies /api and /health to :3000
 cd frontend && npm run check  # svelte-check — keep this clean
-cd frontend && npm test       # vitest — pure logic in src/lib (budget pace math)
+cd frontend && npm test       # vitest — pure logic in src/lib (budget bar status, projections)
 cd frontend && npm run build  # required before `go build`; the binary embeds frontend/build
 ```
 
@@ -251,6 +251,15 @@ month. "Add money" on the line is a real transfer from the income account into t
 which then fills that account's goals in order, so on a shared account it isn't aimed at one goal —
 and is hidden for goals on the income account, which fill from income by themselves. A goal with no
 account still takes hand-logged `goal_contributions`.
+
+**Each line opens to what's behind it.** Every income, savings, debt and spending line on the
+budgets page has a closed `ActivityDropdown` that fetches on first open and again whenever the month
+reloads. A budget's is its category's transactions for the month (`GET /api/transactions` — the
+category alone selects what `spent` counted); a debt line's is everything on the account but
+adjustments. A goal's comes from `GET /api/goals/{id}/activity?month=` (`ledger.GoalActivity`): the
+replay records which movement filled or drained each goal (`goalfill.Result.Entries`), so a row
+shows the goal's **part** of a transaction ("of +$400.00" when it isn't the whole thing), drains
+included, and the rows sum to the line's `moved`. A hand-tracked goal lists its contributions.
 
 **Spending from savings.** When more leaves the income account in a month than the income there was
 to plan on less the savings planned, the difference was money meant for savings
