@@ -216,7 +216,7 @@
 						purchases.
 					</p>
 				{:else}
-					<HoldingsTable {holdings} />
+					<HoldingsTable {holdings} cashFund={account.cash_fund} />
 				{/if}
 
 				<p class="muted small price-note">

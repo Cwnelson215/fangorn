@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -324,6 +325,36 @@ func (f *fixture) investment(name, since string, cash float64, fund *string) mod
 		f.t.Fatalf("CreateAccount(%s): %v", name, err)
 	}
 	return a
+}
+
+// The cash fund is the account's cash, so it can't also be held as a position:
+// the same dollars would show on two lines and only one would earn the dividend.
+func TestCashFundCannotBeTraded(t *testing.T) {
+	f := newFixture(t)
+	fund := fmt.Sprintf("SPAXX%d", f.hh)
+	f.price(fund, 1, 1)
+	other := fmt.Sprintf("FZROX%d", f.hh)
+	f.price(other, 20, 20)
+
+	brokerage := f.investment("Brokerage", "2026-06-01", 5000, &fund)
+	_, err := f.svc.CreateTrade(f.ctx, f.hh, brokerage.ID, ledger.TradeInput{
+		Symbol: fund, Side: "opening", TradeDate: "2026-06-02", Shares: 100, Price: 1,
+	})
+	wantInvalid(t, err)
+	tr := f.trade(brokerage.ID, "buy", other, "2026-06-02", 10, 20)
+	_, err = f.svc.UpdateTrade(f.ctx, f.hh, tr.ID, ledger.TradeInput{
+		Symbol: fund, Side: "buy", TradeDate: "2026-06-02", Shares: 200, Price: 1,
+	})
+	wantInvalid(t, err)
+
+	// An account holding the fund as a position can't then name it as its cash.
+	plain := f.investment("Plain", "2026-06-01", 5000, nil)
+	f.trade(plain.ID, "opening", fund, "2026-06-02", 100, 1)
+	_, err = f.svc.UpdateAccount(f.ctx, f.hh, plain.ID, ledger.AccountInput{
+		Name: "Plain", Type: models.AccountInvestment, StartingBalance: 5000,
+		StartingBalanceDate: "2026-06-01", CashFund: &fund,
+	})
+	wantInvalid(t, err)
 }
 
 func simpleYield(y float64) float64 { return (math.Pow(1+y/100/12, 12) - 1) * 100 }

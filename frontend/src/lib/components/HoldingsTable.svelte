@@ -3,7 +3,12 @@
 	import { formatCurrency, formatPercent, formatPrice, formatShares, formatSigned } from '$lib/format';
 
 	// Also renders the household-wide summary, which has no account_id.
-	let { holdings }: { holdings: Omit<Holdings, 'account_id'> } = $props();
+	// cashFund is the money market fund the account's cash sits in (SPAXX), which
+	// the brokerage lists as a position of its own.
+	let {
+		holdings,
+		cashFund = null
+	}: { holdings: Omit<Holdings, 'account_id'>; cashFund?: string | null } = $props();
 
 	// Which merged positions are opened up to their accounts, by symbol.
 	let open = $state<Record<string, boolean>>({});
@@ -116,7 +121,10 @@
 		{/each}
 
 		<div class="row summary">
-			<span class="holding"><span class="symbol">Cash</span></span>
+			<span class="holding">
+				<span class="symbol">Cash</span>
+				{#if cashFund}<span class="sub">held in {cashFund}</span>{/if}
+			</span>
 			<span class="shares"></span>
 			<span class="price"></span>
 			<span class="right num value" class:neg={holdings.cash < 0}>{formatCurrency(holdings.cash)}</span>

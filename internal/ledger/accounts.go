@@ -314,6 +314,25 @@ func (s *Service) UpdateAccount(ctx context.Context, householdID, id int, in Acc
 		}
 	}
 
+	// The fund is the account's cash, so shares of it logged as a holding would
+	// be the same money on two lines. Only a change of fund is checked, so an
+	// account that already has both can still be saved while it is sorted out.
+	if in.CashFund != nil {
+		var held bool
+		err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS (
+			   SELECT 1 FROM trades t JOIN accounts a ON a.id = t.account_id
+			   WHERE t.household_id = $1 AND t.account_id = $2 AND t.symbol = $3
+			     AND a.cash_fund IS DISTINCT FROM $3)`,
+			householdID, id, *in.CashFund).Scan(&held)
+		if err != nil {
+			return models.Account{}, fmt.Errorf("checking for trades in the cash fund: %w", err)
+		}
+		if held {
+			return models.Account{}, invalid("this account has %s logged as a holding; delete those trades first, since its cash already counts as %s", *in.CashFund, *in.CashFund)
+		}
+	}
+
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE accounts SET
 		   name = $1, institution_name = $2, type = $3, class = $4, mask = $5,

@@ -172,6 +172,9 @@ func (s *Service) CreateTrade(ctx context.Context, householdID, accountID int, i
 		if err := lockInvestmentAccount(ctx, tx, householdID, accountID); err != nil {
 			return err
 		}
+		if err := assertNotCashFund(ctx, tx, accountID, in.Symbol); err != nil {
+			return err
+		}
 		if err := seedSecurity(ctx, tx, in.Symbol, in.Price); err != nil {
 			return err
 		}
@@ -214,6 +217,9 @@ func (s *Service) UpdateTrade(ctx context.Context, householdID, id int, in Trade
 			return err
 		}
 		if err := lockInvestmentAccount(ctx, tx, householdID, accountID); err != nil {
+			return err
+		}
+		if err := assertNotCashFund(ctx, tx, accountID, in.Symbol); err != nil {
 			return err
 		}
 		if err := seedSecurity(ctx, tx, in.Symbol, in.Price); err != nil {
@@ -352,6 +358,21 @@ func lockInvestmentAccount(ctx context.Context, tx *sql.Tx, householdID, account
 	}
 	if !models.HoldsSecurities(typ) {
 		return invalid("trades can only be logged on investment and retirement accounts")
+	}
+	return nil
+}
+
+// assertNotCashFund refuses a trade in the account's own cash fund. That fund
+// IS the account's cash — Fidelity shows every uninvested dollar as SPAXX — so
+// a position in it would count the same money on a second line, and one the
+// monthly dividend never reaches, since that is paid on the cash balance.
+func assertNotCashFund(ctx context.Context, tx *sql.Tx, accountID int, symbol string) error {
+	var fund sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT cash_fund FROM accounts WHERE id = $1`, accountID).Scan(&fund); err != nil {
+		return fmt.Errorf("checking the cash fund: %w", err)
+	}
+	if fund.Valid && fund.String == symbol {
+		return invalid("%s is where this account's cash sits, so it is already counted as cash; log money in or out instead of a trade", symbol)
 	}
 	return nil
 }
