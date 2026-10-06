@@ -263,7 +263,9 @@ set with the ↑/↓ buttons, `PUT /api/goals/order`, which keeps the goals in t
 the rest). A linked goal's progress is its share of the account's money, worked out by replaying the
 account (`internal/goalfill`, pure, in cents; `ledger.goalFills` loads it):
 
-- Money **added** — a transfer in, or income there other than interest (`goalMoney`) — fills the
+- Money **added** — a transfer in, or income there other than what the account earned by itself
+  (`goalMoney`: not interest, and not dividends, whether posted, confirmed or typed in under the
+  Dividends or Interest category — a Roth's dividends aren't contributions) — fills the
   account's open goals in priority order, each up to what is left of its **share of that month** (a
   monthly goal's target; a long-term goal's plan in force, none without one), never past its target.
   Off the income account, what's left then fills the goals up to their targets in the same order

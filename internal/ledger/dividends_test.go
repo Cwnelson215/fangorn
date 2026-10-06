@@ -356,3 +356,46 @@ func TestDividendAlreadyLoggedOrDismissed(t *testing.T) {
 		t.Errorf("cross-household dismiss: %v", err)
 	}
 }
+
+// A goal on a Roth counts what was put in, not what its holdings paid: neither
+// a confirmed dividend nor one typed in under Dividends fills it.
+func TestGoalIgnoresDividends(t *testing.T) {
+	f := newFixture(t)
+	today := f.householdToday()
+	sym := f.sym("META")
+	f.price(sym, 700, 700)
+	checking := f.account("Checking", models.AccountChecking, 5000)
+	roth := f.retirement("Roth IRA", models.TaxRoth, 0)
+	f.trade(roth.ID, portfolio.SideOpening, sym, ymd(today.AddDate(0, 0, -40)), 10, 650)
+
+	goal, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
+		Name: "Max the Roth", TargetAmount: 7000, AccountID: &roth.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.transfer(checking.ID, roth.ID, 500, ymd(today))
+
+	f.declare(sym, today.AddDate(0, 0, -3), 0.525)
+	f.findDividends(today)
+	if err := f.svc.ConfirmDividend(f.ctx, f.hh, f.pendingDividends()[0].ID, ledger.DividendConfirmation{}); err != nil {
+		t.Fatal(err)
+	}
+	dividends, err := f.svc.ListCategories(f.ctx, f.hh, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dividendsID int
+	for _, c := range dividends {
+		if c.Name == "Dividends" {
+			dividendsID = c.ID
+		}
+	}
+	f.txn(roth.ID, models.KindIncome, ymd(today), 12.34, &dividendsID) // typed in by hand
+
+	goal, err = f.svc.GetGoal(f.ctx, f.hh, goal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	money(t, "only the contribution", goal.Saved, 500)
+}

@@ -12,11 +12,17 @@ import (
 )
 
 // goalMoney is which of a goal account's transactions count as money added:
-// transfers in, and income deposited there directly — but not interest or money
-// market dividends (source 'interest'), which the account earned by itself, and
-// not market growth, which isn't a transaction at all. Only its positive rows
-// matter; everything leaving the account is replayed the same way.
-const goalMoney = `(t.kind = 'transfer' OR (t.kind = 'income' AND t.source <> 'interest'))`
+// transfers in, and income deposited there directly — but not what the account
+// earned by itself: interest and money market dividends (source 'interest'),
+// stock and fund dividends (source 'dividend', or typed in under the Dividends
+// or Interest category), and market growth, which isn't a transaction at all.
+// A Roth's dividends aren't contributions, and a goal there tracks what was put
+// in. Only positive rows matter; everything leaving the account is replayed the
+// same way.
+const goalMoney = `(t.kind = 'transfer' OR (t.kind = 'income'
+	AND t.source NOT IN ('interest', 'dividend')
+	AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.id = t.category_id
+	                AND lower(btrim(c.name)) IN ('dividends', 'interest'))))`
 
 // A goal's target is how much to ADD, not a balance to reach. There are two
 // kinds: a long-term goal counts from the day it started, and a monthly goal
