@@ -452,7 +452,26 @@
 			to: monthEnd(month),
 			limit: 500
 		});
-		return txns.map((t) => txnRow(t, t.kind === 'refund' ? 'Refund' : '', t.merchant, t.account_name));
+		// What's still to post from recurring rules comes first: it is dated
+		// later than anything that has happened, and counts toward the bar's
+		// "scheduled", not its "spent".
+		const sign = budget.kind === 'income' ? 1 : -1;
+		const upcoming = [...budget.scheduled_items].reverse().map(
+			(s): ActivityRow => ({
+				key: `s${s.rule_id}-${s.date}`,
+				date: s.date,
+				description: s.name,
+				detail: [s.auto_post ? 'Scheduled' : 'Scheduled · log by hand', s.vendor, s.account_name]
+					.filter(Boolean)
+					.join(' · '),
+				amount: sign * s.amount,
+				pending: true
+			})
+		);
+		return [
+			...upcoming,
+			...txns.map((t) => txnRow(t, t.kind === 'refund' ? 'Refund' : '', t.merchant, t.account_name))
+		];
 	}
 
 	// A goal on a shared account often holds only part of a transaction; the

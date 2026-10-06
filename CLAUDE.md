@@ -299,7 +299,8 @@ account still takes hand-logged `goal_contributions`.
 **Each line opens to what's behind it.** Every income, savings, debt and spending line on the
 budgets page has a closed `ActivityDropdown` that fetches on first open and again whenever the month
 reloads. A budget's is its category's transactions for the month (`GET /api/transactions` — the
-category alone selects what `spent` counted); a debt line's is everything on the account but
+category alone selects what `spent` counted), with the recurring charges still to post listed
+first and muted (`Budget.scheduled_items`, which `scheduled` is the sum of); a debt line's is everything on the account but
 adjustments. A goal's comes from `GET /api/goals/{id}/activity?month=` (`ledger.GoalActivity`): the
 replay records which movement filled or drained each goal (`goalfill.Result.Entries`), so a row
 shows the goal's **part** of a transaction ("of +$400.00" when it isn't the whole thing), drains

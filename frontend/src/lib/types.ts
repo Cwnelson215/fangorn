@@ -264,6 +264,21 @@ export interface Budget {
 	spent: number;
 	/** Recurring expenses (or income) in the month not posted yet. Always 0 for past months. */
 	scheduled: number;
+	/** What `scheduled` is the sum of, soonest first. */
+	scheduled_items: ScheduledItem[];
+}
+
+/** One occurrence of a recurring rule still to post in a budget's month. */
+export interface ScheduledItem {
+	rule_id: number;
+	name: string;
+	vendor: string | null;
+	date: string;
+	/** A positive magnitude, like the rule's. */
+	amount: number;
+	account_name?: string;
+	/** False for a rule that waits to be logged by hand. */
+	auto_post: boolean;
 }
 
 export interface BudgetMonth {

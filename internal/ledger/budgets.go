@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/cwnelson/fangorn/internal/models"
@@ -218,14 +219,23 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 		return nil, err
 	}
 	for i := range out {
-		out[i].Scheduled = scheduled[out[i].CategoryID]
+		items := scheduled[out[i].CategoryID]
+		if items == nil {
+			items = []models.ScheduledItem{}
+		}
+		var total float64
+		for _, it := range items {
+			total += it.Amount
+		}
+		out[i].Scheduled, out[i].ScheduledItems = round2(total), items
 	}
 	return out, nil
 }
 
-// scheduledSpend totals, per category, the recurring expenses — and recurring
+// scheduledSpend lists, per category, the recurring expenses — and recurring
 // income, for expected-income budgets — that fall in the month but have not
-// posted yet. Categories are one kind or the other, so one map holds both.
+// posted yet, soonest first. Categories are one kind or the other, so one map
+// holds both. A budget's Scheduled is the sum of its list.
 //
 // Dates come from the rules through the date engine, not from
 // recurring_occurrences. Those rows only exist out to the scheduler's horizon,
@@ -239,7 +249,7 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 // scheduler just hasn't reached it. Past months report nothing: an unposted
 // charge there belongs to a manual rule nobody logged, and that's not a budget
 // commitment any more.
-func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStart string, today time.Time) (map[int]float64, error) {
+func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStart string, today time.Time) (map[int][]models.ScheduledItem, error) {
 	month, err := models.ParseDate(monthStart)
 	if err != nil {
 		return nil, err
@@ -258,7 +268,7 @@ func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStar
 		return nil, err
 	}
 
-	out := map[int]float64{}
+	out := map[int][]models.ScheduledItem{}
 	for _, rule := range rules {
 		if rule.Paused || rule.CategoryID == nil ||
 			(rule.Kind != models.KindExpense && rule.Kind != models.KindIncome) {
@@ -272,12 +282,15 @@ func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStar
 		if last, ok := handled[rule.ID]; ok && !last.Before(from) {
 			from = last.AddDate(0, 0, 1)
 		}
-		if n := len(spec.Occurrences(from, monthEnd, 0)); n > 0 {
-			out[*rule.CategoryID] += float64(n) * rule.Amount
+		for _, due := range spec.Occurrences(from, monthEnd, 0) {
+			out[*rule.CategoryID] = append(out[*rule.CategoryID], models.ScheduledItem{
+				RuleID: rule.ID, Name: rule.Name, Vendor: rule.Vendor, Date: dateStr(due),
+				Amount: rule.Amount, AccountName: rule.AccountName, AutoPost: rule.AutoPost,
+			})
 		}
 	}
-	for id, v := range out {
-		out[id] = round2(v)
+	for _, items := range out {
+		sort.SliceStable(items, func(i, j int) bool { return items[i].Date < items[j].Date })
 	}
 	return out, nil
 }

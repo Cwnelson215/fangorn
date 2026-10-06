@@ -393,6 +393,21 @@ type Budget struct {
 	// income) in this category that fall in the month but have not posted yet,
 	// as a positive number. Always 0 for past months.
 	Scheduled float64 `json:"scheduled"`
+	// ScheduledItems is what Scheduled is the sum of, soonest first.
+	ScheduledItems []ScheduledItem `json:"scheduled_items"`
+}
+
+// ScheduledItem is one occurrence of a recurring rule that falls in a budget's
+// month and hasn't posted yet. Amount is a positive magnitude, like the rule's.
+type ScheduledItem struct {
+	RuleID      int     `json:"rule_id"`
+	Name        string  `json:"name"`
+	Vendor      *string `json:"vendor"`
+	Date        string  `json:"date"`
+	Amount      float64 `json:"amount"`
+	AccountName string  `json:"account_name,omitempty"`
+	// AutoPost is false for a rule that waits to be logged by hand.
+	AutoPost bool `json:"auto_post"`
 }
 
 // BudgetMonth is one month of budgets as the budgets page shows it.

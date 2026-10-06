@@ -6,6 +6,8 @@
 		description: string;
 		detail?: string;
 		amount: number;
+		/** Planned, not happened yet: shown muted. */
+		pending?: boolean;
 	}
 </script>
 
@@ -61,7 +63,7 @@
 	{:else}
 		<ul>
 			{#each rows as row (row.key)}
-				<li>
+				<li class:pending={row.pending}>
 					<span class="date">{formatDateShort(row.date)}</span>
 					<span class="desc">
 						<span class="name">{row.description}</span>
@@ -167,5 +169,13 @@
 
 	.pos {
 		color: var(--pos);
+	}
+
+	/* Planned, not happened: quieter than what has. */
+	.pending .name,
+	.pending .amount {
+		color: var(--muted);
+		font-weight: 500;
+		font-style: italic;
 	}
 </style>

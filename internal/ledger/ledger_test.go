@@ -600,6 +600,21 @@ func TestBudgetScheduledSpend(t *testing.T) {
 	money(t, "this month scheduled", food1(thisMonth).Scheduled, 15+3)
 	nb := food1(next)
 	money(t, "next month scheduled", nb.Scheduled, 15+3+50)
+	// The total is the sum of a list, soonest first, each naming its rule.
+	var listed float64
+	for i, it := range nb.ScheduledItems {
+		listed += it.Amount
+		if it.Name == "" || it.Date < ym(next) || (i > 0 && it.Date < nb.ScheduledItems[i-1].Date) {
+			t.Errorf("scheduled item %d = %+v", i, it)
+		}
+	}
+	if len(nb.ScheduledItems) != 3 {
+		t.Errorf("next month lists %d scheduled items, want 3", len(nb.ScheduledItems))
+	}
+	money(t, "the list sums to the total", listed, nb.Scheduled)
+	if items := food1(prev).ScheduledItems; items == nil || len(items) != 0 {
+		t.Errorf("a past month lists %+v, want an empty list", items)
+	}
 	money(t, "next month spent (the posted meal kit)", nb.Spent, 50)
 }
 
