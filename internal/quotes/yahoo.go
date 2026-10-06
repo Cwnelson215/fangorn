@@ -91,12 +91,15 @@ type chartResponse struct {
 			Indicators struct {
 				Quote []chartQuote `json:"quote"`
 			} `json:"indicators"`
-			// Events is only present when asked for with events=div.
+			// Events is only present when asked for with events=.
 			Events struct {
-				Dividends map[string]struct {
-					Amount float64 `json:"amount"`
-					Date   int64   `json:"date"`
-				} `json:"dividends"`
+				Dividends    map[string]chartPayout `json:"dividends"`
+				CapitalGains map[string]chartPayout `json:"capitalGains"`
+				Splits       map[string]struct {
+					Date        int64   `json:"date"`
+					Numerator   float64 `json:"numerator"`
+					Denominator float64 `json:"denominator"`
+				} `json:"splits"`
 			} `json:"events"`
 		} `json:"result"`
 		Error *struct {
@@ -167,37 +170,59 @@ func (y *Yahoo) History(ctx context.Context, symbol string, from time.Time) ([]C
 	return closes(r.Timestamp, r.Indicators.Quote, r.Meta.ExchangeTimezoneName), nil
 }
 
-// Dividends reads the chart's dividend events. Each is dated by its ex-date in
-// the exchange's timezone, like a bar. A symbol that pays none comes back empty.
-func (y *Yahoo) Dividends(ctx context.Context, symbol string, from time.Time) ([]Dividend, error) {
+type chartPayout struct {
+	Amount float64 `json:"amount"`
+	Date   int64   `json:"date"`
+}
+
+// Events reads the chart's dividend and split events. Each is dated by its day
+// in the exchange's timezone, like a bar — for a dividend that is the ex-date.
+// A fund's capital gain distribution is a payout per share like any other, so
+// it is added to that day's dividend. A symbol with none comes back empty.
+func (y *Yahoo) Events(ctx context.Context, symbol string, from time.Time) (Events, error) {
 	q := url.Values{
 		"period1":  {strconv.FormatInt(from.Unix(), 10)},
 		"period2":  {strconv.FormatInt(time.Now().Unix(), 10)},
 		"interval": {"1d"},
-		"events":   {"div"},
+		"events":   {"div,splits,capitalGains"},
 	}
 	res, err := y.chart(ctx, symbol, q)
 	if err != nil {
-		return nil, err
+		return Events{}, err
 	}
 	r := res.Chart.Result[0]
 	loc, err := time.LoadLocation(r.Meta.ExchangeTimezoneName)
 	if err != nil {
 		loc, _ = time.LoadLocation("America/New_York")
 	}
-	out := []Dividend{}
-	for _, d := range r.Events.Dividends {
-		if d.Amount <= 0 || d.Date == 0 {
-			continue
-		}
-		yr, m, day := time.Unix(d.Date, 0).In(loc).Date()
-		ex := time.Date(yr, m, day, 0, 0, 0, 0, time.UTC)
-		if ex.Before(from.Truncate(24 * time.Hour)) {
-			continue
-		}
-		out = append(out, Dividend{ExDate: ex, Amount: d.Amount})
+	day := func(ts int64) time.Time {
+		yr, m, d := time.Unix(ts, 0).In(loc).Date()
+		return time.Date(yr, m, d, 0, 0, 0, 0, time.UTC)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ExDate.Before(out[j].ExDate) })
+	floor := from.Truncate(24 * time.Hour)
+
+	perDay := map[time.Time]float64{}
+	for _, payouts := range []map[string]chartPayout{r.Events.Dividends, r.Events.CapitalGains} {
+		for _, p := range payouts {
+			if p.Amount <= 0 || p.Date == 0 || day(p.Date).Before(floor) {
+				continue
+			}
+			perDay[day(p.Date)] += p.Amount
+		}
+	}
+	out := Events{Dividends: []Dividend{}, Splits: []Split{}}
+	for ex, amount := range perDay {
+		out.Dividends = append(out.Dividends, Dividend{ExDate: ex, Amount: amount})
+	}
+	for _, sp := range r.Events.Splits {
+		if sp.Numerator <= 0 || sp.Denominator <= 0 || sp.Numerator == sp.Denominator ||
+			sp.Date == 0 || day(sp.Date).Before(floor) {
+			continue
+		}
+		out.Splits = append(out.Splits, Split{Date: day(sp.Date), Numerator: sp.Numerator, Denominator: sp.Denominator})
+	}
+	sort.Slice(out.Dividends, func(i, j int) bool { return out.Dividends[i].ExDate.Before(out.Dividends[j].ExDate) })
+	sort.Slice(out.Splits, func(i, j int) bool { return out.Splits[i].Date.Before(out.Splits[j].Date) })
 	return out, nil
 }
 
@@ -336,26 +361,66 @@ var errBadCrumb = errors.New("yahoo: crumb rejected")
 // Yield returns a fund's published yield in percent — SPAXX's 7-day yield, for
 // example. A symbol Yahoo has no yield for is ErrNotFound.
 func (y *Yahoo) Yield(ctx context.Context, symbol string) (float64, error) {
-	pct, err := y.yield(ctx, symbol)
+	res, err := y.summary(ctx, symbol, "summaryDetail")
+	if err != nil {
+		return 0, err
+	}
+	raw := res.SummaryDetail.Yield.Raw
+	if raw == nil || *raw <= 0 || *raw >= 1 {
+		return 0, fmt.Errorf("%w: yahoo publishes no yield for %s", ErrNotFound, symbol)
+	}
+	// Yahoo gives a fraction (0.0333); keep the three decimals a fund quotes.
+	return math.Round(*raw*100*1000) / 1000, nil
+}
+
+// DividendPayDate is the ex-date and pay date of the symbol's latest declared
+// dividend. Both are dates at midnight UTC. Yahoo has none for mutual funds.
+func (y *Yahoo) DividendPayDate(ctx context.Context, symbol string) (time.Time, time.Time, error) {
+	res, err := y.summary(ctx, symbol, "calendarEvents")
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	ex, pay := res.CalendarEvents.ExDividendDate.Raw, res.CalendarEvents.DividendDate.Raw
+	if ex == nil || pay == nil || *ex <= 0 || *pay <= 0 {
+		return time.Time{}, time.Time{}, fmt.Errorf("%w: yahoo publishes no pay date for %s", ErrNotFound, symbol)
+	}
+	date := func(ts int64) time.Time { return time.Unix(ts, 0).UTC().Truncate(24 * time.Hour) }
+	return date(*ex), date(*pay), nil
+}
+
+// summary fetches one quoteSummary module, renewing the crumb once if the
+// session has expired.
+func (y *Yahoo) summary(ctx context.Context, symbol, module string) (summaryResult, error) {
+	res, err := y.summaryOnce(ctx, symbol, module)
 	if errors.Is(err, errBadCrumb) {
 		y.crumbMu.Lock()
 		y.crumb = ""
 		y.crumbMu.Unlock()
-		pct, err = y.yield(ctx, symbol)
+		res, err = y.summaryOnce(ctx, symbol, module)
 	}
-	return pct, err
+	return res, err
+}
+
+type summaryResult struct {
+	SummaryDetail struct {
+		Yield struct {
+			Raw *float64 `json:"raw"`
+		} `json:"yield"`
+	} `json:"summaryDetail"`
+	CalendarEvents struct {
+		ExDividendDate struct {
+			Raw *int64 `json:"raw"`
+		} `json:"exDividendDate"`
+		DividendDate struct {
+			Raw *int64 `json:"raw"`
+		} `json:"dividendDate"`
+	} `json:"calendarEvents"`
 }
 
 type quoteSummaryResponse struct {
 	QuoteSummary struct {
-		Result []struct {
-			SummaryDetail struct {
-				Yield struct {
-					Raw *float64 `json:"raw"`
-				} `json:"yield"`
-			} `json:"summaryDetail"`
-		} `json:"result"`
-		Error *struct {
+		Result []summaryResult `json:"result"`
+		Error  *struct {
 			Code        string `json:"code"`
 			Description string `json:"description"`
 		} `json:"error"`
@@ -367,33 +432,28 @@ type quoteSummaryResponse struct {
 	} `json:"finance"`
 }
 
-func (y *Yahoo) yield(ctx context.Context, symbol string) (float64, error) {
+func (y *Yahoo) summaryOnce(ctx context.Context, symbol, module string) (summaryResult, error) {
 	crumb, err := y.sessionCrumb(ctx)
 	if err != nil {
-		return 0, err
+		return summaryResult{}, err
 	}
-	q := url.Values{"modules": {"summaryDetail"}, "crumb": {crumb}}
+	q := url.Values{"modules": {module}, "crumb": {crumb}}
 	var res quoteSummaryResponse
 	status, err := y.get(ctx, "/v10/finance/quoteSummary/"+url.PathEscape(strings.ToUpper(symbol)), q, &res)
 	if status == http.StatusUnauthorized ||
 		(res.Finance.Error != nil && res.Finance.Error.Code == "Unauthorized") {
-		return 0, errBadCrumb
+		return summaryResult{}, errBadCrumb
 	}
 	if status == http.StatusNotFound {
-		return 0, ErrNotFound
+		return summaryResult{}, ErrNotFound
 	}
 	if err != nil {
-		return 0, err
+		return summaryResult{}, err
 	}
 	if len(res.QuoteSummary.Result) == 0 {
-		return 0, ErrNotFound
+		return summaryResult{}, ErrNotFound
 	}
-	raw := res.QuoteSummary.Result[0].SummaryDetail.Yield.Raw
-	if raw == nil || *raw <= 0 || *raw >= 1 {
-		return 0, fmt.Errorf("%w: yahoo publishes no yield for %s", ErrNotFound, symbol)
-	}
-	// Yahoo gives a fraction (0.0333); keep the three decimals a fund quotes.
-	return math.Round(*raw*100*1000) / 1000, nil
+	return res.QuoteSummary.Result[0], nil
 }
 
 // sessionCrumb returns the cached crumb, or starts a session for one: the

@@ -256,22 +256,46 @@ func TestYieldMissing(t *testing.T) {
 	}
 }
 
-func TestDividends(t *testing.T) {
+func TestEvents(t *testing.T) {
 	y := serve(t, map[string]string{"/v8/finance/chart/META": "chart_meta_dividends.json"})
-	divs, err := y.Dividends(context.Background(), "META", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+	ev, err := y.Events(context.Background(), "META", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Oldest first, each dated by its ex-date on the exchange.
+	divs := ev.Dividends
 	if len(divs) != 2 || divs[0].ExDate.Format("2006-01-02") != "2026-06-22" ||
 		divs[1].ExDate.Format("2006-01-02") != "2026-09-22" {
 		t.Fatalf("dividends = %+v", divs)
 	}
+	// A capital gain distribution on the same day is part of that day's payout.
+	approx(t, "june payout", divs[0].Amount, 0.525+1.1, 1e-9)
 	approx(t, "per share", divs[1].Amount, 0.525, 1e-9)
+	if len(ev.Splits) != 1 || ev.Splits[0].Date.Format("2006-01-02") != "2026-08-10" ||
+		ev.Splits[0].Numerator != 10 || ev.Splits[0].Denominator != 1 {
+		t.Fatalf("splits = %+v", ev.Splits)
+	}
 
-	// A symbol that pays none has no events block at all.
+	// A symbol with neither has no events block at all.
 	y = serve(t, map[string]string{"/v8/finance/chart/VOO": "chart_voo_history.json"})
-	if divs, err := y.Dividends(context.Background(), "VOO", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil || len(divs) != 0 {
-		t.Fatalf("no events: %+v, %v", divs, err)
+	ev, err = y.Events(context.Background(), "VOO", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || len(ev.Dividends) != 0 || len(ev.Splits) != 0 {
+		t.Fatalf("no events: %+v, %v", ev, err)
+	}
+}
+
+func TestDividendPayDate(t *testing.T) {
+	y, _ := yieldServer(t, "summary_crm_calendar.json")
+	ex, pay, err := y.DividendPayDate(context.Background(), "CRM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex.Format("2006-01-02") != "2026-09-17" || pay.Format("2006-01-02") != "2026-10-08" {
+		t.Errorf("ex %v, pay %v", ex, pay)
+	}
+	// A fund has no calendar; that's "none published", not an outage.
+	y, _ = yieldServer(t, "summary_noyield.json")
+	if _, _, err := y.DividendPayDate(context.Background(), "FZROX"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
 	}
 }

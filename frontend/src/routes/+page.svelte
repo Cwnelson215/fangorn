@@ -16,6 +16,7 @@
 	import ValueChart from '$lib/components/ValueChart.svelte';
 	import TrendChart from '$lib/components/TrendChart.svelte';
 	import GroupBySwitch from '$lib/components/GroupBySwitch.svelte';
+	import DividendsCard from '$lib/components/DividendsCard.svelte';
 	import { groupAccounts } from '$lib/grouping';
 	import { grouping } from '$lib/grouping.svelte';
 
@@ -37,6 +38,16 @@
 			error = e instanceof Error ? e.message : 'Could not load your dashboard';
 		} finally {
 			loading = false;
+		}
+	}
+
+	// After a dividend or split is confirmed: the same data again, without
+	// flashing the page back to "Loading…".
+	async function refresh() {
+		try {
+			data = await getDashboard();
+		} catch {
+			// The figures already shown stay; the next visit reloads them.
 		}
 	}
 
@@ -68,6 +79,8 @@
 				<a class="cta" href="/accounts">Add your first account</a>
 			</div>
 		{:else}
+			<DividendsCard onchange={refresh} />
+
 			<div class="stats">
 				<div class="card stat">
 					<span class="stat-label">Net Worth</span>

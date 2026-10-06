@@ -71,11 +71,32 @@ type Dividend struct {
 	Amount float64
 }
 
-// DividendProvider lists a symbol's dividends with an ex-date on or after
-// `from`, oldest first. Separate from Provider for the same reason as
-// YieldProvider.
-type DividendProvider interface {
-	Dividends(ctx context.Context, symbol string, from time.Time) ([]Dividend, error)
+// Split is a stock split: every Denominator shares became Numerator on Date.
+// 10 and 1 is a ten-for-one split; 1 and 10 is a reverse split.
+type Split struct {
+	Date        time.Time
+	Numerator   float64
+	Denominator float64
+}
+
+// Events is what happened to a symbol's shares: dividends (a fund's capital
+// gain distributions among them) and splits, each oldest first.
+type Events struct {
+	Dividends []Dividend
+	Splits    []Split
+}
+
+// EventsProvider lists a symbol's dividends and splits dated on or after
+// `from`. Separate from Provider for the same reason as YieldProvider.
+type EventsProvider interface {
+	Events(ctx context.Context, symbol string, from time.Time) (Events, error)
+}
+
+// PayDateProvider knows when a symbol's latest declared dividend is paid: its
+// ex-date, to match it to a Dividend, and the pay date. ErrNotFound when the
+// source publishes none — true of mutual funds.
+type PayDateProvider interface {
+	DividendPayDate(ctx context.Context, symbol string) (exDate, payDate time.Time, err error)
 }
 
 type Provider interface {

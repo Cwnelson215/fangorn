@@ -10,7 +10,6 @@ import (
 	"github.com/cwnelson/fangorn/internal/quotes"
 )
 
-
 func ymd(t time.Time) string { return t.Format("2006-01-02") }
 
 func (f *fixture) householdToday() time.Time {
@@ -112,7 +111,8 @@ func TestDividendFoundAndConfirmedAsCash(t *testing.T) {
 
 func math2(v float64) float64 { return float64(int64(v*100+0.5)) / 100 }
 
-// A reinvested dividend becomes a reinvest trade: more shares, no cash.
+// A reinvested dividend is income that bought shares the same day: it counts
+// as a dividend like any other, and the cash nets to nothing.
 func TestDividendConfirmedAsReinvestment(t *testing.T) {
 	f := newFixture(t)
 	today := f.householdToday()
@@ -149,14 +149,167 @@ func TestDividendConfirmedAsReinvestment(t *testing.T) {
 		t.Fatalf("holdings = %+v", h)
 	}
 	trades, _ := f.svc.ListTrades(f.ctx, f.hh, brokerage.ID)
-	var reinvest *models.Trade
+	var bought *models.Trade
 	for i := range trades {
-		if trades[i].Side == portfolio.SideReinvest {
-			reinvest = &trades[i]
+		if trades[i].Side == portfolio.SideBuy {
+			bought = &trades[i]
 		}
 	}
-	if reinvest == nil || reinvest.Amount != 30.12 || reinvest.TradeDate != ymd(ex) {
-		t.Fatalf("reinvest trade = %+v", reinvest)
+	if bought == nil || bought.Amount != 30.12 || bought.TradeDate != ymd(ex) {
+		t.Fatalf("reinvestment = %+v", bought)
+	}
+	income, err := f.svc.ListTransactions(f.ctx, f.hh, ledger.TransactionFilter{AccountID: brokerage.ID, Kind: models.KindIncome})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(income) != 1 || income[0].Amount != 30.12 || income[0].Source != models.SourceDividend {
+		t.Fatalf("income = %+v", income)
+	}
+}
+
+// With a published pay date, one tap waits for it and dates the dividend then.
+func TestDividendPayDate(t *testing.T) {
+	f := newFixture(t)
+	today := f.householdToday()
+	paid, upcoming := f.sym("META"), f.sym("CRM")
+	f.price(paid, 700, 700)
+	f.price(upcoming, 200, 200)
+	brokerage := f.account("Brokerage", models.AccountInvestment, 0)
+	since := ymd(today.AddDate(0, 0, -40))
+	f.trade(brokerage.ID, portfolio.SideOpening, paid, since, 1, 650)
+	f.trade(brokerage.ID, portfolio.SideOpening, upcoming, since, 1, 190)
+	ex := today.AddDate(0, 0, -12)
+	f.declare(paid, ex, 0.525)
+	f.declare(upcoming, ex, 0.44)
+	for sym, pay := range map[string]time.Time{paid: today.AddDate(0, 0, -5), upcoming: today.AddDate(0, 0, 2)} {
+		if err := f.svc.SaveDividendPayDate(f.ctx, sym, ex, pay); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.findDividends(today)
+	bysymbol := map[string]ledger.Dividend{}
+	for _, d := range f.pendingDividends() {
+		bysymbol[d.Symbol] = d
+	}
+	if d := bysymbol[paid]; d.PayDate == nil || *d.PayDate != ymd(today.AddDate(0, 0, -5)) {
+		t.Fatalf("pay date = %v", d.PayDate)
+	}
+
+	// Not paid yet: one tap is refused, and the dividend stays pending.
+	wantInvalid(t, f.svc.ConfirmDividend(f.ctx, f.hh, bysymbol[upcoming].ID, ledger.DividendConfirmation{}))
+	if err := f.svc.ConfirmDividend(f.ctx, f.hh, bysymbol[paid].ID, ledger.DividendConfirmation{}); err != nil {
+		t.Fatalf("ConfirmDividend: %v", err)
+	}
+	income, err := f.svc.ListTransactions(f.ctx, f.hh, ledger.TransactionFilter{AccountID: brokerage.ID, Kind: models.KindIncome})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(income) != 1 || income[0].Date != ymd(today.AddDate(0, 0, -5)) || income[0].Amount != 0.53 {
+		t.Fatalf("income = %+v", income)
+	}
+	if left := f.pendingDividends(); len(left) != 1 || left[0].Symbol != upcoming {
+		t.Fatalf("pending = %+v", left)
+	}
+}
+
+// Confirming a split restates the trades before it in post-split shares and
+// prices: the position, its cost and the cash are what they were, in new units.
+func TestSplitFoundAndConfirmed(t *testing.T) {
+	f := newFixture(t)
+	today := f.householdToday()
+	sym := f.sym("NVDA")
+	f.price(sym, 120, 120) // already quoted post-split
+	brokerage := f.account("Brokerage", models.AccountInvestment, 5000)
+	f.trade(brokerage.ID, portfolio.SideOpening, sym, ymd(today.AddDate(0, 0, -50)), 2, 1000)
+	f.trade(brokerage.ID, portfolio.SideBuy, sym, ymd(today.AddDate(0, 0, -30)), 1, 1100)
+	splitDay := today.AddDate(0, 0, -10)
+	f.trade(brokerage.ID, portfolio.SideBuy, sym, ymd(splitDay), 5, 118) // bought after: already post-split
+	cash := f.accountByID(brokerage.ID).CashBalance
+
+	split := []quotes.Split{{Date: splitDay, Numerator: 10, Denominator: 1}}
+	if err := f.svc.SaveSplits(f.ctx, sym, split); err != nil {
+		t.Fatal(err)
+	}
+	find := func() int {
+		n, err := f.svc.FindSplits(f.ctx, f.hh, today)
+		if err != nil {
+			t.Fatalf("FindSplits: %v", err)
+		}
+		return n
+	}
+	if n := find(); n != 1 {
+		t.Fatalf("raised %d splits, want 1", n)
+	}
+	if n := find(); n != 0 {
+		t.Fatalf("a second pass raised %d more", n)
+	}
+	pending, err := f.svc.ListSplits(f.ctx, f.hh, &brokerage.ID)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+	sp := pending[0]
+	if sp.Symbol != sym || sp.Shares != 3 || sp.SharesAfter != 30 || sp.SplitDate != ymd(splitDay) {
+		t.Fatalf("split = %+v", sp)
+	}
+
+	if err := f.svc.ConfirmSplit(f.ctx, f.hh, sp.ID); err != nil {
+		t.Fatalf("ConfirmSplit: %v", err)
+	}
+	h, err := f.svc.Holdings(f.ctx, f.hh, brokerage.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 3 became 30, plus the 5 bought after; what was paid hasn't changed.
+	if len(h.Positions) != 1 || h.Positions[0].Shares != 35 || h.Positions[0].CostBasis != 2000+1100+590 {
+		t.Fatalf("position = %+v", h.Positions)
+	}
+	if h.Cash != cash {
+		t.Errorf("cash went %v -> %v", cash, h.Cash)
+	}
+	// Twice would apply the ratio twice.
+	wantInvalid(t, f.svc.ConfirmSplit(f.ctx, f.hh, sp.ID))
+	if n := find(); n != 0 {
+		t.Error("a confirmed split was raised again")
+	}
+
+	// Another household can't reach it, and a dismissed one changes nothing.
+	g := newFixture(t)
+	if err := g.svc.DismissSplit(g.ctx, g.hh, sp.ID); err != ledger.ErrNotFound {
+		t.Errorf("cross-household dismiss: %v", err)
+	}
+}
+
+func TestSplitDismissed(t *testing.T) {
+	f := newFixture(t)
+	today := f.householdToday()
+	sym := f.sym("AMD")
+	f.price(sym, 60, 60)
+	brokerage := f.account("Brokerage", models.AccountInvestment, 0)
+	f.trade(brokerage.ID, portfolio.SideOpening, sym, ymd(today.AddDate(0, 0, -50)), 10, 55)
+	// A reverse split, and one from before the lookback that is never raised.
+	err := f.svc.SaveSplits(f.ctx, sym, []quotes.Split{
+		{Date: today.AddDate(0, 0, -3), Numerator: 1, Denominator: 4},
+		{Date: today.AddDate(0, 0, -300), Numerator: 2, Denominator: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := f.svc.FindSplits(f.ctx, f.hh, today); err != nil || n != 1 {
+		t.Fatalf("FindSplits = %d, %v", n, err)
+	}
+	pending, _ := f.svc.ListSplits(f.ctx, f.hh, nil)
+	if len(pending) != 1 || pending[0].SharesAfter != 2.5 {
+		t.Fatalf("pending = %+v", pending)
+	}
+	if err := f.svc.DismissSplit(f.ctx, f.hh, pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := f.svc.Holdings(f.ctx, f.hh, brokerage.ID)
+	if h.Positions[0].Shares != 10 {
+		t.Errorf("shares = %v; dismissing must leave the trades alone", h.Positions[0].Shares)
+	}
+	if left, _ := f.svc.ListSplits(f.ctx, f.hh, nil); len(left) != 0 {
+		t.Error("still pending after dismissing")
 	}
 }
 

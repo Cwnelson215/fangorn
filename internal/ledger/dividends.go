@@ -7,6 +7,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/cwnelson/fangorn/internal/models"
 	"github.com/cwnelson/fangorn/internal/portfolio"
 	"github.com/cwnelson/fangorn/internal/quotes"
@@ -40,8 +42,11 @@ type Dividend struct {
 	Name        *string `json:"name"`
 	QuoteType   *string `json:"quote_type"`
 	ExDate      string  `json:"ex_date"`
-	PerShare    float64 `json:"per_share"`
-	Shares      float64 `json:"shares"`
+	// PayDate is the day it is paid, when the provider publishes one. Confirming
+	// waits for it, and dates the dividend then.
+	PayDate  *string `json:"pay_date"`
+	PerShare float64 `json:"per_share"`
+	Shares   float64 `json:"shares"`
 	// Amount is the estimate: shares × per-share, to the cent.
 	Amount float64 `json:"amount"`
 	// Price is the symbol's latest price, to suggest how many shares a
@@ -85,6 +90,30 @@ func (s *Service) SaveDividends(ctx context.Context, symbol string, events []quo
 		}
 		return nil
 	})
+}
+
+// SaveDividendPayDate records when a declared dividend is paid. A dividend the
+// ledger doesn't have (the next one, not yet gone ex) is ignored.
+func (s *Service) SaveDividendPayDate(ctx context.Context, symbol string, exDate, payDate time.Time) error {
+	if payDate.Before(exDate) {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE security_dividends SET pay_date = $3 WHERE symbol = $1 AND ex_date = $2`,
+		NormalizeSymbol(symbol), dateStr(exDate), dateStr(payDate))
+	if err != nil {
+		return fmt.Errorf("saving %s pay date: %w", symbol, err)
+	}
+	return nil
+}
+
+// PayDatesWanted lists the given symbols that have a dividend with an ex-date
+// since `since` whose pay date isn't known yet.
+func (s *Service) PayDatesWanted(ctx context.Context, symbols []string, since time.Time) ([]string, error) {
+	return s.heldSymbols(ctx,
+		`SELECT DISTINCT symbol FROM security_dividends
+		 WHERE symbol = ANY($1) AND ex_date >= $2 AND pay_date IS NULL ORDER BY symbol`,
+		pq.Array(symbols), dateStr(since))
 }
 
 // FindDividends raises a pending dividend for every recent ex-date an open
@@ -217,11 +246,12 @@ func (s *Service) findAccountDividends(ctx context.Context, householdID, account
 // ListDividends returns the household's pending dividends, oldest ex-date
 // first — one account's when accountID is given.
 func (s *Service) ListDividends(ctx context.Context, householdID int, accountID *int) ([]Dividend, error) {
-	q := `SELECT d.id, d.account_id, a.name, d.symbol, s.name, s.quote_type, d.ex_date,
+	q := `SELECT d.id, d.account_id, a.name, d.symbol, s.name, s.quote_type, d.ex_date, sd.pay_date,
 	             d.per_share, d.shares, d.amount, s.last_price, d.status
 	      FROM dividends d
 	      JOIN accounts a ON a.id = d.account_id
 	      JOIN securities s ON s.symbol = d.symbol
+	      LEFT JOIN security_dividends sd ON sd.symbol = d.symbol AND sd.ex_date = d.ex_date
 	      WHERE d.household_id = $1 AND d.status = 'pending' AND a.archived_at IS NULL`
 	args := []any{householdID}
 	if accountID != nil {
@@ -239,49 +269,56 @@ func (s *Service) ListDividends(ctx context.Context, householdID int, accountID 
 			d        Dividend
 			name, qt sql.NullString
 			ex       time.Time
+			pay      sql.NullTime
 		)
-		if err := rows.Scan(&d.ID, &d.AccountID, &d.AccountName, &d.Symbol, &name, &qt, &ex,
+		if err := rows.Scan(&d.ID, &d.AccountID, &d.AccountName, &d.Symbol, &name, &qt, &ex, &pay,
 			&d.PerShare, &d.Shares, &d.Amount, &d.Price, &d.Status); err != nil {
 			return nil, fmt.Errorf("scanning dividend: %w", err)
 		}
 		d.Name, d.QuoteType, d.ExDate = strPtr(name), strPtr(qt), dateStr(ex)
+		if pay.Valid {
+			d.PayDate = ptr(dateStr(pay.Time))
+		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
 }
 
 // DividendConfirmation is what confirming one may say. Left empty it is the one
-// tap: the estimated amount, as cash, dated today.
+// tap: the estimated amount, as cash, dated its pay date — or today when the
+// provider didn't publish one.
 type DividendConfirmation struct {
 	// Amount is what was actually paid, when the statement differs by a cent
 	// or tax was withheld.
 	Amount *float64 `json:"amount"`
-	// Date is the day it landed (the pay date); today when blank.
+	// Date is the day it landed, when that isn't the published pay date.
 	Date string `json:"date"`
-	// Reinvested records it as more shares rather than cash. Shares is then
-	// how many it bought, from the statement.
+	// Reinvested also buys shares with it. Shares is then how many, from the
+	// statement.
 	Reinvested bool     `json:"reinvested"`
 	Shares     *float64 `json:"shares"`
 }
 
-// ConfirmDividend posts a pending dividend: an income transaction under
-// Dividends, or a reinvest trade that adds shares and moves no cash. The post
-// and the status flip share one database transaction, guarded by the status, so
-// two taps (or two phones) can't post it twice.
+// ConfirmDividend posts a pending dividend as an income transaction under
+// Dividends. A reinvested one also buys shares with it the same day, so it is
+// counted as income like any other dividend and the cash nets to nothing —
+// unlike a hand-logged `reinvest` trade, which only adds shares. The posts and
+// the status flip share one database transaction, guarded by the status, so two
+// taps (or two phones) can't post it twice.
 func (s *Service) ConfirmDividend(ctx context.Context, householdID, id int, in DividendConfirmation) error {
 	household, err := s.GetHousehold(ctx, householdID)
 	if err != nil {
 		return err
 	}
-	if in.Date == "" {
-		in.Date = dateStr(household.Today())
-	}
-	date, err := models.ParseDate(in.Date)
-	if err != nil {
-		return invalid("date must be YYYY-MM-DD")
-	}
-	if date.After(household.Today()) {
-		return invalid("a dividend can't be confirmed for a day that hasn't come yet")
+	today := household.Today()
+	var date time.Time
+	if in.Date != "" {
+		if date, err = models.ParseDate(in.Date); err != nil {
+			return invalid("date must be YYYY-MM-DD")
+		}
+		if date.After(today) {
+			return invalid("a dividend can't be confirmed for a day that hasn't come yet")
+		}
 	}
 	if in.Amount != nil {
 		amt := math.Round(*in.Amount*100) / 100
@@ -303,17 +340,31 @@ func (s *Service) ConfirmDividend(ctx context.Context, householdID, id int, in D
 			symbol    string
 			estimate  float64
 			ex        time.Time
+			pay       sql.NullTime
 		)
 		err := tx.QueryRowContext(ctx,
 			`UPDATE dividends SET status = 'confirmed', resolved_at = NOW()
 			 WHERE id = $1 AND household_id = $2 AND status = 'pending'
-			 RETURNING account_id, symbol, amount, ex_date`, id, householdID).
-			Scan(&accountID, &symbol, &estimate, &ex)
+			 RETURNING account_id, symbol, amount, ex_date,
+			   (SELECT pay_date FROM security_dividends sd
+			    WHERE sd.symbol = dividends.symbol AND sd.ex_date = dividends.ex_date)`, id, householdID).
+			Scan(&accountID, &symbol, &estimate, &ex, &pay)
 		if err == sql.ErrNoRows {
 			return s.dividendGone(ctx, tx, householdID, id)
 		}
 		if err != nil {
 			return fmt.Errorf("claiming dividend: %w", err)
+		}
+		if in.Date == "" {
+			// The published pay date, once it has come; today without one.
+			date = today
+			if pay.Valid {
+				if pay.Time.After(today) {
+					return invalid("%s doesn't pay this dividend until %s", symbol, dateStr(pay.Time))
+				}
+				date = pay.Time
+			}
+			in.Date = dateStr(date)
 		}
 		if date.Before(ex) {
 			return invalid("%s went ex-dividend on %s; it can't have been paid before that", symbol, dateStr(ex))
@@ -321,23 +372,6 @@ func (s *Service) ConfirmDividend(ctx context.Context, householdID, id int, in D
 		amount := estimate
 		if in.Amount != nil {
 			amount = *in.Amount
-		}
-
-		if in.Reinvested {
-			shares := portfolio.RoundShares(*in.Shares)
-			trade := TradeInput{
-				Symbol: symbol, Side: portfolio.SideReinvest, TradeDate: in.Date,
-				Shares: shares, Price: math.Round(amount/shares*1e6) / 1e6, Amount: &amount,
-			}
-			if err := trade.normalize(); err != nil {
-				return err
-			}
-			tradeID, err := insertTrade(ctx, tx, householdID, accountID, trade)
-			if err != nil {
-				return err
-			}
-			_, err = tx.ExecContext(ctx, `UPDATE dividends SET trade_id = $1 WHERE id = $2`, tradeID, id)
-			return err
 		}
 
 		categoryID, err := incomeCategory(ctx, tx, householdID, "Dividends")
@@ -355,7 +389,25 @@ func (s *Service) ConfirmDividend(ctx context.Context, householdID, id int, in D
 		if err != nil {
 			return fmt.Errorf("posting dividend: %w", err)
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE dividends SET transaction_id = $1 WHERE id = $2`, txnID, id)
+		var tradeID sql.NullInt64
+		if in.Reinvested {
+			shares := portfolio.RoundShares(*in.Shares)
+			note := "Reinvested dividend"
+			trade := TradeInput{
+				Symbol: symbol, Side: portfolio.SideBuy, TradeDate: in.Date,
+				Shares: shares, Price: math.Round(amount/shares*1e6) / 1e6, Amount: &amount, Notes: &note,
+			}
+			if err := trade.normalize(); err != nil {
+				return err
+			}
+			bought, err := insertTrade(ctx, tx, householdID, accountID, trade)
+			if err != nil {
+				return err
+			}
+			tradeID = sql.NullInt64{Int64: int64(bought), Valid: true}
+		}
+		_, err = tx.ExecContext(ctx,
+			`UPDATE dividends SET transaction_id = $1, trade_id = $2 WHERE id = $3`, txnID, tradeID, id)
 		return err
 	})
 }

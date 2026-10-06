@@ -230,6 +230,11 @@ func (s *Scheduler) findDividends(ctx context.Context, household ledger.Househol
 	if n > 0 {
 		log.Printf("Scheduler: found %d dividend(s) to confirm for household %d", n, household.ID)
 	}
+	if n, err = s.svc.FindSplits(ctx, household.ID, today); err != nil {
+		log.Printf("Scheduler: splits for household %d: %v", household.ID, err)
+	} else if n > 0 {
+		log.Printf("Scheduler: found %d stock split(s) to confirm for household %d", n, household.ID)
+	}
 }
 
 // processReceipts finishes receipts an upload did not: ones still waiting after

@@ -21,6 +21,7 @@
 	import TransactionRow from '$lib/components/TransactionRow.svelte';
 	import HoldingsTable from '$lib/components/HoldingsTable.svelte';
 	import DividendsCard from '$lib/components/DividendsCard.svelte';
+	import ReconcileModal from '$lib/components/ReconcileModal.svelte';
 	import TradeModal from '$lib/components/TradeModal.svelte';
 	import ValueHistoryCard from '$lib/components/ValueHistoryCard.svelte';
 	import SavingsRateCard from '$lib/components/SavingsRateCard.svelte';
@@ -46,6 +47,7 @@
 	let inflow = $state<number | null>(null);
 
 	let tradeModalOpen = $state(false);
+	let reconcileOpen = $state(false);
 	let editingTrade = $state<Trade | null>(null);
 
 	let accountId = $derived(Number(page.params.id));
@@ -211,7 +213,14 @@
 			<div class="card">
 				<div class="card-header">
 					<h2>Holdings</h2>
-					<Button size="sm" onclick={openNewTrade}>Log trade</Button>
+					<div class="card-actions">
+						{#if holdings.positions.length > 0}
+							<Button variant="ghost" size="sm" onclick={() => (reconcileOpen = true)}>
+								Reconcile
+							</Button>
+						{/if}
+						<Button size="sm" onclick={openNewTrade}>Log trade</Button>
+					</div>
 				</div>
 
 				{#if holdings.positions.length === 0 && trades.length === 0}
@@ -344,6 +353,9 @@
 
 		{#if isInvestment}
 			<TradeModal {accountId} trade={editingTrade} bind:open={tradeModalOpen} onsaved={load} />
+			{#if holdings}
+				<ReconcileModal bind:open={reconcileOpen} {holdings} cashFund={account.cash_fund} />
+			{/if}
 		{/if}
 	{/if}
 </div>
@@ -418,6 +430,11 @@
 
 	.card-header h2 {
 		margin-bottom: 0;
+	}
+
+	.card-actions {
+		display: flex;
+		gap: 0.25rem;
 	}
 
 	.day-change {

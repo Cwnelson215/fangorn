@@ -1,4 +1,5 @@
 import type {
+	Split,
 	Dividend,
 	DividendConfirmation,
 	SavingsOutlook,
@@ -115,6 +116,11 @@ export const getDividends = (accountId?: number) =>
 export const confirmDividend = (id: number, input: DividendConfirmation = {}) =>
 	send<void>('POST', `/api/dividends/${id}/confirm`, input);
 export const dismissDividend = (id: number) => send<void>('POST', `/api/dividends/${id}/dismiss`);
+
+export const getSplits = (accountId?: number) =>
+	request<Split[]>(`/api/splits${accountId ? `?account=${accountId}` : ''}`);
+export const confirmSplit = (id: number) => send<void>('POST', `/api/splits/${id}/confirm`);
+export const dismissSplit = (id: number) => send<void>('POST', `/api/splits/${id}/dismiss`);
 
 export const getSavingsOutlook = (accountId: number) =>
 	request<SavingsOutlook>(`/api/accounts/${accountId}/savings`);

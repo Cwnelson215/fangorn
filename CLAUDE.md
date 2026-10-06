@@ -162,20 +162,40 @@ holds a fund as a position can't name it as its cash fund — the same dollars w
 and only the cash one would earn the dividend.
 
 **7. A stock or fund dividend is found, then confirmed — never posted by itself.** The provider's
-dividend events give an ex-date and an amount per share, which says one is owed but not the day it
-lands (the pay date is days or weeks later) or how many shares a reinvestment bought.
-`prices.Refresher.RefreshDividends` looks each traded symbol up at most every 12h into
-`security_dividends` (shared market data); `ledger.FindDividends` then raises one `dividends` row
+chart events (`quotes.EventsProvider`: dividends, a fund's capital gain distributions folded into
+that day's payout, and splits) give an ex-date and an amount per share, which says one is owed but
+not how many shares a reinvestment bought. `prices.Refresher.RefreshDividends` looks each traded
+symbol up at most every 12h into `security_dividends` (shared market data), then asks
+`quotes.PayDateProvider` (Yahoo `calendarEvents`; stocks only, mutual funds have none) for the pay
+date of any recent dividend still missing one. `ledger.FindDividends` raises one `dividends` row
 per account, symbol and ex-date for the shares held **going into** the ex-date (`SharesAsOf` the day
 before), reaching back 60 days. One that looks already typed in — income of the same amount on the
 account since the ex-date, or a `reinvest` trade of the symbol — is recorded `dismissed` instead of
-asked about. `DividendsCard` (account page and `/investments`) lists the pending ones: **Confirm**
-posts the estimate as income under **Dividends** dated today (`source = 'dividend'`), **Edit** sets
-the real amount and pay date or records it as a `reinvest` trade with the statement's share count
-(a mutual fund's Confirm opens that form), **Dismiss** drops it. The post and the status flip share
-one database transaction guarded by `status = 'pending'`, and the row outlives what it posted, so a
+asked about. `DividendsCard` (dashboard, account page and `/investments`) lists the pending ones:
+**Confirm** posts the estimate as income under **Dividends** (`source = 'dividend'`) dated the pay
+date — today when none is published, and refused until a published one has come; **Edit** sets the
+real amount and date, or marks it reinvested with the statement's share count (a mutual fund's
+Confirm opens that form); **Dismiss** drops it. A reinvested one is the income **plus a `buy`** of
+the same amount that day, so it counts as dividend income and the cash nets to zero — unlike a
+hand-logged `reinvest` trade, which only adds shares. The posts and the status flip share one
+database transaction guarded by `status = 'pending'`, and the row outlives what it posted, so a
 deleted dividend isn't raised again. Money market funds are skipped — theirs is the monthly cash
 dividend above.
+
+**8. A stock split is confirmed the same way, and restates the trades.** `security_splits` holds
+the ratio (`numerator`-for-`denominator`; a reverse split has the smaller numerator) and
+`ledger.FindSplits` raises a `splits` row per account that held shares going into the split date.
+Yahoo restates a symbol's whole price history in post-split terms, so **Apply**
+(`ledger.ConfirmSplit`) does the same to the account's trades dated before the split — shares × the
+ratio, price ÷ it, dollar amounts and cash legs untouched — and `SaveSplits` clears
+`securities.history_from` so the stored closes are fetched again adjusted. Nothing tells whether
+trades were already entered in post-split shares, which is why it asks; **Dismiss** is for that.
+Until one is applied the position is valued at old shares × the new price.
+
+**Reconcile** (Holdings card on an account page, `ReconcileModal` + pure `lib/reconcile.ts`) takes
+the statement's shares, values and cash and says which line is off and why: a different share count
+is a missing trade, the same shares at another value is only the price, cash is a missing dividend
+or fee. It changes nothing.
 
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`, each position **truncated** to the cent (`TRUNC`, and
@@ -500,6 +520,7 @@ monthly goals after).
 `020_debt_plans` adds `debt_plans` (a card or loan's planned monthly paydown, by month).
 `021_dividends` adds `security_dividends`, `dividends`, `securities.dividends_checked_at` and the
 `dividend` transaction source.
+`022_splits_and_pay_dates` adds `security_splits`, `splits` and `security_dividends.pay_date`.
 
 ## Conventions
 

@@ -517,6 +517,8 @@ export interface Dividend {
 	name: string | null;
 	quote_type: string | null;
 	ex_date: string;
+	/** The day it is paid, when that is published (stocks, not mutual funds). */
+	pay_date: string | null;
 	per_share: number;
 	/** Shares held going into the ex-date. */
 	shares: number;
@@ -527,7 +529,24 @@ export interface Dividend {
 	status: 'pending' | 'confirmed' | 'dismissed';
 }
 
-/** Left empty, a confirmation is the estimate, as cash, dated today. */
+/** A stock split found on a holding, waiting to be confirmed. */
+export interface Split {
+	id: number;
+	account_id: number;
+	account_name: string;
+	symbol: string;
+	name: string | null;
+	split_date: string;
+	/** Every `denominator` shares became `numerator`. */
+	numerator: number;
+	denominator: number;
+	/** Held going into the split, and what confirming turns that into. */
+	shares: number;
+	shares_after: number;
+	status: 'pending' | 'confirmed' | 'dismissed';
+}
+
+/** Left empty, a confirmation is the estimate, as cash, dated its pay date (or today). */
 export interface DividendConfirmation {
 	amount?: number;
 	date?: string;
