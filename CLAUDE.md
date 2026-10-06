@@ -155,6 +155,28 @@ fund pays the month to whoever holds it on the last day, and a balance entered m
 include what had accrued. A high-yield savings account's first month is still prorated. A money market yield is a simple annual rate, so `fundYields` converts
 it to the APY whose monthly rate is exactly yield ÷ 12. The dividend is described "SPAXX dividend".
 
+**The fund is the account's cash, so it can't also be a holding.** Fidelity lists every uninvested
+dollar as a SPAXX position; here that is the cash balance ("held in SPAXX" on the Cash line).
+`assertNotCashFund` refuses a trade in the account's own `cash_fund`, and an account that already
+holds a fund as a position can't name it as its cash fund — the same dollars would sit on two lines
+and only the cash one would earn the dividend.
+
+**7. A stock or fund dividend is found, then confirmed — never posted by itself.** The provider's
+dividend events give an ex-date and an amount per share, which says one is owed but not the day it
+lands (the pay date is days or weeks later) or how many shares a reinvestment bought.
+`prices.Refresher.RefreshDividends` looks each traded symbol up at most every 12h into
+`security_dividends` (shared market data); `ledger.FindDividends` then raises one `dividends` row
+per account, symbol and ex-date for the shares held **going into** the ex-date (`SharesAsOf` the day
+before), reaching back 60 days. One that looks already typed in — income of the same amount on the
+account since the ex-date, or a `reinvest` trade of the symbol — is recorded `dismissed` instead of
+asked about. `DividendsCard` (account page and `/investments`) lists the pending ones: **Confirm**
+posts the estimate as income under **Dividends** dated today (`source = 'dividend'`), **Edit** sets
+the real amount and pay date or records it as a `reinvest` trade with the statement's share count
+(a mutual fund's Confirm opens that form), **Dismiss** drops it. The post and the status flip share
+one database transaction guarded by `status = 'pending'`, and the row outlives what it posted, so a
+deleted dividend isn't raised again. Money market funds are skipped — theirs is the monthly cash
+dividend above.
+
 An account's worth is defined **once**, in `ledger/balances.go` (`accountBalances`): cash plus net
 shares × `securities.last_price`, each position **truncated** to the cent (`TRUNC`, and
 `portfolio.MarketValue` in Go) — that is how Fidelity values a position, and rounding to nearest put
@@ -181,7 +203,7 @@ internal/vision/          receipt Extractor interface + Anthropic Messages API c
 internal/receipts/        Decide (pure: extraction -> post or hold) + Processor (claim, read, finish)
 internal/assistant/       the Ask chat: streaming Messages API client, read-only ledger tools, the tool loop
 internal/ledger/          every read and write against the ledger
-internal/scheduler/       posts due recurring items, refreshes prices, snapshots net worth
+internal/scheduler/       posts due recurring items, refreshes prices, finds dividends, snapshots net worth
 internal/handlers/        HTTP layer
 internal/middleware/      auth, CORS, logging
 internal/crypto/          AES-GCM (unused today; kept for future invite tokens)
@@ -476,6 +498,8 @@ monthly goal for the month after it was created; any other became a plan startin
 `019_goal_priority` adds `goals.priority` (existing goals numbered in the order the list showed them,
 monthly goals after).
 `020_debt_plans` adds `debt_plans` (a card or loan's planned monthly paydown, by month).
+`021_dividends` adds `security_dividends`, `dividends`, `securities.dividends_checked_at` and the
+`dividend` transaction source.
 
 ## Conventions
 

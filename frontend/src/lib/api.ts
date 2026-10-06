@@ -1,4 +1,6 @@
 import type {
+	Dividend,
+	DividendConfirmation,
 	SavingsOutlook,
 	SavingsRate,
 	Account,
@@ -107,6 +109,12 @@ export const dropBalance = (id: number, date: string) =>
 	send<Transaction>('POST', `/api/accounts/${id}/drop-balance`, { date });
 export const archiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/archive`);
 export const unarchiveAccount = (id: number) => send<Account>('POST', `/api/accounts/${id}/unarchive`);
+
+export const getDividends = (accountId?: number) =>
+	request<Dividend[]>(`/api/dividends${accountId ? `?account=${accountId}` : ''}`);
+export const confirmDividend = (id: number, input: DividendConfirmation = {}) =>
+	send<void>('POST', `/api/dividends/${id}/confirm`, input);
+export const dismissDividend = (id: number) => send<void>('POST', `/api/dividends/${id}/dismiss`);
 
 export const getSavingsOutlook = (accountId: number) =>
 	request<SavingsOutlook>(`/api/accounts/${accountId}/savings`);

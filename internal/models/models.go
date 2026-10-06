@@ -120,6 +120,9 @@ const (
 	SourceReceipt = "receipt"
 	// SourceInterest is a high-yield savings account's monthly interest.
 	SourceInterest = "interest"
+	// SourceDividend is a stock or fund dividend the app found and someone
+	// confirmed.
+	SourceDividend = "dividend"
 )
 
 // SavingsRate is one entry in a high-yield savings account's rate history: an

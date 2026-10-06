@@ -169,41 +169,51 @@ func (s *Service) CreateTrade(ctx context.Context, householdID, accountID int, i
 
 	var id int
 	err := s.inTx(func(tx *sql.Tx) error {
-		if err := lockInvestmentAccount(ctx, tx, householdID, accountID); err != nil {
-			return err
-		}
-		if err := assertNotCashFund(ctx, tx, accountID, in.Symbol); err != nil {
-			return err
-		}
-		if err := seedSecurity(ctx, tx, in.Symbol, in.Price); err != nil {
-			return err
-		}
-
-		trades, err := loadTrades(ctx, tx, accountID)
-		if err != nil {
-			return err
-		}
-		if err := validateLog(append(trades, in.candidate(math.MaxInt))); err != nil {
-			return err
-		}
-
-		err = tx.QueryRowContext(ctx,
-			`INSERT INTO trades
-			   (household_id, account_id, symbol, side, trade_date, shares, price, fees, amount, notes)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-			 RETURNING id`,
-			householdID, accountID, in.Symbol, in.Side, in.TradeDate, in.Shares, in.Price,
-			in.Fees, *in.Amount, nullStr(in.Notes),
-		).Scan(&id)
-		if err != nil {
-			return fmt.Errorf("inserting trade: %w", err)
-		}
-		return insertTradeLeg(ctx, tx, householdID, accountID, id, in)
+		var err error
+		id, err = insertTrade(ctx, tx, householdID, accountID, in)
+		return err
 	})
 	if err != nil {
 		return models.Trade{}, err
 	}
 	return s.GetTrade(ctx, householdID, id)
+}
+
+// insertTrade is CreateTrade inside a transaction the caller owns: it locks the
+// account, checks the log still replays, and writes the trade and its cash leg.
+// in must already be normalized.
+func insertTrade(ctx context.Context, tx *sql.Tx, householdID, accountID int, in TradeInput) (int, error) {
+	if err := lockInvestmentAccount(ctx, tx, householdID, accountID); err != nil {
+		return 0, err
+	}
+	if err := assertNotCashFund(ctx, tx, accountID, in.Symbol); err != nil {
+		return 0, err
+	}
+	if err := seedSecurity(ctx, tx, in.Symbol, in.Price); err != nil {
+		return 0, err
+	}
+
+	trades, err := loadTrades(ctx, tx, accountID)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateLog(append(trades, in.candidate(math.MaxInt))); err != nil {
+		return 0, err
+	}
+
+	var id int
+	err = tx.QueryRowContext(ctx,
+		`INSERT INTO trades
+		   (household_id, account_id, symbol, side, trade_date, shares, price, fees, amount, notes)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		 RETURNING id`,
+		householdID, accountID, in.Symbol, in.Side, in.TradeDate, in.Shares, in.Price,
+		in.Fees, *in.Amount, nullStr(in.Notes),
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("inserting trade: %w", err)
+	}
+	return id, insertTradeLeg(ctx, tx, householdID, accountID, id, in)
 }
 
 func (s *Service) UpdateTrade(ctx context.Context, householdID, id int, in TradeInput) (models.Trade, error) {

@@ -7,6 +7,7 @@
 	import { formatCurrency, formatMarketTime, formatPercent, formatSigned } from '$lib/format';
 	import { startPolling } from '$lib/poll';
 	import HoldingsTable from '$lib/components/HoldingsTable.svelte';
+	import DividendsCard from '$lib/components/DividendsCard.svelte';
 	import DonutChart from '$lib/components/DonutChart.svelte';
 	import ValueHistoryCard from '$lib/components/ValueHistoryCard.svelte';
 
@@ -138,6 +139,8 @@
 				loadHistory={() => getInvestmentsHistory(0)}
 			/>
 		{/if}
+
+		<DividendsCard onchange={refresh} />
 
 		<div class="card">
 			<h2>Holdings</h2>

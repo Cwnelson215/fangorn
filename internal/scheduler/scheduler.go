@@ -185,6 +185,7 @@ func (s *Scheduler) runHousehold(ctx context.Context, household ledger.Household
 	// Prices before the snapshot, so the day's net worth values holdings at the
 	// latest figures rather than whatever was last fetched.
 	s.refreshPrices(ctx, household)
+	s.findDividends(ctx, household, today)
 
 	if err := s.svc.SnapshotNetWorth(ctx, household.ID, today); err != nil {
 		log.Printf("Scheduler: net worth snapshot for household %d: %v", household.ID, err)
@@ -213,6 +214,21 @@ func (s *Scheduler) refreshPrices(ctx context.Context, household ledger.Househol
 	// here means the charts are usually complete before anyone opens them.
 	if err := s.prices.BackfillHistory(rctx, household.ID, nil); err != nil {
 		log.Printf("Scheduler: price history backfill for household %d: %v", household.ID, err)
+	}
+	if err := s.prices.RefreshDividends(rctx, household.ID); err != nil {
+		log.Printf("Scheduler: dividend lookup for household %d: %v", household.ID, err)
+	}
+}
+
+// findDividends raises a pending dividend for each recent ex-date an account
+// held shares into. Nothing posts until someone confirms it.
+func (s *Scheduler) findDividends(ctx context.Context, household ledger.Household, today time.Time) {
+	n, err := s.svc.FindDividends(ctx, household.ID, today)
+	if err != nil {
+		log.Printf("Scheduler: dividends for household %d: %v", household.ID, err)
+	}
+	if n > 0 {
+		log.Printf("Scheduler: found %d dividend(s) to confirm for household %d", n, household.ID)
 	}
 }
 

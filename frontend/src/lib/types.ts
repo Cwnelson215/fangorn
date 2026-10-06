@@ -135,7 +135,7 @@ export interface Transaction {
 	transfer_group_id: string | null;
 	recurring_rule_id: number | null;
 	trade_id: number | null;
-	source: 'manual' | 'recurring' | 'receipt' | 'interest';
+	source: 'manual' | 'recurring' | 'receipt' | 'interest' | 'dividend';
 	created_at: string;
 	/** The photographed receipt this was posted from, if any. */
 	receipt_id: number | null;
@@ -506,6 +506,33 @@ export interface PositionAccount {
 	unrealized_gain_pct: number | null;
 	/** Share of the whole summary's holdings value, like the position's weight. */
 	weight: number;
+}
+
+/** A dividend the app found from a holding's ex-date, waiting to be confirmed. */
+export interface Dividend {
+	id: number;
+	account_id: number;
+	account_name: string;
+	symbol: string;
+	name: string | null;
+	quote_type: string | null;
+	ex_date: string;
+	per_share: number;
+	/** Shares held going into the ex-date. */
+	shares: number;
+	/** The estimate: shares × per_share. */
+	amount: number;
+	/** The symbol's latest price, to suggest what a reinvestment bought. */
+	price: number;
+	status: 'pending' | 'confirmed' | 'dismissed';
+}
+
+/** Left empty, a confirmation is the estimate, as cash, dated today. */
+export interface DividendConfirmation {
+	amount?: number;
+	date?: string;
+	reinvested?: boolean;
+	shares?: number;
 }
 
 export interface Holdings {

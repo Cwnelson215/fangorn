@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,10 @@ func (h *InvestmentHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/accounts/{id}/trades", h.CreateTrade)
 	mux.HandleFunc("PATCH /api/trades/{id}", h.UpdateTrade)
 	mux.HandleFunc("DELETE /api/trades/{id}", h.DeleteTrade)
+
+	mux.HandleFunc("GET /api/dividends", h.ListDividends)
+	mux.HandleFunc("POST /api/dividends/{id}/confirm", h.ConfirmDividend)
+	mux.HandleFunc("POST /api/dividends/{id}/dismiss", h.DismissDividend)
 
 	mux.HandleFunc("GET /api/investments", h.Summary)
 	mux.HandleFunc("GET /api/investments/value-history", h.SummaryValueHistory)
@@ -233,4 +238,52 @@ func (h *InvestmentHandler) ensureSecurity(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	return true
+}
+
+// ListDividends is the dividends waiting to be confirmed — every account's, or
+// one's with ?account=. It reads what the scheduler found; nothing is fetched.
+func (h *InvestmentHandler) ListDividends(w http.ResponseWriter, r *http.Request) {
+	var accountID *int
+	if v := r.URL.Query().Get("account"); v != "" {
+		id, err := strconv.Atoi(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "account must be a number")
+			return
+		}
+		accountID = &id
+	}
+	out, err := h.svc.ListDividends(r.Context(), h.householdID, accountID)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *InvestmentHandler) ConfirmDividend(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	var in ledger.DividendConfirmation
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := h.svc.ConfirmDividend(r.Context(), h.householdID, id, in); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *InvestmentHandler) DismissDividend(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(w, r, "id")
+	if !ok {
+		return
+	}
+	if err := h.svc.DismissDividend(r.Context(), h.householdID, id); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

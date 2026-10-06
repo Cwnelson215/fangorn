@@ -255,3 +255,23 @@ func TestYieldMissing(t *testing.T) {
 		t.Errorf("want ErrNotFound for a fund with no published yield, got %v", err)
 	}
 }
+
+func TestDividends(t *testing.T) {
+	y := serve(t, map[string]string{"/v8/finance/chart/META": "chart_meta_dividends.json"})
+	divs, err := y.Dividends(context.Background(), "META", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Oldest first, each dated by its ex-date on the exchange.
+	if len(divs) != 2 || divs[0].ExDate.Format("2006-01-02") != "2026-06-22" ||
+		divs[1].ExDate.Format("2006-01-02") != "2026-09-22" {
+		t.Fatalf("dividends = %+v", divs)
+	}
+	approx(t, "per share", divs[1].Amount, 0.525, 1e-9)
+
+	// A symbol that pays none has no events block at all.
+	y = serve(t, map[string]string{"/v8/finance/chart/VOO": "chart_voo_history.json"})
+	if divs, err := y.Dividends(context.Background(), "VOO", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil || len(divs) != 0 {
+		t.Fatalf("no events: %+v, %v", divs, err)
+	}
+}

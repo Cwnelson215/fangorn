@@ -20,6 +20,7 @@
 	import { startPolling } from '$lib/poll';
 	import TransactionRow from '$lib/components/TransactionRow.svelte';
 	import HoldingsTable from '$lib/components/HoldingsTable.svelte';
+	import DividendsCard from '$lib/components/DividendsCard.svelte';
 	import TradeModal from '$lib/components/TradeModal.svelte';
 	import ValueHistoryCard from '$lib/components/ValueHistoryCard.svelte';
 	import SavingsRateCard from '$lib/components/SavingsRateCard.svelte';
@@ -200,6 +201,10 @@
 					loadHistory={() => history(365)}
 				/>
 			{/if}
+		{/if}
+
+		{#if isInvestment}
+			<DividendsCard {accountId} onchange={load} />
 		{/if}
 
 		{#if isInvestment && holdings}

@@ -63,6 +63,21 @@ type YieldProvider interface {
 	Yield(ctx context.Context, symbol string) (float64, error)
 }
 
+// Dividend is one declared dividend: the amount per share, and the ex-date —
+// whoever holds the shares going into that day is paid. The pay date, days or
+// weeks later, isn't published here.
+type Dividend struct {
+	ExDate time.Time
+	Amount float64
+}
+
+// DividendProvider lists a symbol's dividends with an ex-date on or after
+// `from`, oldest first. Separate from Provider for the same reason as
+// YieldProvider.
+type DividendProvider interface {
+	Dividends(ctx context.Context, symbol string, from time.Time) ([]Dividend, error)
+}
+
 type Provider interface {
 	Quote(ctx context.Context, symbol string) (Quote, error)
 	// History returns daily closes from `from` to today, oldest first.

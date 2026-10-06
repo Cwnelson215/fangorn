@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,6 +91,13 @@ type chartResponse struct {
 			Indicators struct {
 				Quote []chartQuote `json:"quote"`
 			} `json:"indicators"`
+			// Events is only present when asked for with events=div.
+			Events struct {
+				Dividends map[string]struct {
+					Amount float64 `json:"amount"`
+					Date   int64   `json:"date"`
+				} `json:"dividends"`
+			} `json:"events"`
 		} `json:"result"`
 		Error *struct {
 			Code        string `json:"code"`
@@ -157,6 +165,40 @@ func (y *Yahoo) History(ctx context.Context, symbol string, from time.Time) ([]C
 	}
 	r := res.Chart.Result[0]
 	return closes(r.Timestamp, r.Indicators.Quote, r.Meta.ExchangeTimezoneName), nil
+}
+
+// Dividends reads the chart's dividend events. Each is dated by its ex-date in
+// the exchange's timezone, like a bar. A symbol that pays none comes back empty.
+func (y *Yahoo) Dividends(ctx context.Context, symbol string, from time.Time) ([]Dividend, error) {
+	q := url.Values{
+		"period1":  {strconv.FormatInt(from.Unix(), 10)},
+		"period2":  {strconv.FormatInt(time.Now().Unix(), 10)},
+		"interval": {"1d"},
+		"events":   {"div"},
+	}
+	res, err := y.chart(ctx, symbol, q)
+	if err != nil {
+		return nil, err
+	}
+	r := res.Chart.Result[0]
+	loc, err := time.LoadLocation(r.Meta.ExchangeTimezoneName)
+	if err != nil {
+		loc, _ = time.LoadLocation("America/New_York")
+	}
+	out := []Dividend{}
+	for _, d := range r.Events.Dividends {
+		if d.Amount <= 0 || d.Date == 0 {
+			continue
+		}
+		yr, m, day := time.Unix(d.Date, 0).In(loc).Date()
+		ex := time.Date(yr, m, day, 0, 0, 0, 0, time.UTC)
+		if ex.Before(from.Truncate(24 * time.Hour)) {
+			continue
+		}
+		out = append(out, Dividend{ExDate: ex, Amount: d.Amount})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ExDate.Before(out[j].ExDate) })
+	return out, nil
 }
 
 func (y *Yahoo) chart(ctx context.Context, symbol string, q url.Values) (chartResponse, error) {
