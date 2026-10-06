@@ -303,7 +303,9 @@ category alone selects what `spent` counted); a debt line's is everything on the
 adjustments. A goal's comes from `GET /api/goals/{id}/activity?month=` (`ledger.GoalActivity`): the
 replay records which movement filled or drained each goal (`goalfill.Result.Entries`), so a row
 shows the goal's **part** of a transaction ("of +$400.00" when it isn't the whole thing), drains
-included, and the rows sum to the line's `moved`. A hand-tracked goal lists its contributions.
+included, and the rows sum to the line's `moved`. A hand-tracked goal lists its contributions. Each
+goal on the Long-term Goals card has the same dropdown for its whole life (`?month=all`,
+`ledger.GoalActivityAll`), where the rows sum to what the goal holds.
 
 **Spending from savings.** When more leaves the income account in a month than the income there was
 to plan on less the savings planned, the difference was money meant for savings

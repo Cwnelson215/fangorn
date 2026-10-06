@@ -388,6 +388,20 @@ func TestGoalsShareTheIncomeAccount(t *testing.T) {
 	money(t, "second paycheck", activity[1].Amount, 200)
 	money(t, "first paycheck", activity[2].Amount, 100)
 
+	// Its whole life is the same rows here, and sums to what it holds.
+	whole, err := f.svc.GoalActivity(f.ctx, f.hh, ids[1], ledger.GoalActivityAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var held float64
+	for _, a := range whole {
+		held += a.Amount
+	}
+	if len(whole) != 3 {
+		t.Fatalf("vacation's whole activity = %+v, want 3 rows", whole)
+	}
+	money(t, "sums to what the goal holds", held, got["Vacation"][0])
+
 	// Swap them: now Emergency is drained first.
 	if err := f.svc.ReorderGoals(f.ctx, f.hh, []int{ids[1], ids[0]}); err != nil {
 		t.Fatal(err)

@@ -172,15 +172,23 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 	return out, nil
 }
 
+// GoalActivityAll asks GoalActivity for a goal's whole life rather than a month.
+const GoalActivityAll = "all"
+
 // GoalActivity is what moved a goal in a month, newest first: for a goal linked
 // to an account, each transaction on that account with the part of it the goal
 // took or gave up (goalFills — on a shared account that is often less than the
 // whole transaction); for one tracked by hand, its logged contributions. The
-// amounts sum to the month's SavingsLine.Moved.
+// amounts sum to the month's SavingsLine.Moved. A month of GoalActivityAll is
+// everything since the goal started instead, summing to what it holds.
 func (s *Service) GoalActivity(ctx context.Context, householdID, goalID int, month string) ([]models.GoalActivity, error) {
-	monthStart, _, err := s.resolveBudgetMonth(ctx, householdID, month)
-	if err != nil {
-		return nil, err
+	all := month == GoalActivityAll
+	monthStart := "0001-01-01"
+	if !all {
+		var err error
+		if monthStart, _, err = s.resolveBudgetMonth(ctx, householdID, month); err != nil {
+			return nil, err
+		}
 	}
 	goal, err := s.GetGoal(ctx, householdID, goalID)
 	if err != nil {
@@ -191,8 +199,9 @@ func (s *Service) GoalActivity(ctx context.Context, householdID, goalID int, mon
 	if goal.AccountID == nil {
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT date, amount, COALESCE(note, '') FROM goal_contributions
-			 WHERE goal_id = $1 AND date >= $2::date AND date < ($2::date + INTERVAL '1 month')
-			 ORDER BY date DESC, id DESC`, goalID, monthStart)
+			 WHERE goal_id = $1
+			   AND ($3::boolean OR (date >= $2::date AND date < ($2::date + INTERVAL '1 month')))
+			 ORDER BY date DESC, id DESC`, goalID, monthStart, all)
 		if err != nil {
 			return nil, fmt.Errorf("listing contributions: %w", err)
 		}
@@ -213,12 +222,15 @@ func (s *Service) GoalActivity(ctx context.Context, householdID, goalID int, mon
 	if err != nil {
 		return nil, err
 	}
-	from := monthKey(monthStart)
-	to := from.AddDate(0, 1, 0)
+	var from, to time.Time
+	if !all {
+		from = monthKey(monthStart)
+		to = from.AddDate(0, 1, 0)
+	}
 	var entries []goalfill.Entry
 	var ids []int64
 	for _, e := range fills[goalID].entries {
-		if !e.Date.Before(from) && e.Date.Before(to) {
+		if all || (!e.Date.Before(from) && e.Date.Before(to)) {
 			entries = append(entries, e)
 			ids = append(ids, int64(e.ID))
 		}

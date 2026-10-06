@@ -274,7 +274,7 @@ export const getGoals = () => request<Goal[]>('/api/goals');
 /** Highest priority first; the goals keep the places they held among the rest. */
 export const reorderGoals = (ids: number[]) => send<void>('PUT', '/api/goals/order', { ids });
 export const getGoal = (id: number) => request<Goal>(`/api/goals/${id}`);
-/** What filled or drained a goal in `month`, newest first. */
+/** What filled or drained a goal in `month` — or, with 'all', since it started — newest first. */
 export const getGoalActivity = (id: number, month: string) =>
 	request<GoalActivity[]>(`/api/goals/${id}/activity${qs({ month })}`);
 export const createGoal = (input: GoalInput) => send<Goal>('POST', '/api/goals', input);

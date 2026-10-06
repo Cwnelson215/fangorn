@@ -29,6 +29,7 @@
 		Category,
 		DebtLine,
 		Goal,
+		GoalActivity,
 		GoalInput,
 		SavingsLine,
 		Transaction
@@ -457,7 +458,15 @@
 	// A goal on a shared account often holds only part of a transaction; the
 	// row shows that part and says what it was part of.
 	async function savingsActivity(line: SavingsLine): Promise<ActivityRow[]> {
-		const activity = await getGoalActivity(line.goal_id, month);
+		return goalRows(await getGoalActivity(line.goal_id, month));
+	}
+
+	// The same for a long-term goal's whole life, on its card.
+	async function goalActivity(goal: Goal): Promise<ActivityRow[]> {
+		return goalRows(await getGoalActivity(goal.id, 'all'));
+	}
+
+	function goalRows(activity: GoalActivity[]): ActivityRow[] {
 		return activity.map((a, i) => {
 			const t = a.transaction;
 			if (!t) {
@@ -940,6 +949,12 @@
 								{/if}
 								{#if goal.target_date}· by {formatDate(goal.target_date)}{/if}
 							</div>
+							<ActivityDropdown
+								load={() => goalActivity(goal)}
+								stamp={loadedCount}
+								label="Transactions & transfers"
+								empty="Nothing has gone toward this yet."
+							/>
 						</div>
 					{/each}
 				</div>
