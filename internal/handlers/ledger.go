@@ -357,6 +357,7 @@ func (h *LedgerHandler) ListTransactions(w http.ResponseWriter, r *http.Request)
 		From:       q.Get("from"),
 		To:         q.Get("to"),
 		Search:     q.Get("search"),
+		HasReceipt: q.Get("receipt") == "true",
 		Limit:      queryInt(r, "limit"),
 	}
 	transactions, err := h.svc.ListTransactions(r.Context(), h.householdID, filter)
@@ -539,8 +540,12 @@ func (h *LedgerHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *LedgerHandler) PauseRule(w http.ResponseWriter, r *http.Request)  { h.setRulePaused(w, r, true) }
-func (h *LedgerHandler) ResumeRule(w http.ResponseWriter, r *http.Request) { h.setRulePaused(w, r, false) }
+func (h *LedgerHandler) PauseRule(w http.ResponseWriter, r *http.Request) {
+	h.setRulePaused(w, r, true)
+}
+func (h *LedgerHandler) ResumeRule(w http.ResponseWriter, r *http.Request) {
+	h.setRulePaused(w, r, false)
+}
 
 func (h *LedgerHandler) setRulePaused(w http.ResponseWriter, r *http.Request, paused bool) {
 	id, ok := pathInt(w, r, "id")

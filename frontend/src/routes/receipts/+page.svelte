@@ -1,13 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getAccounts, getCategories, getReceipts, receiptImageUrl, uploadReceipt } from '$lib/api';
+	import {
+		getAccounts,
+		getCategories,
+		getReceipts,
+		getTransactions,
+		receiptImageUrl,
+		uploadReceipt
+	} from '$lib/api';
 	import { downscale } from '$lib/image';
-	import { formatCurrency, formatDateShort } from '$lib/format';
+	import { formatCurrency, formatDateShort, formatSigned } from '$lib/format';
 	import { startPolling } from '$lib/poll';
 	import { describeUpload, isWorking, reasonText, type UploadNotice } from '$lib/receipts';
 	import { RECEIPT_UPLOADED } from '$lib/capture.svelte';
-	import type { Account, Category, Receipt } from '$lib/types';
+	import type { Account, Category, Receipt, Transaction } from '$lib/types';
 	import ReceiptReviewModal from '$lib/components/ReceiptReviewModal.svelte';
+	import TransactionModal from '$lib/components/TransactionModal.svelte';
 
 	// How long to keep checking on receipts still being read. Past this they are
 	// still finished by the server; the page just stops watching.
@@ -15,6 +23,9 @@
 	const POLL_FOR_MS = 2 * 60 * 1000;
 
 	let receipts = $state<Receipt[]>([]);
+	// Once a receipt is posted the transaction is what counts, so the Posted list
+	// shows the transactions — as they stand now, edits included.
+	let posted = $state<Transaction[]>([]);
 	let accounts = $state<Account[]>([]);
 	let categories = $state<Category[]>([]);
 	let loading = $state(true);
@@ -27,16 +38,21 @@
 	let reviewing = $state<Receipt | null>(null);
 	let reviewOpen = $state(false);
 
+	let editing = $state<Transaction | null>(null);
+	let editOpen = $state(false);
+
 	let needsReview = $derived(receipts.filter((r) => r.status === 'needs_review'));
 	let working = $derived(receipts.filter(isWorking));
-	let posted = $derived(receipts.filter((r) => r.status === 'posted').slice(0, 20));
 
 	let accountName = $derived(new Map(accounts.map((a) => [a.id, a.name])));
 	let categoryName = $derived(new Map(categories.map((c) => [c.id, c.name])));
 
 	async function load() {
 		try {
-			receipts = await getReceipts();
+			[receipts, posted] = await Promise.all([
+				getReceipts(),
+				getTransactions({ receipt: true, limit: 20 })
+			]);
 			error = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load receipts';
@@ -104,6 +120,11 @@
 	function openReview(r: Receipt) {
 		reviewing = r;
 		reviewOpen = true;
+	}
+
+	function openEdit(t: Transaction) {
+		editing = t;
+		editOpen = true;
 	}
 </script>
 
@@ -186,19 +207,19 @@
 			<div class="card empty"><p class="muted">Nothing posted from a receipt yet.</p></div>
 		{:else}
 			<div class="card list">
-				{#each posted as r (r.id)}
-					<a class="item" href={receiptImageUrl(r.id)} target="_blank" rel="noopener">
-						<img class="thumb" src={receiptImageUrl(r.id)} alt="" loading="lazy" />
+				{#each posted as t (t.id)}
+					<button class="item" onclick={() => openEdit(t)}>
+						<img class="thumb" src={receiptImageUrl(t.receipt_id!)} alt="" loading="lazy" />
 						<span class="body">
-							<span class="title">{r.merchant ?? 'Receipt'}</span>
+							<span class="title">{t.merchant ?? t.description}</span>
 							<span class="why">
-								{r.purchased_on ? formatDateShort(r.purchased_on) : ''}
-								{#if r.account_id}· {accountName.get(r.account_id) ?? ''}{/if}
-								{#if r.category_id}· {categoryName.get(r.category_id) ?? ''}{/if}
+								{formatDateShort(t.date)}
+								{#if t.account_name}· {t.account_name}{/if}
+								{#if t.category_name}· {t.category_name}{/if}
 							</span>
 						</span>
-						<span class="amount">{r.total != null ? formatCurrency(r.total) : ''}</span>
-					</a>
+						<span class="amount">{t.amount < 0 ? formatCurrency(-t.amount) : formatSigned(t.amount)}</span>
+					</button>
 				{/each}
 			</div>
 		{/if}
@@ -206,6 +227,8 @@
 </div>
 
 <ReceiptReviewModal bind:open={reviewOpen} receipt={reviewing} {accounts} {categories} onchange={load} />
+
+<TransactionModal {accounts} {categories} transaction={editing} bind:open={editOpen} onsaved={load} />
 
 <style>
 	.hidden {
@@ -311,13 +334,11 @@
 		border-bottom: none;
 	}
 
-	button.item,
-	a.item {
+	button.item {
 		cursor: pointer;
 	}
 
-	button.item:hover,
-	a.item:hover {
+	button.item:hover {
 		background: var(--surface-2);
 	}
 

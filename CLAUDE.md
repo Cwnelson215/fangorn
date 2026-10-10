@@ -442,7 +442,10 @@ transaction. A cancelled context hands the claim back uncounted; a real failure 
 **Statuses:** `pending`, `processing`, `needs_review`, `posted` — no `failed`; an unreadable
 receipt needs the same thing from the user as a doubtful one. `CHECK ((status='posted') =
 (transaction_id IS NOT NULL))`, and `transaction_id` is `ON DELETE CASCADE`: deleting the
-transaction deletes the photo, and `DELETE /api/receipts/{id}` refuses a posted one.
+transaction deletes the photo, and `DELETE /api/receipts/{id}` refuses a posted one. Once posted,
+the transaction is what counts: the Receipts page's Posted list is `GET /api/transactions?receipt=true`
+(not the receipt's extracted fields), and each row opens `TransactionModal.svelte` — the same
+income/expense/refund form Activity uses — so a posted receipt can be corrected or deleted there.
 
 **It posts by itself only when `receipts.Decide` finds nothing to hold for:** total and date read,
 date within 60 days and not in the future, USD, a purchase not a return, subtotal+tax+tip matching

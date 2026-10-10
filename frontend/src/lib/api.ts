@@ -179,6 +179,8 @@ export interface TransactionQuery {
 	from?: string;
 	to?: string;
 	search?: string;
+	/** Only transactions posted from a photographed receipt. */
+	receipt?: boolean;
 	limit?: number;
 }
 

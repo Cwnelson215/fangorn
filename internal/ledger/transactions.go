@@ -58,6 +58,8 @@ type TransactionFilter struct {
 	From       string
 	To         string
 	Search     string
+	// HasReceipt keeps only transactions posted from a photographed receipt.
+	HasReceipt bool
 	Limit      int
 }
 
@@ -95,6 +97,10 @@ func (s *Service) ListTransactions(ctx context.Context, householdID int, f Trans
 		// One argument, referenced from two positions — Postgres allows this.
 		p := bind("%" + f.Search + "%")
 		where = append(where, "(t.description ILIKE "+p+" OR t.merchant ILIKE "+p+")")
+	}
+
+	if f.HasReceipt {
+		where = append(where, "r.id IS NOT NULL")
 	}
 
 	limit := f.Limit

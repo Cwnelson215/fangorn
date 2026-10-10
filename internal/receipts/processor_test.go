@@ -175,6 +175,21 @@ func TestProcessPosts(t *testing.T) {
 	if len(reg) != 1 || reg[0].ReceiptID == nil || *reg[0].ReceiptID != id {
 		t.Errorf("register row receipt_id = %+v", reg)
 	}
+
+	// The Receipts page lists what was posted by asking for transactions that
+	// have a receipt; one typed in by hand must stay out of that list.
+	if _, err := f.svc.CreateTransaction(f.ctx, f.hh, ledger.TransactionInput{
+		AccountID: f.card.ID, Date: txn.Date, Amount: 5, Kind: models.KindExpense, Description: "Coffee",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	withReceipt, err := f.svc.ListTransactions(f.ctx, f.hh, ledger.TransactionFilter{HasReceipt: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withReceipt) != 1 || withReceipt[0].ID != txn.ID {
+		t.Errorf("transactions with a receipt = %+v, want only %d", withReceipt, txn.ID)
+	}
 }
 
 // The upload request and the scheduler can both reach a receipt at once. Only
