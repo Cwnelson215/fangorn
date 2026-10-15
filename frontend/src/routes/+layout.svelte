@@ -4,7 +4,8 @@
 	import { goto } from '$app/navigation';
 	import { onMount, tick } from 'svelte';
 	import { authStatus } from '$lib/api';
-	import { capture, dismissNotice, openCamera, openLibrary, registerCaptureInputs, uploadPhoto } from '$lib/capture.svelte';
+	import CameraSheet from '$lib/components/CameraSheet.svelte';
+	import { capture, dismissNotice, openCamera, registerCaptureInputs, takeFile } from '$lib/capture.svelte';
 	import { isAppleMobile } from '$lib/device';
 
 	let { children }: { children: Snippet } = $props();
@@ -103,10 +104,6 @@
 		openCamera();
 	}
 
-	function pickFromMenu() {
-		openMenu = null;
-		openLibrary();
-	}
 
 	const SETTINGS = { href: '/settings', label: 'Settings', icon: 'gear' as Icon };
 	const SHORTCUT = { href: '/shortcut', label: 'iPhone Shortcut', icon: 'phone' as Icon };
@@ -187,7 +184,7 @@
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		input.value = ''; // so the same photo can be picked again
-		if (file) uploadPhoto(file);
+		if (file) takeFile(file);
 	}
 </script>
 
@@ -310,9 +307,6 @@
 						<button role="menuitem" onclick={snapFromMenu} disabled={capture.stage !== null}>
 							{@render glyph('camera')}Scan a receipt
 						</button>
-						<button role="menuitem" onclick={pickFromMenu} disabled={capture.stage !== null}>
-							{@render glyph('receipt')}Upload a receipt image
-						</button>
 						<a role="menuitem" href="/transfers?new">{@render glyph('swap')}Record a transfer</a>
 					</div>
 				{/if}
@@ -321,7 +315,7 @@
 			<!-- On a phone the camera is its own button; the tab bar has the rest. -->
 			<button
 				class="camera"
-				onclick={openCamera}
+				onclick={() => openCamera()}
 				disabled={capture.stage !== null}
 				aria-label="Snap a receipt"
 			>
@@ -357,6 +351,10 @@
 			aria-hidden="true"
 			onchange={onPhoto}
 		/>
+
+		{#if capture.cameraOpen}
+			<CameraSheet />
+		{/if}
 
 		{#if capture.stage || capture.notice}
 			<div class="capture-banner {capture.notice?.tone ?? 'busy'}" role="status" aria-live="polite">

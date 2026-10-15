@@ -12,7 +12,7 @@
 	import { formatCurrency, formatDateShort, formatSigned } from '$lib/format';
 	import { startPolling } from '$lib/poll';
 	import { describeUpload, isWorking, reasonText, type UploadNotice } from '$lib/receipts';
-	import { RECEIPT_UPLOADED } from '$lib/capture.svelte';
+	import { RECEIPT_UPLOADED, capture, openCamera } from '$lib/capture.svelte';
 	import type { Account, Category, Receipt, Transaction } from '$lib/types';
 	import ReceiptReviewModal from '$lib/components/ReceiptReviewModal.svelte';
 	import TransactionModal from '$lib/components/TransactionModal.svelte';
@@ -31,8 +31,6 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
-	let cameraInput: HTMLInputElement;
-	let libraryInput: HTMLInputElement;
 	let stage = $state<'idle' | 'preparing' | 'uploading'>('idle');
 	let notice = $state<UploadNotice | null>(null);
 
@@ -96,12 +94,9 @@
 		return stop;
 	});
 
-	async function onFile(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		input.value = ''; // so choosing the same file again still fires
-		if (!file) return;
-
+	// Uploads here rather than through the app-wide banner, so a receipt that
+	// needs a look opens its review straight away.
+	async function onFile(file: File) {
 		notice = null;
 		try {
 			stage = 'preparing';
@@ -135,18 +130,7 @@
 	</div>
 
 	<div class="card capture">
-		<!-- capture goes straight to the camera; the second input lets the phone
-		     offer screenshots and photos already taken. -->
-		<input
-			bind:this={cameraInput}
-			class="hidden"
-			type="file"
-			accept="image/*"
-			capture="environment"
-			onchange={onFile}
-		/>
-		<input bind:this={libraryInput} class="hidden" type="file" accept="image/*" onchange={onFile} />
-		<button class="shoot" onclick={() => cameraInput.click()} disabled={stage !== 'idle'}>
+		<button class="shoot" onclick={() => openCamera(onFile)} disabled={stage !== 'idle' || capture.stage !== null}>
 			{#if stage === 'preparing'}
 				Preparing photo…
 			{:else if stage === 'uploading'}
@@ -155,11 +139,8 @@
 				Scan a receipt
 			{/if}
 		</button>
-		<button class="pick" onclick={() => libraryInput.click()} disabled={stage !== 'idle'}>
-			Or choose a screenshot or saved photo
-		</button>
 		<p class="muted small">
-			Take a photo, flat and well lit. Expenses post on their own when the card's last 4 digits match
+			Take a photo, flat and well lit, or pick a screenshot from the camera roll. Expenses post on their own when the card's last 4 digits match
 			an account and the category matches one of yours; anything else waits below for you.
 		</p>
 		{#if notice}
@@ -238,10 +219,6 @@
 <TransactionModal {accounts} {categories} transaction={editing} bind:open={editOpen} onsaved={load} />
 
 <style>
-	.hidden {
-		display: none;
-	}
-
 	.capture {
 		display: flex;
 		flex-direction: column;
@@ -271,22 +248,6 @@
 
 	.shoot:disabled {
 		opacity: 0.7;
-		cursor: progress;
-	}
-
-	.pick {
-		padding: 0.25rem 0.5rem;
-		border: none;
-		background: none;
-		font: inherit;
-		font-size: 0.9rem;
-		color: var(--accent);
-		text-decoration: underline;
-		cursor: pointer;
-	}
-
-	.pick:disabled {
-		opacity: 0.6;
 		cursor: progress;
 	}
 

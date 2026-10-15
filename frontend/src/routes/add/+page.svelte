@@ -20,7 +20,7 @@
 	import type { Account, Category, Transaction } from '$lib/types';
 	import { formatCurrency, formatDateShort, today } from '$lib/format';
 	import { rememberLastAccount, startingAccount } from '$lib/remember';
-	import { capture, openCamera, openLibrary } from '$lib/capture.svelte';
+	import { capture, openCamera } from '$lib/capture.svelte';
 
 	type Kind = 'expense' | 'income' | 'refund';
 
@@ -226,17 +226,14 @@
 			<a class="link-button" href="/accounts">Go to accounts</a>
 		</div>
 	{:else}
-		<button type="button" class="snap" onclick={openCamera} disabled={capture.stage !== null}>
+		<button type="button" class="snap" onclick={() => openCamera()} disabled={capture.stage !== null}>
 			<svg viewBox="0 0 24 24" aria-hidden="true"
 				><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg
 			>
 			<span class="snap-text">
 				<strong>{capture.stage ? 'Reading receipt…' : 'Snap a receipt'}</strong>
-				<span>It logs itself — or type it in below</span>
+				<span>Take one or pick a screenshot — it logs itself</span>
 			</span>
-		</button>
-		<button type="button" class="pick" onclick={openLibrary} disabled={capture.stage !== null}>
-			Or choose a screenshot or saved photo
 		</button>
 
 		{#if saved}
@@ -397,23 +394,6 @@
 		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
-	}
-
-	.pick {
-		align-self: center;
-		padding: 0.25rem 0.5rem;
-		border: none;
-		background: none;
-		font: inherit;
-		font-size: 0.875rem;
-		color: var(--accent);
-		text-decoration: underline;
-		cursor: pointer;
-	}
-
-	.pick:disabled {
-		opacity: 0.6;
-		cursor: progress;
 	}
 
 	.snap-text {

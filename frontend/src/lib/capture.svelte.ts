@@ -1,13 +1,15 @@
-// One camera for the whole app. The layout owns two hidden file inputs and a
-// result banner; any button anywhere calls openCamera() or openLibrary(), so a
+// One camera for the whole app. The layout owns the camera sheet, two hidden
+// file inputs and a result banner; any button anywhere calls openCamera(), so a
 // receipt is one tap from every page and its result shows up wherever you are.
 //
-// Two inputs because one can't do both in a single tap: `capture` sends a phone
-// straight to the camera, and without it the phone asks first — which is what
-// a screenshot or a photo already taken needs.
+// On a phone the camera is our own (CameraSheet: a live viewfinder), because the
+// phone's camera — what <input capture> opens — has no way back to the camera
+// roll, and a receipt is often a screenshot or a photo already taken. The sheet
+// has a camera-roll button for those. Where the live camera can't run, the
+// phone's own camera is the fallback; on a desktop it's a plain file picker.
 //
-// Both must run inside the tap's own event handler: browsers only let a file
-// input open from a direct user gesture.
+// Opening a file input must run inside a tap's own event handler: browsers only
+// let one open from a direct user gesture.
 
 import { getAccounts, getCategories, uploadReceipt } from './api';
 import { downscale } from './image';
@@ -18,10 +20,14 @@ type Stage = 'preparing' | 'uploading';
 export const capture = $state<{
 	stage: Stage | null;
 	notice: (UploadNotice & { review?: boolean }) | null;
-}>({ stage: null, notice: null });
+	cameraOpen: boolean;
+}>({ stage: null, notice: null, cameraOpen: false });
 
 let cameraInput: HTMLInputElement | null = null;
 let libraryInput: HTMLInputElement | null = null;
+// Where the next photo goes. Most callers want the app-wide upload and banner;
+// the Receipts page handles its own.
+let deliver: (file: File) => void = (file) => uploadPhoto(file);
 let dismissTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** The layout hands over its hidden <input type="file">s. */
@@ -30,16 +36,38 @@ export function registerCaptureInputs(camera: HTMLInputElement | null, library: 
 	libraryInput = library;
 }
 
-/** Straight to the camera. */
-export function openCamera() {
-	if (capture.stage) return;
+/** A live camera is worth it on a touch screen that can run one. */
+function liveCameraUsable(): boolean {
+	return !!navigator.mediaDevices?.getUserMedia && matchMedia('(pointer: coarse)').matches;
+}
+
+/** Opens the camera; the photo, taken or picked, goes to handle. */
+export function openCamera(handle: (file: File) => void = (file) => uploadPhoto(file)) {
+	if (capture.stage || capture.cameraOpen) return;
+	deliver = handle;
+	if (liveCameraUsable()) capture.cameraOpen = true;
+	else if (matchMedia('(pointer: coarse)').matches) cameraInput?.click();
+	else libraryInput?.click();
+}
+
+/** The camera roll (photos, screenshots), from the camera sheet. */
+export function openLibrary() {
+	libraryInput?.click();
+}
+
+/** The phone's own camera, for when the live one can't start. */
+export function openSystemCamera() {
 	cameraInput?.click();
 }
 
-/** A screenshot or a photo already taken. */
-export function openLibrary() {
-	if (capture.stage) return;
-	libraryInput?.click();
+export function closeCamera() {
+	capture.cameraOpen = false;
+}
+
+/** A photo arrived — from the shutter or either file input. */
+export function takeFile(file: File) {
+	capture.cameraOpen = false;
+	deliver(file);
 }
 
 export function dismissNotice() {
