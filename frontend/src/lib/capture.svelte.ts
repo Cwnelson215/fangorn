@@ -1,9 +1,13 @@
-// One camera for the whole app. The layout owns a single hidden file input and
-// a result banner; any button anywhere calls openCamera(), so a receipt is one
-// tap from every page and its result shows up wherever you are.
+// One camera for the whole app. The layout owns two hidden file inputs and a
+// result banner; any button anywhere calls openCamera() or openLibrary(), so a
+// receipt is one tap from every page and its result shows up wherever you are.
 //
-// openCamera() must run inside the tap's own event handler: browsers only let a
-// file input open from a direct user gesture.
+// Two inputs because one can't do both in a single tap: `capture` sends a phone
+// straight to the camera, and without it the phone asks first — which is what
+// a screenshot or a photo already taken needs.
+//
+// Both must run inside the tap's own event handler: browsers only let a file
+// input open from a direct user gesture.
 
 import { getAccounts, getCategories, uploadReceipt } from './api';
 import { downscale } from './image';
@@ -16,17 +20,26 @@ export const capture = $state<{
 	notice: (UploadNotice & { review?: boolean }) | null;
 }>({ stage: null, notice: null });
 
-let input: HTMLInputElement | null = null;
+let cameraInput: HTMLInputElement | null = null;
+let libraryInput: HTMLInputElement | null = null;
 let dismissTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** The layout hands over its hidden <input type="file">. */
-export function registerCameraInput(el: HTMLInputElement | null) {
-	input = el;
+/** The layout hands over its hidden <input type="file">s. */
+export function registerCaptureInputs(camera: HTMLInputElement | null, library: HTMLInputElement | null) {
+	cameraInput = camera;
+	libraryInput = library;
 }
 
+/** Straight to the camera. */
 export function openCamera() {
 	if (capture.stage) return;
-	input?.click();
+	cameraInput?.click();
+}
+
+/** A screenshot or a photo already taken. */
+export function openLibrary() {
+	if (capture.stage) return;
+	libraryInput?.click();
 }
 
 export function dismissNotice() {

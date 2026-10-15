@@ -31,7 +31,8 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
-	let fileInput: HTMLInputElement;
+	let cameraInput: HTMLInputElement;
+	let libraryInput: HTMLInputElement;
 	let stage = $state<'idle' | 'preparing' | 'uploading'>('idle');
 	let notice = $state<UploadNotice | null>(null);
 
@@ -134,14 +135,18 @@
 	</div>
 
 	<div class="card capture">
+		<!-- capture goes straight to the camera; the second input lets the phone
+		     offer screenshots and photos already taken. -->
 		<input
-			bind:this={fileInput}
+			bind:this={cameraInput}
 			class="hidden"
 			type="file"
 			accept="image/*"
+			capture="environment"
 			onchange={onFile}
 		/>
-		<button class="shoot" onclick={() => fileInput.click()} disabled={stage !== 'idle'}>
+		<input bind:this={libraryInput} class="hidden" type="file" accept="image/*" onchange={onFile} />
+		<button class="shoot" onclick={() => cameraInput.click()} disabled={stage !== 'idle'}>
 			{#if stage === 'preparing'}
 				Preparing photo…
 			{:else if stage === 'uploading'}
@@ -149,6 +154,9 @@
 			{:else}
 				Scan a receipt
 			{/if}
+		</button>
+		<button class="pick" onclick={() => libraryInput.click()} disabled={stage !== 'idle'}>
+			Or choose a screenshot or saved photo
 		</button>
 		<p class="muted small">
 			Take a photo, flat and well lit. Expenses post on their own when the card's last 4 digits match
@@ -263,6 +271,22 @@
 
 	.shoot:disabled {
 		opacity: 0.7;
+		cursor: progress;
+	}
+
+	.pick {
+		padding: 0.25rem 0.5rem;
+		border: none;
+		background: none;
+		font: inherit;
+		font-size: 0.9rem;
+		color: var(--accent);
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.pick:disabled {
+		opacity: 0.6;
 		cursor: progress;
 	}
 

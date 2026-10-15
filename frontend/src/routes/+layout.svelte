@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount, tick } from 'svelte';
 	import { authStatus } from '$lib/api';
-	import { capture, dismissNotice, openCamera, registerCameraInput, uploadPhoto } from '$lib/capture.svelte';
+	import { capture, dismissNotice, openCamera, openLibrary, registerCaptureInputs, uploadPhoto } from '$lib/capture.svelte';
 	import { isAppleMobile } from '$lib/device';
 
 	let { children }: { children: Snippet } = $props();
@@ -103,6 +103,11 @@
 		openCamera();
 	}
 
+	function pickFromMenu() {
+		openMenu = null;
+		openLibrary();
+	}
+
 	const SETTINGS = { href: '/settings', label: 'Settings', icon: 'gear' as Icon };
 	const SHORTCUT = { href: '/shortcut', label: 'iPhone Shortcut', icon: 'phone' as Icon };
 
@@ -171,10 +176,12 @@
 			});
 	});
 
-	function registerCamera(el: HTMLInputElement) {
-		registerCameraInput(el);
-		return { destroy: () => registerCameraInput(null) };
-	}
+	let cameraInput = $state<HTMLInputElement>();
+	let libraryInput = $state<HTMLInputElement>();
+	$effect(() => {
+		registerCaptureInputs(cameraInput ?? null, libraryInput ?? null);
+		return () => registerCaptureInputs(null, null);
+	});
 
 	function onPhoto(event: Event) {
 		const input = event.currentTarget as HTMLInputElement;
@@ -303,6 +310,9 @@
 						<button role="menuitem" onclick={snapFromMenu} disabled={capture.stage !== null}>
 							{@render glyph('camera')}Scan a receipt
 						</button>
+						<button role="menuitem" onclick={pickFromMenu} disabled={capture.stage !== null}>
+							{@render glyph('receipt')}Upload a receipt image
+						</button>
 						<a role="menuitem" href="/transfers?new">{@render glyph('swap')}Record a transfer</a>
 					</div>
 				{/if}
@@ -329,7 +339,17 @@
 		</nav>
 
 		<input
-			use:registerCamera
+			bind:this={cameraInput}
+			class="camera-input"
+			type="file"
+			accept="image/*"
+			capture="environment"
+			tabindex="-1"
+			aria-hidden="true"
+			onchange={onPhoto}
+		/>
+		<input
+			bind:this={libraryInput}
 			class="camera-input"
 			type="file"
 			accept="image/*"

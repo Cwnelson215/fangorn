@@ -20,7 +20,7 @@
 	import type { Account, Category, Transaction } from '$lib/types';
 	import { formatCurrency, formatDateShort, today } from '$lib/format';
 	import { rememberLastAccount, startingAccount } from '$lib/remember';
-	import { capture, openCamera } from '$lib/capture.svelte';
+	import { capture, openCamera, openLibrary } from '$lib/capture.svelte';
 
 	type Kind = 'expense' | 'income' | 'refund';
 
@@ -232,8 +232,11 @@
 			>
 			<span class="snap-text">
 				<strong>{capture.stage ? 'Reading receipt…' : 'Snap a receipt'}</strong>
-				<span>Take a photo or pick a screenshot — it logs itself</span>
+				<span>It logs itself — or type it in below</span>
 			</span>
+		</button>
+		<button type="button" class="pick" onclick={openLibrary} disabled={capture.stage !== null}>
+			Or choose a screenshot or saved photo
 		</button>
 
 		{#if saved}
@@ -394,6 +397,23 @@
 		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
+	}
+
+	.pick {
+		align-self: center;
+		padding: 0.25rem 0.5rem;
+		border: none;
+		background: none;
+		font: inherit;
+		font-size: 0.875rem;
+		color: var(--accent);
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.pick:disabled {
+		opacity: 0.6;
+		cursor: progress;
 	}
 
 	.snap-text {
