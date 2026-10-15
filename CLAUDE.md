@@ -566,7 +566,9 @@ monthly goals after).
 - **A receipt is one tap from anywhere.** The top bar's camera button (every page, phone and
   desktop) and `/add`'s "Snap a receipt" both call `openCamera()` from `lib/capture.svelte.ts`,
   which drives the layout's single hidden file input and its result banner. It has to be called
-  from the tap's own handler — browsers only open a file picker on a direct user gesture.
+  from the tap's own handler — browsers only open a file picker on a direct user gesture. The
+  input deliberately has no `capture` attribute: that would force the camera, and the phone's own
+  picker already offers Take Photo next to the photo library, so screenshots and saved photos work.
 - **Service worker** (`src/service-worker.ts`) caches the build output and icons so the installed
   app launches without the network. Page loads are network-first with the cached page as an
   offline fallback; `/api/` is never cached. The manifest, `/icons/` and `/service-worker.js` are

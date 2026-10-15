@@ -333,7 +333,6 @@
 			class="camera-input"
 			type="file"
 			accept="image/*"
-			capture="environment"
 			tabindex="-1"
 			aria-hidden="true"
 			onchange={onPhoto}

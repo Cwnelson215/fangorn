@@ -139,7 +139,6 @@
 			class="hidden"
 			type="file"
 			accept="image/*"
-			capture="environment"
 			onchange={onFile}
 		/>
 		<button class="shoot" onclick={() => fileInput.click()} disabled={stage !== 'idle'}>

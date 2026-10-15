@@ -232,7 +232,7 @@
 			>
 			<span class="snap-text">
 				<strong>{capture.stage ? 'Reading receipt…' : 'Snap a receipt'}</strong>
-				<span>It logs itself — or type it in below</span>
+				<span>Take a photo or pick a screenshot — it logs itself</span>
 			</span>
 		</button>
 
