@@ -137,8 +137,9 @@ var tools = []tool{
 	},
 	{
 		name: "get_budget_month",
-		description: "One month's budget as the Budgets page shows it: each category's budget, what was spent (or, " +
-			"for income categories, received) and what is still scheduled; expected and received income; " +
+		description: "One month's budget as the Budgets page shows it: each spending category's budget, what was spent " +
+			"and what is still scheduled; the month's expected income against all income received (any category) " +
+			"and recurring income still to come; " +
 			"the savings goals planned for the month and how much has been moved to each; any savings shortfall " +
 			"(planned savings that were spent instead); and each credit card and loan: paid, newly charged, and the " +
 			"paydown (paid beyond new charges) that counts toward the month.",

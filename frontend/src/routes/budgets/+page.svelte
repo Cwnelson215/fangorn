@@ -19,6 +19,7 @@
 		reorderGoals,
 		setBudget,
 		setDebtPlan,
+		setIncomePlan,
 		stopBudget,
 		updateGoal,
 		updateSettings
@@ -31,7 +32,9 @@
 		Goal,
 		GoalActivity,
 		GoalInput,
+		IncomeLine,
 		SavingsLine,
+		ScheduledItem,
 		Transaction
 	} from '$lib/types';
 	import {
@@ -50,13 +53,11 @@
 	import BudgetBar from '$lib/components/BudgetBar.svelte';
 	import ActivityDropdown, { type ActivityRow } from '$lib/components/ActivityDropdown.svelte';
 	import { budgetPace, incomePace } from '$lib/budget';
-	import type { CategoryKind } from '$lib/types';
 
 	let month = $state(monthStart());
 	let budgets: Budget[] = $state([]);
 	let unbudgeted = $state(0);
-	let incomeReceived = $state(0);
-	let unplannedIncome = $state(0);
+	let income: IncomeLine = $state({ expected: 0, received: 0, scheduled: 0, scheduled_items: [] });
 	let savings: SavingsLine[] = $state([]);
 	let shortfall = $state(0);
 	let debts: DebtLine[] = $state([]);
@@ -76,7 +77,6 @@
 	let budgetModalOpen = $state(false);
 	let budgetSaving = $state(false);
 	let budgetError = $state<string | null>(null);
-	let budgetKind = $state<CategoryKind>('expense');
 	let budgetCategoryId = $state(0);
 	let budgetAmount = $state('');
 
@@ -139,8 +139,7 @@
 			if (requested !== month) return; // a later month change won
 			budgets = data.budgets;
 			unbudgeted = data.unbudgeted_spent;
-			incomeReceived = data.income_received;
-			unplannedIncome = data.unplanned_income;
+			income = data.income;
 			savings = data.savings;
 			shortfall = data.savings_shortfall;
 			debts = data.debts;
@@ -164,18 +163,17 @@
 	let expenseCategories = $derived(
 		categories.filter((c) => c.kind === 'expense' && !c.archived)
 	);
-	let incomeCategories = $derived(categories.filter((c) => c.kind === 'income' && !c.archived));
 	let budgetedIds = $derived(new Set(budgets.map((b) => b.category_id)));
 
-	// Spending limits and expected income share the budgets table, split by the
-	// category's kind.
 	let spendBudgets = $derived(budgets.filter((b) => b.kind === 'expense'));
-	let incomeBudgets = $derived(budgets.filter((b) => b.kind === 'income'));
 	let totalBudget = $derived(spendBudgets.reduce((sum, b) => sum + b.amount, 0));
 	let totalSpent = $derived(spendBudgets.reduce((sum, b) => sum + b.spent, 0));
 	let totalScheduled = $derived(spendBudgets.reduce((sum, b) => sum + b.scheduled, 0));
-	let totalExpected = $derived(incomeBudgets.reduce((sum, b) => sum + b.amount, 0));
-	let incomeScheduled = $derived(incomeBudgets.reduce((sum, b) => sum + b.scheduled, 0));
+	let totalExpected = $derived(income.expected);
+	let incomeReceived = $derived(income.received);
+	let incomeScheduled = $derived(income.scheduled);
+	// Shown once there's a plan or any income at all.
+	let showIncome = $derived(income.expected > 0.005 || income.received > 0.005 || income.scheduled > 0.005);
 	let totalSavingsPlanned = $derived(savings.reduce((sum, l) => sum + l.monthly_amount, 0));
 	let totalMoved = $derived(savings.reduce((sum, l) => sum + l.moved, 0));
 	let totalDebtPlanned = $derived(debts.reduce((sum, l) => sum + l.monthly_amount, 0));
@@ -184,7 +182,35 @@
 	// What the plan leaves over: expected income less budgeted spending, the
 	// month's savings and the debt it means to pay down.
 	let planLeft = $derived(totalExpected - totalBudget - totalSavingsPlanned - totalDebtPlanned);
-	let showPlan = $derived(incomeBudgets.length > 0 || savings.length > 0 || totalDebtPlanned > 0.005);
+	let showPlan = $derived(income.expected > 0.005 || savings.length > 0 || totalDebtPlanned > 0.005);
+
+	// Expected income form: one amount for all income, whatever its category.
+	let incomeModalOpen = $state(false);
+	let incomeAmount = $state('');
+	let incomeSaving = $state(false);
+	let incomeError = $state<string | null>(null);
+
+	function openIncomePlan() {
+		incomeAmount = income.expected ? String(income.expected) : '';
+		incomeError = null;
+		incomeModalOpen = true;
+	}
+
+	// A blank amount stops the plan from this month on.
+	async function saveIncomePlan(event: Event) {
+		event.preventDefault();
+		incomeSaving = true;
+		incomeError = null;
+		try {
+			await setIncomePlan(Math.abs(parseFloat(incomeAmount) || 0) || null, month);
+			incomeModalOpen = false;
+			await loadBudgets();
+		} catch (e) {
+			incomeError = e instanceof Error ? e.message : 'Could not save expected income';
+		} finally {
+			incomeSaving = false;
+		}
+	}
 
 	// Planned paydown form
 	let debtModalOpen = $state(false);
@@ -229,11 +255,8 @@
 		}
 	}
 
-	let modalCategories = $derived(budgetKind === 'income' ? incomeCategories : expenseCategories);
-
-	function openBudget(kind: CategoryKind) {
-		budgetKind = kind;
-		const pool = kind === 'income' ? incomeCategories : expenseCategories;
+	function openBudget() {
+		const pool = expenseCategories;
 		budgetCategoryId = pool.find((c) => !budgetedIds.has(c.id))?.id ?? pool[0]?.id ?? 0;
 		budgetAmount = '';
 		budgetError = null;
@@ -241,7 +264,6 @@
 	}
 
 	function editBudget(budget: Budget) {
-		budgetKind = budget.kind;
 		budgetCategoryId = budget.category_id;
 		budgetAmount = String(budget.amount);
 		budgetError = null;
@@ -443,8 +465,8 @@
 		amount: t.amount
 	});
 
-	// A category's kind is its transactions' kind, so the category alone picks
-	// out exactly what the budget counted: expenses and refunds, or income.
+	// An expense category holds expenses and refunds, so the category alone
+	// picks out exactly what the budget counted.
 	async function budgetActivity(budget: Budget): Promise<ActivityRow[]> {
 		const txns = await getTransactions({
 			category_id: budget.category_id,
@@ -452,11 +474,27 @@
 			to: monthEnd(month),
 			limit: 500
 		});
-		// What's still to post from recurring rules comes first: it is dated
-		// later than anything that has happened, and counts toward the bar's
-		// "scheduled", not its "spent".
-		const sign = budget.kind === 'income' ? 1 : -1;
-		const upcoming = [...budget.scheduled_items].reverse().map(
+		return [
+			...scheduledRows(budget.scheduled_items, -1),
+			...txns.map((t) => txnRow(t, t.kind === 'refund' ? 'Refund' : '', t.merchant, t.account_name))
+		];
+	}
+
+	// Every income transaction in the month, whatever its category — exactly
+	// what Income counts.
+	async function incomeActivity(): Promise<ActivityRow[]> {
+		const txns = await getTransactions({ kind: 'income', from: month, to: monthEnd(month), limit: 500 });
+		return [
+			...scheduledRows(income.scheduled_items, 1),
+			...txns.map((t) => txnRow(t, t.category_name ?? 'Uncategorized', t.account_name))
+		];
+	}
+
+	// What's still to post from recurring rules comes first: it is dated later
+	// than anything that has happened, and counts toward the bar's "scheduled",
+	// not its "spent".
+	function scheduledRows(items: ScheduledItem[], sign: 1 | -1): ActivityRow[] {
+		return [...items].reverse().map(
 			(s): ActivityRow => ({
 				key: `s${s.rule_id}-${s.date}`,
 				date: s.date,
@@ -468,10 +506,6 @@
 				pending: true
 			})
 		);
-		return [
-			...upcoming,
-			...txns.map((t) => txnRow(t, t.kind === 'refund' ? 'Refund' : '', t.merchant, t.account_name))
-		];
 	}
 
 	// A goal on a shared account often holds only part of a transaction; the
@@ -539,15 +573,10 @@
 			<div class="section-head">
 				<h2>Monthly Budgets</h2>
 				<span class="head-actions">
-					<Button
-						variant="secondary"
-						size="sm"
-						onclick={() => openBudget('income')}
-						disabled={incomeCategories.length === 0}
-					>
-						Expect Income
-					</Button>
-					<Button size="sm" onclick={() => openBudget('expense')} disabled={expenseCategories.length === 0}>
+					{#if income.expected <= 0.005}
+						<Button variant="secondary" size="sm" onclick={openIncomePlan}>Expect Income</Button>
+					{/if}
+					<Button size="sm" onclick={openBudget} disabled={expenseCategories.length === 0}>
 						Set a Budget
 					</Button>
 				</span>
@@ -571,7 +600,7 @@
 			{#if showPlan}
 				<div class="plan" class:with-debt={showDebt}>
 					<div>
-						<span class="plan-label">Expected income</span>
+						<span class="plan-label">Income</span>
 						<span class="plan-value">{formatCurrency(totalExpected)}</span>
 						<span class="muted small">{formatCurrency(incomeReceived)} received</span>
 					</div>
@@ -619,49 +648,48 @@
 				</select>
 			</label>
 
-			{#if incomeBudgets.length > 0}
-				<h3 class="sub-head">Expected income</h3>
+			{#if showIncome}
+				<!-- Beyond what's already scheduled, so a recurring paycheck isn't counted twice. -->
+				{@const toCome = income.expected - income.received - income.scheduled}
+				<h3 class="sub-head">Income</h3>
 				<div class="list">
-					{#each incomeBudgets as budget (budget.id)}
-						<!-- Beyond what's already scheduled, so a recurring paycheck isn't counted twice. -->
-						{@const toCome = budget.amount - budget.spent - budget.scheduled}
-						<div class="item">
-							<div class="item-head">
-								<span class="item-name">{budget.category_name}</span>
-								<span class="item-actions">
-									<Button variant="ghost" size="sm" onclick={() => editBudget(budget)}>Edit</Button>
-									<Button variant="ghost" size="sm" onclick={() => endBudget(budget)}>Stop</Button>
-								</span>
-							</div>
+					<div class="item">
+						<div class="item-head">
+							<span class="item-name">Income</span>
+							<span class="item-actions">
+								<Button variant="ghost" size="sm" onclick={openIncomePlan}>
+									{income.expected > 0.005 ? 'Edit' : 'Set expected'}
+								</Button>
+							</span>
+						</div>
+						{#if income.expected > 0.005}
 							<BudgetBar
-								spent={budget.spent}
-								amount={budget.amount}
-								scheduled={budget.scheduled}
+								spent={income.received}
+								amount={income.expected}
+								scheduled={income.scheduled}
 								color="var(--pos)"
 								pace={incomePace(month)}
 							/>
-							<div class="item-foot muted">
-								{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)} received
-								{#if budget.scheduled > 0}
-									· {formatCurrency(budget.scheduled)} scheduled
-								{/if}
-								{#if toCome > 0.005}
-									· {formatCurrency(toCome)} still to come
-								{:else if budget.spent > budget.amount + 0.005}
-									· <span class="pos">{formatCurrency(budget.spent - budget.amount)} more than expected</span>
-								{/if}
-							</div>
-							<ActivityDropdown
-								load={() => budgetActivity(budget)}
-								stamp={loadedCount}
-								empty="No income here in {formatMonth(month)}."
-							/>
+						{/if}
+						<div class="item-foot muted">
+							{formatCurrency(income.received)}{#if income.expected > 0.005}{' '}of
+								{formatCurrency(income.expected)}{/if} received
+							{#if income.scheduled > 0}
+								· {formatCurrency(income.scheduled)} scheduled
+							{/if}
+							{#if income.expected > 0.005 && toCome > 0.005}
+								· {formatCurrency(toCome)} still to come
+							{:else if income.expected > 0.005 && income.received > income.expected + 0.005}
+								· <span class="pos">{formatCurrency(income.received - income.expected)} more than expected</span>
+							{/if}
 						</div>
-					{/each}
+						<ActivityDropdown
+							load={incomeActivity}
+							stamp={loadedCount}
+							empty="No income in {formatMonth(month)}."
+						/>
+					</div>
 				</div>
-				{#if unplannedIncome > 0.005}
-					<p class="muted small">Plus {formatCurrency(unplannedIncome)} of income you didn't plan for.</p>
-				{/if}
 			{/if}
 
 			<div class="sub-row">
@@ -821,7 +849,7 @@
 			{#if spendBudgets.length === 0}
 				<p class="muted small">
 					{#if isCurrentMonth}
-						{incomeBudgets.length > 0 ? 'No spending budgets yet.' : 'No budgets set.'} Pick a category
+						{income.expected > 0.005 ? 'No spending budgets yet.' : 'No budgets set.'} Pick a category
 						and a monthly limit to track spending against it, or <strong>Expect Income</strong> to plan
 						what comes in.
 					{:else}
@@ -982,21 +1010,18 @@
 	{/if}
 </div>
 
-<Modal
-	bind:open={budgetModalOpen}
-	title="{budgetKind === 'income' ? 'Expected Income' : 'Set a Budget'} for {formatMonth(month)}"
->
+<Modal bind:open={budgetModalOpen} title="Set a Budget for {formatMonth(month)}">
 	<form onsubmit={saveBudget}>
-		<Field label={budgetKind === 'income' ? 'Income category' : 'Category'} id="budgetCategory">
+		<Field label="Category" id="budgetCategory">
 			<select id="budgetCategory" bind:value={budgetCategoryId} disabled={budgetSaving}>
-				{#each modalCategories as category (category.id)}
+				{#each expenseCategories as category (category.id)}
 					<option value={category.id}>{category.name}</option>
 				{/each}
 			</select>
 		</Field>
 
 		<Field
-			label={budgetKind === 'income' ? 'Expected each month' : 'Monthly limit'}
+			label="Monthly limit"
 			id="budgetAmount"
 			hint="Applies from {formatMonth(month)} until the next change"
 		>
@@ -1020,7 +1045,39 @@
 		<div class="form-actions">
 			<Button variant="secondary" onclick={() => (budgetModalOpen = false)}>Cancel</Button>
 			<Button type="submit" disabled={budgetSaving || !budgetAmount}>
-				{budgetSaving ? 'Saving…' : budgetKind === 'income' ? 'Save Expected Income' : 'Save Budget'}
+				{budgetSaving ? 'Saving…' : 'Save Budget'}
+			</Button>
+		</div>
+	</form>
+</Modal>
+
+<Modal bind:open={incomeModalOpen} title="Expected Income for {formatMonth(month)}">
+	<form onsubmit={saveIncomePlan}>
+		<Field
+			label="Expected each month"
+			id="incomeAmount"
+			hint="All income counts toward it, whatever its category. Applies from {formatMonth(month)} until the next change; leave blank for none"
+		>
+			<input
+				id="incomeAmount"
+				type="number"
+				inputmode="decimal"
+				step="0.01"
+				min="0"
+				placeholder="0.00"
+				bind:value={incomeAmount}
+				disabled={incomeSaving}
+			/>
+		</Field>
+
+		{#if incomeError}
+			<p class="error-text">{incomeError}</p>
+		{/if}
+
+		<div class="form-actions">
+			<Button variant="secondary" onclick={() => (incomeModalOpen = false)}>Cancel</Button>
+			<Button type="submit" disabled={incomeSaving}>
+				{incomeSaving ? 'Saving…' : 'Save Expected Income'}
 			</Button>
 		</div>
 	</form>

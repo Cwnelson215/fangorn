@@ -379,19 +379,17 @@ type Budget struct {
 	CategoryID    int     `json:"category_id"`
 	CategoryName  string  `json:"category_name,omitempty"`
 	CategoryColor *string `json:"category_color,omitempty"`
-	// Kind is the category's kind: "expense" for a limit, "income" for expected income.
+	// Kind is the category's kind; always "expense" — expected income is BudgetMonth.Income.
 	Kind          string  `json:"kind"`
 	Period        string  `json:"period"`
 	Amount        float64 `json:"amount"`
 	EffectiveFrom string  `json:"effective_from"`
 
-	// Spent is the month-to-date actual, as a positive number: spend net of
-	// refunds on an expense budget, income received on an income budget.
+	// Spent is the month-to-date spend net of refunds, as a positive number.
 	Spent float64 `json:"spent"`
 
-	// Scheduled is recurring expenses (or, on an income budget, recurring
-	// income) in this category that fall in the month but have not posted yet,
-	// as a positive number. Always 0 for past months.
+	// Scheduled is recurring expenses in this category that fall in the month
+	// but have not posted yet, as a positive number. Always 0 for past months.
 	Scheduled float64 `json:"scheduled"`
 	// ScheduledItems is what Scheduled is the sum of, soonest first.
 	ScheduledItems []ScheduledItem `json:"scheduled_items"`
@@ -419,11 +417,9 @@ type BudgetMonth struct {
 	// including uncategorized transactions, as a positive number.
 	UnbudgetedSpent float64 `json:"unbudgeted_spent"`
 
-	// IncomeReceived is all income in the month, budgeted or not.
-	IncomeReceived float64 `json:"income_received"`
-	// UnplannedIncome is the part of IncomeReceived in categories with no
-	// expected-income budget, uncategorized included.
-	UnplannedIncome float64 `json:"unplanned_income"`
+	// Income is the month's expected income against all income received,
+	// whatever its category.
+	Income IncomeLine `json:"income"`
 
 	// Savings is each open goal with a monthly amount: planned vs put toward it.
 	Savings []SavingsLine `json:"savings"`
@@ -434,6 +430,19 @@ type BudgetMonth struct {
 	// Debts is every credit card and loan: what was paid to it in the month and
 	// how much of that counts toward the budget.
 	Debts []DebtLine `json:"debts"`
+}
+
+// IncomeLine is a month's income: one expected amount for the household, and
+// every income transaction counted against it regardless of category.
+type IncomeLine struct {
+	// Expected is the plan in force for the month (income_plans); 0 for none.
+	Expected float64 `json:"expected"`
+	// Received is all income in the month, uncategorized included.
+	Received float64 `json:"received"`
+	// Scheduled is recurring income in the month not posted yet; 0 for past months.
+	Scheduled float64 `json:"scheduled"`
+	// ScheduledItems is what Scheduled is the sum of, soonest first.
+	ScheduledItems []ScheduledItem `json:"scheduled_items"`
 }
 
 // DebtLine is one credit card or loan in a month's budget.

@@ -28,10 +28,15 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
-	budgets, err := s.listBudgets(ctx, householdID, monthStart, today)
+	budgets, err := s.budgetRows(ctx, householdID, monthStart)
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
+	scheduled, scheduledIncome, err := s.scheduledSpend(ctx, householdID, monthStart, today)
+	if err != nil {
+		return models.BudgetMonth{}, err
+	}
+	attachScheduled(budgets, scheduled)
 
 	// Refunds are summed alongside expenses and are positive, so a returned
 	// purchase subtracts itself here rather than needing its own term.
@@ -50,23 +55,21 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 
 	// Each budget's actual is exactly its category's for the month, so whatever
 	// is left over — other categories and uncategorized — is outside the plan.
-	unbudgeted, unplanned := spent, income
+	unbudgeted := spent
 	for _, b := range budgets {
-		if b.Kind == models.KindIncome {
-			unplanned -= b.Spent
-		} else {
-			unbudgeted -= b.Spent
-		}
+		unbudgeted -= b.Spent
 	}
 	savings, fills, err := s.savingsLines(ctx, householdID, monthStart)
 	if err != nil {
 		return models.BudgetMonth{}, err
 	}
-	var expected float64
-	for _, b := range budgets {
-		if b.Kind == models.KindIncome {
-			expected += b.Amount
-		}
+	expected, err := s.incomePlan(ctx, householdID, monthStart)
+	if err != nil {
+		return models.BudgetMonth{}, err
+	}
+	var incomeScheduled float64
+	for _, it := range scheduledIncome {
+		incomeScheduled += it.Amount
 	}
 	thisMonth := today.Format("2006-01") + "-01"
 	shortfall, err := s.savingsShortfallFor(ctx, householdID, monthStart, monthStart >= thisMonth, expected, savings, fills)
@@ -81,8 +84,12 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 		Month:            monthStart,
 		Budgets:          budgets,
 		UnbudgetedSpent:  round2(unbudgeted),
-		IncomeReceived:   round2(income),
-		UnplannedIncome:  round2(unplanned),
+		Income: models.IncomeLine{
+			Expected:       expected,
+			Received:       round2(income),
+			Scheduled:      round2(incomeScheduled),
+			ScheduledItems: scheduledIncome,
+		},
 		Savings:          savings,
 		SavingsShortfall: shortfall,
 		Debts:            debts,
@@ -154,7 +161,37 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 	return out, fills, nil
 }
 
-// listBudgets finds, per category, the newest row whose effective_from is on or
+// listBudgets is budgetRows with each budget's scheduled charges filled in.
+func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart string, today time.Time) ([]models.Budget, error) {
+	out, err := s.budgetRows(ctx, householdID, monthStart)
+	if err != nil || len(out) == 0 {
+		return out, err
+	}
+	scheduled, _, err := s.scheduledSpend(ctx, householdID, monthStart, today)
+	if err != nil {
+		return nil, err
+	}
+	attachScheduled(out, scheduled)
+	return out, nil
+}
+
+// attachScheduled sets each budget's Scheduled and ScheduledItems from its
+// category's list.
+func attachScheduled(budgets []models.Budget, scheduled map[int][]models.ScheduledItem) {
+	for i := range budgets {
+		items := scheduled[budgets[i].CategoryID]
+		if items == nil {
+			items = []models.ScheduledItem{}
+		}
+		var total float64
+		for _, it := range items {
+			total += it.Amount
+		}
+		budgets[i].Scheduled, budgets[i].ScheduledItems = round2(total), items
+	}
+}
+
+// budgetRows finds, per category, the newest row whose effective_from is on or
 // before the month — DISTINCT ON is Postgres's direct way to express that, and it
 // keeps old budget rows around as history instead of overwriting them when an
 // amount changes.
@@ -162,7 +199,11 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 // archived_at is filtered *after* picking the newest row, not before: an archived
 // row is a tombstone left by StopBudget, and it has to win over the older rows
 // beneath it so the budget stays stopped from that month on.
-func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart string, today time.Time) ([]models.Budget, error) {
+//
+// Budgets are spending limits on expense categories. Expected income isn't one
+// of them — it is a single amount for all income (incomePlan) — so any income
+// rows left in the table are ignored.
+func (s *Service) budgetRows(ctx context.Context, householdID int, monthStart string) ([]models.Budget, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`WITH active AS (
 		   SELECT DISTINCT ON (b.category_id)
@@ -175,19 +216,18 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 		 SELECT active.id, active.category_id, c.name, c.color, c.kind, active.period,
 		        active.amount, active.effective_from,
 		        COALESCE((
-		          SELECT CASE WHEN c.kind = 'income' THEN SUM(t.amount) ELSE -SUM(t.amount) END
+		          SELECT -SUM(t.amount)
 		          FROM transactions t
 		          WHERE t.household_id = $1
 		            AND t.category_id = active.category_id
-		            AND (CASE WHEN c.kind = 'income' THEN t.kind = 'income'
-		                      ELSE t.kind IN ('expense','refund') END)
+		            AND t.kind IN ('expense','refund')
 		            AND t.date >= $2::date
 		            AND t.date < ($2::date + INTERVAL '1 month')
 		        ), 0) AS spent
 		 FROM active
-		 JOIN categories c ON c.id = active.category_id AND c.archived_at IS NULL
+		 JOIN categories c ON c.id = active.category_id AND c.archived_at IS NULL AND c.kind = 'expense'
 		 WHERE active.archived_at IS NULL
-		 ORDER BY c.kind DESC, c.name`,
+		 ORDER BY c.name`,
 		householdID, monthStart)
 	if err != nil {
 		return nil, fmt.Errorf("listing budgets: %w", err)
@@ -207,35 +247,13 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 		b.EffectiveFrom = dateStr(effective)
 		out = append(out, b)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return out, nil
-	}
-
-	scheduled, err := s.scheduledSpend(ctx, householdID, monthStart, today)
-	if err != nil {
-		return nil, err
-	}
-	for i := range out {
-		items := scheduled[out[i].CategoryID]
-		if items == nil {
-			items = []models.ScheduledItem{}
-		}
-		var total float64
-		for _, it := range items {
-			total += it.Amount
-		}
-		out[i].Scheduled, out[i].ScheduledItems = round2(total), items
-	}
-	return out, nil
+	return out, rows.Err()
 }
 
-// scheduledSpend lists, per category, the recurring expenses — and recurring
-// income, for expected-income budgets — that fall in the month but have not
-// posted yet, soonest first. Categories are one kind or the other, so one map
-// holds both. A budget's Scheduled is the sum of its list.
+// scheduledSpend lists, per category, the recurring expenses that fall in the
+// month but have not posted yet, soonest first — a budget's Scheduled is the sum
+// of its list — and, as one list, every recurring income still to come, with or
+// without a category, for the month's expected income.
 //
 // Dates come from the rules through the date engine, not from
 // recurring_occurrences. Those rows only exist out to the scheduler's horizon,
@@ -249,50 +267,62 @@ func (s *Service) listBudgets(ctx context.Context, householdID int, monthStart s
 // scheduler just hasn't reached it. Past months report nothing: an unposted
 // charge there belongs to a manual rule nobody logged, and that's not a budget
 // commitment any more.
-func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStart string, today time.Time) (map[int][]models.ScheduledItem, error) {
+func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStart string, today time.Time) (map[int][]models.ScheduledItem, []models.ScheduledItem, error) {
+	income := []models.ScheduledItem{}
 	month, err := models.ParseDate(monthStart)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if month.Before(time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)) {
-		return nil, nil
+		return nil, income, nil
 	}
 	monthEnd := month.AddDate(0, 1, -1)
 
 	rules, err := s.ListRules(ctx, householdID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	handled, err := s.lastHandledByRule(ctx, householdID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	out := map[int][]models.ScheduledItem{}
 	for _, rule := range rules {
-		if rule.Paused || rule.CategoryID == nil ||
-			(rule.Kind != models.KindExpense && rule.Kind != models.KindIncome) {
+		if rule.Paused {
+			continue
+		}
+		if rule.Kind != models.KindIncome && (rule.Kind != models.KindExpense || rule.CategoryID == nil) {
 			continue
 		}
 		spec, err := RuleSpec(rule)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		from := month
 		if last, ok := handled[rule.ID]; ok && !last.Before(from) {
 			from = last.AddDate(0, 0, 1)
 		}
 		for _, due := range spec.Occurrences(from, monthEnd, 0) {
-			out[*rule.CategoryID] = append(out[*rule.CategoryID], models.ScheduledItem{
+			item := models.ScheduledItem{
 				RuleID: rule.ID, Name: rule.Name, Vendor: rule.Vendor, Date: dateStr(due),
 				Amount: rule.Amount, AccountName: rule.AccountName, AutoPost: rule.AutoPost,
-			})
+			}
+			if rule.Kind == models.KindIncome {
+				income = append(income, item)
+			} else {
+				out[*rule.CategoryID] = append(out[*rule.CategoryID], item)
+			}
 		}
 	}
-	for _, items := range out {
+	byDate := func(items []models.ScheduledItem) {
 		sort.SliceStable(items, func(i, j int) bool { return items[i].Date < items[j].Date })
 	}
-	return out, nil
+	for _, items := range out {
+		byDate(items)
+	}
+	byDate(income)
+	return out, income, nil
 }
 
 // lastHandledByRule is LastHandledOccurrence for every rule in a household at
@@ -417,7 +447,8 @@ func (s *Service) StopBudget(ctx context.Context, householdID, id int, month str
 }
 
 // assertBudgetCategory checks a budget's category: the household's own, not
-// retired, and income or expense — a limit on spending or income expected.
+// retired, and an expense category. Expected income is one amount for all
+// income (SetIncomePlan), not a budget on a category.
 func (s *Service) assertBudgetCategory(ctx context.Context, householdID, categoryID int) error {
 	var kind string
 	var archived bool
@@ -430,8 +461,11 @@ func (s *Service) assertBudgetCategory(ctx context.Context, householdID, categor
 	if err != nil {
 		return fmt.Errorf("checking category: %w", err)
 	}
-	if kind != models.KindExpense && kind != models.KindIncome {
-		return invalid("budgets can only be set on income or expense categories")
+	if kind == models.KindIncome {
+		return invalid("expected income covers all income; set it on the budgets page rather than per category")
+	}
+	if kind != models.KindExpense {
+		return invalid("budgets can only be set on expense categories")
 	}
 	if archived {
 		return invalid("category is archived")

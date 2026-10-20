@@ -244,14 +244,18 @@ users is additive rather than a rewrite.
 
 ## Budgets
 
-A budget is a monthly amount on a category, versioned by `effective_from` (a change applies from
-its month on; `StopBudget` writes a tombstone rather than deleting history). On an **expense**
-category it's a spending limit; on an **income** category it's income expected — same table, told
-apart by the category's kind (`Budget.kind`). Its `spent` is the month's actual either way (spend
-net of refunds, or income received), and `scheduled` is recurring expenses or income in the month
-not posted yet. `BudgetMonth` also reports `income_received` and `unplanned_income`, and the
-budgets page sums the plan: expected income − budgeted spending − savings = left over. Income has
-no "over" (`incomePace` in `lib/budget.ts`). The dashboard's budget widget shows spending only.
+A budget is a monthly spending limit on an **expense** category, versioned by `effective_from` (a
+change applies from its month on; `StopBudget` writes a tombstone rather than deleting history).
+Its `spent` is the month's spend net of refunds, and `scheduled` is recurring expenses in the month
+not posted yet.
+
+**Expected income is not a budget.** It is one monthly amount for the household (`income_plans`,
+versioned by month like `debt_plans`; `PUT /api/income-plan`, a blank amount stops it), and
+**every** income transaction counts toward it whatever its category, uncategorized included —
+`BudgetMonth.income` (`expected`, `received`, `scheduled` = all recurring income still to post).
+`SetBudget` rejects income categories. The budgets page shows it as one **Income** line and sums the
+plan: income − budgeted spending − savings = left over. Income has no "over" (`incomePace` in
+`lib/budget.ts`). The dashboard's budget widget shows spending only.
 
 **The monthly flow:** income lands in one account (`households.income_account_id`, "Income lands
 in" on the budgets page, `GET/PUT /api/settings`) — `/add` switches to it for Money in, unless the
@@ -529,6 +533,8 @@ monthly goals after).
 `021_dividends` adds `security_dividends`, `dividends`, `securities.dividends_checked_at` and the
 `dividend` transaction source.
 `022_splits_and_pay_dates` adds `security_splits`, `splits` and `security_dividends.pay_date`.
+`023_income_plans` adds `income_plans` (one expected monthly income for the household), converting
+each month's income-category budgets into their sum and deleting them.
 
 ## Conventions
 

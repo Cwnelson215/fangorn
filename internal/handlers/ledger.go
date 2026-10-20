@@ -79,6 +79,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/budgets", h.SetBudget)
 	mux.HandleFunc("DELETE /api/budgets/{id}", h.StopBudget)
 	mux.HandleFunc("PUT /api/debt-plans", h.SetDebtPlan)
+	mux.HandleFunc("PUT /api/income-plan", h.SetIncomePlan)
 
 	mux.HandleFunc("GET /api/settings", h.GetSettings)
 	mux.HandleFunc("PUT /api/settings", h.UpdateSettings)
@@ -641,6 +642,19 @@ func (h *LedgerHandler) SetDebtPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.SetDebtPlan(r.Context(), h.householdID, in); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetIncomePlan sets the household's expected monthly income from a month on.
+func (h *LedgerHandler) SetIncomePlan(w http.ResponseWriter, r *http.Request) {
+	var in ledger.IncomePlanInput
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := h.svc.SetIncomePlan(r.Context(), h.householdID, in); err != nil {
 		fail(w, err)
 		return
 	}

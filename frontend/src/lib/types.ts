@@ -247,10 +247,7 @@ export interface Occurrence {
 	transaction_id: number | null;
 }
 
-/**
- * A monthly amount planned for a category: a spending limit on an expense
- * category, or the income expected on an income category.
- */
+/** A monthly spending limit on an expense category. */
 export interface Budget {
 	id: number;
 	category_id: number;
@@ -260,9 +257,9 @@ export interface Budget {
 	period: 'monthly';
 	amount: number;
 	effective_from: string;
-	/** The month's actual: spend net of refunds, or income received. */
+	/** The month's spend net of refunds. */
 	spent: number;
-	/** Recurring expenses (or income) in the month not posted yet. Always 0 for past months. */
+	/** Recurring expenses in the month not posted yet. Always 0 for past months. */
 	scheduled: number;
 	/** What `scheduled` is the sum of, soonest first. */
 	scheduled_items: ScheduledItem[];
@@ -281,16 +278,25 @@ export interface ScheduledItem {
 	auto_post: boolean;
 }
 
+/** A month's income: one expected amount, and every income transaction counted against it. */
+export interface IncomeLine {
+	/** The plan in force for the month; 0 for none. */
+	expected: number;
+	/** All income in the month, any category or none. */
+	received: number;
+	/** Recurring income in the month not posted yet. Always 0 for past months. */
+	scheduled: number;
+	scheduled_items: ScheduledItem[];
+}
+
 export interface BudgetMonth {
 	/** First of the month, YYYY-MM-DD. */
 	month: string;
 	budgets: Budget[];
 	/** Expense spend in categories with no budget, uncategorized included. */
 	unbudgeted_spent: number;
-	/** All income in the month. */
-	income_received: number;
-	/** Income in categories with no expected-income budget, uncategorized included. */
-	unplanned_income: number;
+	/** Expected income against all income received, whatever its category. */
+	income: IncomeLine;
 	/** Open goals with a monthly amount: planned vs put toward them this month. */
 	savings: SavingsLine[];
 	/** Planned savings spent from the income account instead, split across `savings`. */

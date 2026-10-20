@@ -171,7 +171,7 @@ func TestSavingsShortfallFromIncomeAccount(t *testing.T) {
 
 	// Expected income counts for the current month, so a paycheck still to come
 	// isn't read as overspending.
-	f.setBudget(pay.ID, 6000, day[:7])
+	f.setIncomePlan(6000, day[:7])
 	money(t, "shortfall with more income expected", month().Total, 0)
 }
 

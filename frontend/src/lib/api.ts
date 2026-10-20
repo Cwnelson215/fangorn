@@ -265,6 +265,9 @@ export const setBudget = (categoryId: number, amount: number, effectiveFrom: str
 /** Sets a card or loan's planned monthly paydown from `month` on; null stops it. */
 export const setDebtPlan = (accountId: number, amount: number | null, month: string) =>
 	send<void>('PUT', '/api/debt-plans', { account_id: accountId, amount, effective_from: month });
+/** Sets the household's expected monthly income from `month` on; null stops it. */
+export const setIncomePlan = (amount: number | null, month: string) =>
+	send<void>('PUT', '/api/income-plan', { amount, effective_from: month });
 /** Stops a budget from `month` onward; earlier months keep it. */
 export const stopBudget = (id: number, month: string) =>
 	send<void>('DELETE', `/api/budgets/${id}${qs({ month })}`);
