@@ -257,6 +257,13 @@ versioned by month like `debt_plans`; `PUT /api/income-plan`, a blank amount sto
 plan: income − budgeted spending − savings = left over. Income has no "over" (`incomePace` in
 `lib/budget.ts`). The dashboard's budget widget shows spending only.
 
+**The dashboard is one calendar month** (`GET /api/dashboard?month=`, the current one by default,
+in the household's timezone; ‹ › step back through past months, never forward). Money In shows the
+month's expected income, both cards compare with last month **to the same day** (`prev_from`/
+`prev_to`; all of last month for a past month), and the current month's **Left this month** is
+net + recurring income − recurring expenses still to post (`scheduledSpend`, uncategorized
+expenses included under key `uncategorized`). A past month shows plain Net.
+
 **The monthly flow:** income lands in one account (`households.income_account_id`, "Income lands
 in" on the budgets page, `GET/PUT /api/settings`) — `/add` switches to it for Money in, unless the
 income category names its own account. A goal's target is how much to **add**, not a balance to

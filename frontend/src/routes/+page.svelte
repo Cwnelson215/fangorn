@@ -4,12 +4,14 @@
 	import type { Dashboard } from '$lib/types';
 	import {
 		formatCurrency,
-		formatDate,
+		formatDateShort,
+		formatMonth,
 		formatPercent,
 		formatSigned,
-		monthStart,
-		relativeDays
+		relativeDays,
+		shiftMonth
 	} from '$lib/format';
+	import Button from '$lib/components/Button.svelte';
 	import { budgetPace } from '$lib/budget';
 	import BudgetBar from '$lib/components/BudgetBar.svelte';
 	import DonutChart from '$lib/components/DonutChart.svelte';
@@ -26,6 +28,10 @@
 	let accountGroups = $derived(data ? groupAccounts(data.accounts, grouping.by) : []);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	// The month shown; undefined until the server says which month is current
+	// (it knows the household's timezone).
+	let month = $state<string | undefined>(undefined);
+	let monthLoading = $state(false);
 
 	onMount(load);
 
@@ -34,6 +40,7 @@
 		error = null;
 		try {
 			data = await getDashboard();
+			month = data.month;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load your dashboard';
 		} finally {
@@ -41,15 +48,38 @@
 		}
 	}
 
+	// Another month: the figures already shown stay up, dimmed, until it lands.
+	async function goToMonth(next: string) {
+		month = next;
+		monthLoading = true;
+		error = null;
+		try {
+			const got = await getDashboard(next);
+			if (month === next) data = got;
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not load that month';
+		} finally {
+			if (month === next) monthLoading = false;
+		}
+	}
+
 	// After a dividend or split is confirmed: the same data again, without
 	// flashing the page back to "Loading…".
 	async function refresh() {
 		try {
-			data = await getDashboard();
+			data = await getDashboard(month);
 		} catch {
 			// The figures already shown stay; the next visit reloads them.
 		}
 	}
+
+	// The month before, to the same point: "Sep 20" mid-month, "September" for
+	// a whole past month.
+	let prevLabel = $derived(
+		data ? (data.current ? formatDateShort(data.prev_to) : formatMonth(data.prev_from).split(' ')[0]) : ''
+	);
+	let prevWord = $derived(data?.current ? 'by' : 'in');
+	let thisMonthWord = $derived(data?.current ? 'this month' : `in ${formatMonth(data?.month ?? '')}`);
 
 	let hasAccounts = $derived((data?.accounts.length ?? 0) > 0);
 	let activeGoals = $derived(data?.goals.filter((g) => !g.achieved) ?? []);
@@ -60,7 +90,31 @@
 	<div class="page-header">
 		<h1>Dashboard</h1>
 		{#if data}
-			<span class="muted">{formatDate(data.from)} – {formatDate(data.to)}</span>
+			<div class="month-nav">
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => goToMonth(shiftMonth(data!.month, -1))}
+					label="Previous month"
+				>
+					‹
+				</Button>
+				<span class="month-label" class:loading={monthLoading}>
+					<strong>{formatMonth(month ?? data.month)}</strong>
+					{#if data.current && !monthLoading}
+						<span class="muted">through {formatDateShort(data.to)}</span>
+					{/if}
+				</span>
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => goToMonth(shiftMonth(data!.month, 1))}
+					disabled={data.current || monthLoading}
+					label="Next month"
+				>
+					›
+				</Button>
+			</div>
 		{/if}
 	</div>
 
@@ -106,22 +160,45 @@
 						</a>
 					{/if}
 				</div>
-				<div class="card stat">
+				<div class="card stat" class:dim={monthLoading}>
 					<span class="stat-label">Money In</span>
 					<span class="stat-value pos">{formatCurrency(data.income)}</span>
-					<span class="muted">last 30 days</span>
+					{#if data.expected_income > 0.005}
+						<span class="muted">of {formatCurrency(data.expected_income)} expected</span>
+					{:else}
+						<span class="muted">{thisMonthWord}</span>
+					{/if}
+					<span class="muted compare">vs {formatCurrency(data.prev_income)} {prevWord} {prevLabel}</span>
 				</div>
-				<div class="card stat">
+				<div class="card stat" class:dim={monthLoading}>
 					<span class="stat-label">Money Out</span>
 					<span class="stat-value neg">{formatCurrency(data.expenses)}</span>
-					<span class="muted">last 30 days</span>
+					<span class="muted">{thisMonthWord}</span>
+					<span class="muted compare">vs {formatCurrency(data.prev_expenses)} {prevWord} {prevLabel}</span>
 				</div>
-				<div class="card stat">
-					<span class="stat-label">Net</span>
-					<span class="stat-value" class:pos={data.net >= 0} class:neg={data.net < 0}>
-						{formatCurrency(data.net)}
-					</span>
-					<span class="muted">in minus out</span>
+				<div class="card stat" class:dim={monthLoading}>
+					{#if data.current}
+						<!-- What the month leaves once the recurring rules still due have posted. -->
+						<span class="stat-label">Left this month</span>
+						<span class="stat-value" class:pos={data.left >= 0} class:neg={data.left < 0}>
+							{formatCurrency(data.left)}
+						</span>
+						{#if data.scheduled_expenses > 0.005}
+							<span class="muted">after {formatCurrency(data.scheduled_expenses)} of bills still due</span>
+						{/if}
+						{#if data.scheduled_income > 0.005}
+							<span class="muted">with {formatCurrency(data.scheduled_income)} still coming in</span>
+						{/if}
+						{#if data.scheduled_expenses <= 0.005 && data.scheduled_income <= 0.005}
+							<span class="muted">in minus out</span>
+						{/if}
+					{:else}
+						<span class="stat-label">Net</span>
+						<span class="stat-value" class:pos={data.net >= 0} class:neg={data.net < 0}>
+							{formatCurrency(data.net)}
+						</span>
+						<span class="muted">in minus out</span>
+					{/if}
 				</div>
 			</div>
 
@@ -193,13 +270,13 @@
 				</div>
 
 				<div class="card">
-					<h2>Spending by Category</h2>
+					<h2>Spending by Category <span class="muted small">{thisMonthWord}</span></h2>
 					{#if data.categories.length > 0}
 						<DonutChart
 							slices={data.categories.map((c) => ({ label: c.category_name, value: c.amount, color: c.color }))}
 						/>
 					{:else}
-						<p class="muted small">No spending logged in this period yet.</p>
+						<p class="muted small">No spending logged {thisMonthWord}{data.current ? ' yet' : ''}.</p>
 					{/if}
 				</div>
 			</div>
@@ -216,12 +293,12 @@
 			{#if spendingBudgets.length > 0}
 				<div class="card">
 					<div class="card-head">
-						<h2>This Month's Budgets</h2>
+						<h2>{data.current ? "This Month's" : formatMonth(data.month)} Budgets</h2>
 						<a class="link" href="/budgets">Manage</a>
 					</div>
 					<div class="budget-list">
 						{#each spendingBudgets as budget (budget.id)}
-							{@const pace = budgetPace(budget, monthStart())}
+							{@const pace = budgetPace(budget, data.month)}
 							<div class="budget">
 								<div class="budget-head">
 									<span>{budget.category_name}</span>
@@ -300,6 +377,40 @@
 
 	.link:hover {
 		color: var(--accent-hover);
+	}
+
+	.month-nav {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.month-nav :global(.btn) {
+		font-size: 1.25rem;
+		line-height: 1;
+		min-width: 40px;
+		min-height: 40px;
+	}
+
+	.month-label {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		min-width: 9rem;
+		line-height: 1.25;
+	}
+
+	.month-label .muted {
+		font-size: 0.75rem;
+	}
+
+	.month-label.loading,
+	.dim {
+		opacity: 0.5;
+	}
+
+	.compare {
+		font-size: 0.75rem;
 	}
 
 	.stats {
@@ -487,7 +598,7 @@
 	}
 
 	@media (max-width: 639px) {
-		/* Net worth gets the full width; the three 30-day figures share a row. */
+		/* Net worth gets the full width; the three month figures share a row. */
 		.stats {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
 			gap: 0.5rem;

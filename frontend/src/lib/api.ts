@@ -88,8 +88,8 @@ export const authStatus = () =>
 // dashboard
 // ---------------------------------------------------------------------------
 
-export const getDashboard = (from?: string, to?: string) =>
-	request<Dashboard>(`/api/dashboard${qs({ from, to })}`);
+/** One calendar month (YYYY-MM-01; the current one by default). */
+export const getDashboard = (month?: string) => request<Dashboard>(`/api/dashboard${qs({ month })}`);
 
 // ---------------------------------------------------------------------------
 // accounts

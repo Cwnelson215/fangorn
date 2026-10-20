@@ -252,7 +252,7 @@ func (s *Service) budgetRows(ctx context.Context, householdID int, monthStart st
 
 // scheduledSpend lists, per category, the recurring expenses that fall in the
 // month but have not posted yet, soonest first — a budget's Scheduled is the sum
-// of its list — and, as one list, every recurring income still to come, with or
+// of its list, and uncategorized ones are under the key `uncategorized` — and, as one list, every recurring income still to come, with or
 // without a category, for the month's expected income.
 //
 // Dates come from the rules through the date engine, not from
@@ -267,6 +267,10 @@ func (s *Service) budgetRows(ctx context.Context, householdID int, monthStart st
 // scheduler just hasn't reached it. Past months report nothing: an unposted
 // charge there belongs to a manual rule nobody logged, and that's not a budget
 // commitment any more.
+// uncategorized is scheduledSpend's key for expenses with no category; no
+// category has id 0, so no budget picks it up.
+const uncategorized = 0
+
 func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStart string, today time.Time) (map[int][]models.ScheduledItem, []models.ScheduledItem, error) {
 	income := []models.ScheduledItem{}
 	month, err := models.ParseDate(monthStart)
@@ -292,7 +296,7 @@ func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStar
 		if rule.Paused {
 			continue
 		}
-		if rule.Kind != models.KindIncome && (rule.Kind != models.KindExpense || rule.CategoryID == nil) {
+		if rule.Kind != models.KindIncome && rule.Kind != models.KindExpense {
 			continue
 		}
 		spec, err := RuleSpec(rule)
@@ -308,9 +312,12 @@ func (s *Service) scheduledSpend(ctx context.Context, householdID int, monthStar
 				RuleID: rule.ID, Name: rule.Name, Vendor: rule.Vendor, Date: dateStr(due),
 				Amount: rule.Amount, AccountName: rule.AccountName, AutoPost: rule.AutoPost,
 			}
-			if rule.Kind == models.KindIncome {
+			switch {
+			case rule.Kind == models.KindIncome:
 				income = append(income, item)
-			} else {
+			case rule.CategoryID == nil:
+				out[uncategorized] = append(out[uncategorized], item)
+			default:
 				out[*rule.CategoryID] = append(out[*rule.CategoryID], item)
 			}
 		}

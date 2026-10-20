@@ -80,7 +80,7 @@ func (f *fixture) balance(id int) float64 {
 
 func (f *fixture) dashboard(from, to string) ledger.Dashboard {
 	f.t.Helper()
-	d, err := f.svc.Dashboard(f.ctx, f.hh, from, to)
+	d, err := f.svc.Dashboard(f.ctx, f.hh, from, from, to)
 	if err != nil {
 		f.t.Fatalf("Dashboard: %v", err)
 	}
@@ -842,4 +842,64 @@ func (f *fixture) setIncomePlan(amount float64, month string) {
 	if err := f.svc.SetIncomePlan(f.ctx, f.hh, ledger.IncomePlanInput{Amount: &amount, EffectiveFrom: month}); err != nil {
 		f.t.Fatalf("SetIncomePlan(%s): %v", month, err)
 	}
+}
+
+// The dashboard covers one calendar month and compares it with the month
+// before to the same point; the current month adds what recurring rules still
+// have to post, with or without a category.
+func TestDashboardMonth(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 1000)
+	food := f.category("Food", models.KindExpense)
+	f.txn(checking.ID, models.KindIncome, "2026-02-10", 1000, nil)
+	f.txn(checking.ID, models.KindExpense, "2026-02-20", 300, &food.ID)
+	f.txn(checking.ID, models.KindIncome, "2026-03-05", 2000, nil)
+	f.txn(checking.ID, models.KindExpense, "2026-03-31", 50, &food.ID)
+	f.setIncomePlan(2500, "2026-03")
+
+	d, err := f.svc.Dashboard(f.ctx, f.hh, "2026-03", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.From != "2026-03-01" || d.To != "2026-03-31" || d.Current {
+		t.Errorf("range = %s–%s current=%v, want the whole of March", d.From, d.To, d.Current)
+	}
+	if d.PrevFrom != "2026-02-01" || d.PrevTo != "2026-02-28" {
+		t.Errorf("previous = %s–%s, want all of February", d.PrevFrom, d.PrevTo)
+	}
+	money(t, "income", d.Income, 2000)
+	money(t, "spent", d.Expenses, 50)
+	money(t, "previous income", d.PrevIncome, 1000)
+	money(t, "previous spent", d.PrevExpenses, 300)
+	money(t, "expected", d.ExpectedIncome, 2500)
+	money(t, "a past month's left is its net", d.Left, 1950)
+
+	today := ledger.Household{Timezone: "America/Denver"}.Today()
+	thisMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	next := thisMonth.AddDate(0, 1, 0).Format("2006-01")
+	if _, err := f.svc.Dashboard(f.ctx, f.hh, next, "", ""); err == nil {
+		t.Error("a month that hasn't started was accepted")
+	}
+
+	last := thisMonth.AddDate(0, 1, -1).Day()
+	for _, r := range []ledger.RuleInput{
+		{Name: "rent", Kind: models.KindExpense, Amount: 800},
+		{Name: "phone", Kind: models.KindExpense, Amount: 40, CategoryID: &food.ID},
+		{Name: "pay", Kind: models.KindIncome, Amount: 1500},
+	} {
+		r.AccountID, r.Frequency, r.DayOfMonth, r.StartDate = checking.ID, "monthly", &last, thisMonth.Format(models.DateOnly)
+		if _, err := f.svc.CreateRule(f.ctx, f.hh, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d, err = f.svc.Dashboard(f.ctx, f.hh, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Current || d.To != today.Format(models.DateOnly) {
+		t.Errorf("current month runs to %s (current=%v), want today", d.To, d.Current)
+	}
+	money(t, "scheduled expenses, uncategorized included", d.ScheduledExpenses, 840)
+	money(t, "scheduled income", d.ScheduledIncome, 1500)
+	money(t, "left", d.Left, d.Net+1500-840)
 }

@@ -102,7 +102,7 @@ func (h *LedgerHandler) Register(mux *http.ServeMux) {
 
 func (h *LedgerHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	data, err := h.svc.Dashboard(r.Context(), h.householdID, q.Get("from"), q.Get("to"))
+	data, err := h.svc.Dashboard(r.Context(), h.householdID, q.Get("month"), q.Get("from"), q.Get("to"))
 	if err != nil {
 		fail(w, err)
 		return

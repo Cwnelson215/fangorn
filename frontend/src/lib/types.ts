@@ -406,11 +406,28 @@ export interface NetWorthPoint {
 }
 
 export interface Dashboard {
+	/** First of the month shown. */
+	month: string;
+	/** The part of the month covered: through today for the current month. */
 	from: string;
 	to: string;
+	/** True for the month containing today. */
+	current: boolean;
 	income: number;
 	expenses: number;
 	net: number;
+	/** The month before, to the same day for the current month, else all of it. */
+	prev_from: string;
+	prev_to: string;
+	prev_income: number;
+	prev_expenses: number;
+	/** The budgets page's expected income for the month; 0 when none is set. */
+	expected_income: number;
+	/** Recurring income and expenses still to post this month; 0 for a past month. */
+	scheduled_income: number;
+	scheduled_expenses: number;
+	/** net + scheduled_income − scheduled_expenses. */
+	left: number;
 	total_assets: number;
 	total_liabilities: number;
 	net_worth: number;
