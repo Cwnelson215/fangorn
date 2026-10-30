@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { createTransfer, deleteTransfer, updateTransfer } from '$lib/api';
 	import type { Account, Transfer, TransferInput } from '$lib/types';
 	import { today } from '$lib/format';
@@ -33,8 +34,15 @@
 	let notes = $state('');
 
 	// Reset the form each time the modal opens, from the transfer if editing.
+	// Only `open` and `transfer` may trigger it: the body reads fromId/toId (and
+	// accounts), and tracking those would reset the pick on every change.
 	$effect(() => {
 		if (!open) return;
+		const editing = transfer;
+		untrack(() => reset(editing));
+	});
+
+	function reset(transfer: Transfer | null) {
 		formError = null;
 		if (transfer) {
 			fromId = transfer.from_account_id;
@@ -53,7 +61,7 @@
 			description = '';
 			notes = '';
 		}
-	});
+	}
 
 	function buildInput(): TransferInput {
 		return {
