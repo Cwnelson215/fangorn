@@ -8,10 +8,11 @@
 	import { onDestroy, tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { askChat, createChat, deleteChat, getChat, getChats } from '$lib/api';
+	import { askChat, createChat, deleteChat, getAssistantContext, getChat, getChats } from '$lib/api';
 	import type { Chat, ChatMessage } from '$lib/types';
 	import { renderMarkdown } from '$lib/markdown';
 	import Button from '$lib/components/Button.svelte';
+	import AssistantContextModal from '$lib/components/AssistantContextModal.svelte';
 
 	const SUGGESTIONS = [
 		'Where did our money go this month?',
@@ -36,6 +37,11 @@
 	let liveTools = $state<string[]>([]);
 	let input = $state('');
 	let confirmingDelete = $state<number | null>(null);
+
+	// What new chats start with beyond the ledger (see AssistantContextModal).
+	let contextOpen = $state(false);
+	let hasInstructions = $state(false);
+	let fileCount = $state(0);
 
 	let abort: AbortController | null = null;
 	let thread: HTMLElement | undefined = $state();
@@ -64,6 +70,14 @@
 			const list = await getChats();
 			enabled = list.enabled;
 			chats = list.chats;
+			if (enabled) {
+				getAssistantContext()
+					.then((c) => {
+						hasInstructions = c.instructions !== '';
+						fileCount = c.files.length;
+					})
+					.catch(() => {});
+			}
 			if (id === null) {
 				chatId = null;
 				title = '';
@@ -177,19 +191,32 @@
 	}
 
 	let empty = $derived(messages.length === 0 && !busy);
+
+	// "instructions and 2 files", or '' when there is nothing.
+	let knows = $derived(
+		[
+			hasInstructions ? 'instructions' : '',
+			fileCount > 0 ? `${fileCount} file${fileCount === 1 ? '' : 's'}` : ''
+		]
+			.filter(Boolean)
+			.join(' and ')
+	);
 </script>
 
 <div class="page chat-page">
 	<div class="page-header">
 		<h1>{chatId && title ? title : 'Ask'}</h1>
-		{#if chatId !== null}
-			<div class="header-actions">
+		<div class="header-actions">
+			{#if enabled && !loading}
+				<Button variant="ghost" size="sm" onclick={() => (contextOpen = true)}>What Claude knows</Button>
+			{/if}
+			{#if chatId !== null}
 				<Button variant="ghost" size="sm" onclick={() => remove(chatId!)}>
 					{confirmingDelete === chatId ? 'Tap again to delete' : 'Delete'}
 				</Button>
 				<Button variant="secondary" size="sm" onclick={() => goto('/chat')}>New chat</Button>
-			</div>
-		{/if}
+			{/if}
+		</div>
 	</div>
 
 	{#if loading}
@@ -204,6 +231,16 @@
 				<p class="muted">
 					Ask about your accounts, spending, budgets, goals, bills or investments. Claude looks things up
 					in your ledger to answer — it can read everything here but can't change anything.
+				</p>
+				<p class="muted knows">
+					{#if knows}
+						It also has your {knows}.
+					{:else}
+						Give it your plans and documents, like a Claude Project:
+					{/if}
+					<button class="link" onclick={() => (contextOpen = true)}>
+						{knows ? 'Change' : 'Add them'}
+					</button>
 				</p>
 				<div class="suggestions">
 					{#each SUGGESTIONS as s (s)}
@@ -291,6 +328,14 @@
 	{/if}
 </div>
 
+<AssistantContextModal
+	bind:open={contextOpen}
+	onchange={(instructions, files) => {
+		hasInstructions = instructions !== '';
+		fileCount = files.length;
+	}}
+/>
+
 <style>
 	.chat-page {
 		gap: 1rem;
@@ -310,6 +355,21 @@
 	.header-actions {
 		display: flex;
 		gap: 0.5rem;
+	}
+
+	.knows {
+		font-size: 0.875rem;
+		margin-top: -0.5rem;
+	}
+
+	.link {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		color: var(--accent);
+		cursor: pointer;
+		text-decoration: underline;
 	}
 
 	.intro {

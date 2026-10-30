@@ -76,14 +76,14 @@ func TestChatTranscript(t *testing.T) {
 		json.RawMessage(`{"role":"user","content":[{"type":"text","text":"hi"}]}`),
 		json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"hello"}]}`),
 	}
-	if err := f.svc.AppendChat(f.ctx, f.hh, chat.ID, 0, turn, "First"); err != nil {
+	if err := f.svc.AppendChat(f.ctx, f.hh, chat.ID, 0, turn, "First", nil); err != nil {
 		t.Fatal(err)
 	}
 	// Built on a transcript that has since grown: refused, not interleaved.
-	if err := f.svc.AppendChat(f.ctx, f.hh, chat.ID, 0, turn, "Second"); !errors.Is(err, ledger.ErrChatChanged) {
+	if err := f.svc.AppendChat(f.ctx, f.hh, chat.ID, 0, turn, "Second", nil); !errors.Is(err, ledger.ErrChatChanged) {
 		t.Fatalf("stale append = %v, want ErrChatChanged", err)
 	}
-	if err := f.svc.AppendChat(f.ctx, f.hh, chat.ID, 2, turn, "Second"); err != nil {
+	if err := f.svc.AppendChat(f.ctx, f.hh, chat.ID, 2, turn, "Second", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -105,7 +105,7 @@ func TestChatTranscript(t *testing.T) {
 	if _, _, err := other.svc.ChatTranscript(other.ctx, other.hh, chat.ID); !errors.Is(err, ledger.ErrNotFound) {
 		t.Errorf("another household read the chat: %v", err)
 	}
-	if err := other.svc.AppendChat(other.ctx, other.hh, chat.ID, 4, turn, ""); !errors.Is(err, ledger.ErrNotFound) {
+	if err := other.svc.AppendChat(other.ctx, other.hh, chat.ID, 4, turn, "", nil); !errors.Is(err, ledger.ErrNotFound) {
 		t.Errorf("another household appended: %v", err)
 	}
 

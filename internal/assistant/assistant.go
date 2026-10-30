@@ -11,6 +11,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -95,7 +96,10 @@ type Event struct {
 // Reply answers text, continuing the conversation in transcript, and returns
 // the messages to append: the question, then every assistant message and tool
 // result the answer took. today is the household's date, YYYY-MM-DD.
-func (a *Assistant) Reply(ctx context.Context, householdID int, transcript []json.RawMessage, text, today string, emit func(Event)) ([]json.RawMessage, error) {
+//
+// kn is what the chat started with beyond the ledger, and has to be the same
+// on every turn of a chat: it sits in front of the history.
+func (a *Assistant) Reply(ctx context.Context, householdID int, transcript []json.RawMessage, text, today string, kn Knowledge, emit func(Event)) ([]json.RawMessage, error) {
 	question, err := json.Marshal(map[string]any{
 		"role": "user",
 		"content": []map[string]any{
@@ -107,13 +111,22 @@ func (a *Assistant) Reply(ctx context.Context, householdID int, transcript []jso
 		return nil, fmt.Errorf("assistant: encoding question: %w", err)
 	}
 	turn := []json.RawMessage{question}
+	system := kn.system()
+	docs := kn.documents()
 
 	for round := 0; round < maxRounds; round++ {
 		msgs := append(append([]json.RawMessage{}, transcript...), turn...)
+		if len(docs) > 0 {
+			first, err := prepend(msgs[0], docs)
+			if err != nil {
+				return nil, err
+			}
+			msgs[0] = first
+		}
 		resp, err := a.api.stream(ctx, request{
 			Model:        a.model,
 			MaxTokens:    maxTokens,
-			System:       systemPrompt,
+			System:       system,
 			Tools:        toolDefs,
 			Messages:     msgs,
 			Fallbacks:    "default",
@@ -191,6 +204,96 @@ func (a *Assistant) Reply(ctx context.Context, householdID int, transcript []jso
 		turn = append(turn, msg)
 	}
 	return nil, fmt.Errorf("assistant: no answer after %d rounds of lookups", maxRounds)
+}
+
+// Knowledge is what the family has given the assistant beyond the ledger —
+// what a claude.ai Project holds: instructions in their own words, and files.
+type Knowledge struct {
+	Instructions string
+	Files        []File
+}
+
+// File is an attached file. MediaType is application/pdf or text/plain (text
+// that is valid UTF-8).
+type File struct {
+	Name      string
+	MediaType string
+	Data      []byte
+}
+
+// system is the system prompt: the fixed one alone when there is no
+// knowledge — sent as the same plain string as before knowledge existed, so
+// those chats' requests don't change — or followed by a block about it.
+func (k Knowledge) system() any {
+	if k.Instructions == "" && len(k.Files) == 0 {
+		return systemPrompt
+	}
+	var b strings.Builder
+	b.WriteString("The family has given you more to work from than the ledger.")
+	if k.Instructions != "" {
+		b.WriteString("\n\nThese are their instructions, in their own words: who they are, what they are planning, and how they want you to help. Follow them, except that the rules above still hold — you can't change anything, and you look numbers up rather than assume them.\n\n<instructions>\n")
+		b.WriteString(k.Instructions)
+		b.WriteString("\n</instructions>")
+	}
+	if len(k.Files) > 0 {
+		names := make([]string, len(k.Files))
+		for i, f := range k.Files {
+			names[i] = f.Name
+		}
+		b.WriteString("\n\nTheir files are attached at the start of the conversation: ")
+		b.WriteString(strings.Join(names, ", "))
+		b.WriteString(". Use them for what the ledger doesn't hold — plans, targets, documents, notes. A figure taken from a file counts like one from a tool; say which file it came from. Where a file and the ledger disagree about how things stand now, the ledger is current and the file may be older; say so when it matters.")
+	}
+	return []map[string]any{
+		{"type": "text", "text": systemPrompt},
+		{"type": "text", "text": b.String()},
+	}
+}
+
+// documents are the files as content blocks, the last one marked for caching
+// so a new chat with the same files reuses them rather than paying for them
+// again.
+func (k Knowledge) documents() []map[string]any {
+	var out []map[string]any
+	for _, f := range k.Files {
+		var source map[string]any
+		if f.MediaType == "application/pdf" {
+			source = map[string]any{"type": "base64", "media_type": f.MediaType,
+				"data": base64.StdEncoding.EncodeToString(f.Data)}
+		} else {
+			source = map[string]any{"type": "text", "media_type": "text/plain", "data": string(f.Data)}
+		}
+		out = append(out, map[string]any{"type": "document", "source": source, "title": f.Name})
+	}
+	if len(out) > 0 {
+		out[len(out)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
+	}
+	return out
+}
+
+// prepend puts blocks in front of a user message's content. The files go with
+// the chat's first question on every request but are never stored in the
+// transcript.
+func prepend(raw json.RawMessage, blocks []map[string]any) (json.RawMessage, error) {
+	var msg struct {
+		Role    string            `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return nil, fmt.Errorf("assistant: reading the first message: %w", err)
+	}
+	content := make([]any, 0, len(blocks)+len(msg.Content))
+	for _, b := range blocks {
+		content = append(content, b)
+	}
+	for _, c := range msg.Content {
+		content = append(content, c)
+	}
+	out, err := json.Marshal(map[string]any{"role": msg.Role, "content": content})
+	if err != nil {
+		return nil, fmt.Errorf("assistant: attaching files: %w", err)
+	}
+	return out, nil
 }
 
 // dateLine starts every question, so "last month" has something to resolve

@@ -790,6 +790,21 @@ export interface Chat {
 	updated_at: string;
 }
 
+/** A file attached for Ask to read with every question. */
+export interface AssistantFile {
+	id: number;
+	name: string;
+	media_type: 'application/pdf' | 'text/plain';
+	size: number;
+	created_at: string;
+}
+
+/** What Ask knows beyond the ledger — like a claude.ai Project's instructions and files. */
+export interface AssistantContext {
+	instructions: string;
+	files: AssistantFile[];
+}
+
 /** One bubble in a conversation. Tools lists what was looked up for an answer. */
 export interface ChatMessage {
 	role: 'user' | 'assistant';

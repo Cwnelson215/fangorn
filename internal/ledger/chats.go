@@ -65,13 +65,13 @@ func (s *Service) CreateChat(ctx context.Context, householdID int) (models.Chat,
 // ChatTranscript returns a chat and its Messages API history, one raw message
 // per element, exactly as stored.
 func (s *Service) ChatTranscript(ctx context.Context, householdID, id int) (models.Chat, []json.RawMessage, error) {
-	var raw []byte
+	var raw, context []byte
 	var c models.Chat
 	var created, updated time.Time
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, title, created_at, updated_at, messages FROM chats WHERE id = $1 AND household_id = $2`,
+		`SELECT id, title, created_at, updated_at, messages, context FROM chats WHERE id = $1 AND household_id = $2`,
 		id, householdID,
-	).Scan(&c.ID, &c.Title, &created, &updated, &raw)
+	).Scan(&c.ID, &c.Title, &created, &updated, &raw, &context)
 	if err == sql.ErrNoRows {
 		return c, nil, ErrNotFound
 	}
@@ -80,6 +80,13 @@ func (s *Service) ChatTranscript(ctx context.Context, householdID, id int) (mode
 	}
 	c.CreatedAt = created.Format(time.RFC3339)
 	c.UpdatedAt = updated.Format(time.RFC3339)
+
+	if context != nil {
+		c.Context = &models.ChatContext{}
+		if err := json.Unmarshal(context, c.Context); err != nil {
+			return c, nil, fmt.Errorf("decoding chat %d context: %w", id, err)
+		}
+	}
 
 	var msgs []json.RawMessage
 	if err := json.Unmarshal(raw, &msgs); err != nil {
@@ -91,8 +98,8 @@ func (s *Service) ChatTranscript(ctx context.Context, householdID, id int) (mode
 // AppendChat adds one finished turn to a chat's transcript. expectedLen is the
 // transcript length the turn was built on; if the chat has moved on since, the
 // append is refused with ErrChatChanged. A chat still without a title takes
-// title.
-func (s *Service) AppendChat(ctx context.Context, householdID, id, expectedLen int, msgs []json.RawMessage, title string) error {
+// title, and one still without a context takes context (nil leaves it unset).
+func (s *Service) AppendChat(ctx context.Context, householdID, id, expectedLen int, msgs []json.RawMessage, title string, context *models.ChatContext) error {
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -100,13 +107,22 @@ func (s *Service) AppendChat(ctx context.Context, householdID, id, expectedLen i
 	if err != nil {
 		return fmt.Errorf("encoding chat messages: %w", err)
 	}
+	var cc any
+	if context != nil {
+		b, err := json.Marshal(context)
+		if err != nil {
+			return fmt.Errorf("encoding chat context: %w", err)
+		}
+		cc = string(b)
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE chats
 		    SET messages = messages || $3::jsonb,
 		        title = CASE WHEN title = '' THEN $4 ELSE title END,
+		        context = COALESCE(context, $6::jsonb),
 		        updated_at = now()
 		  WHERE id = $1 AND household_id = $2 AND jsonb_array_length(messages) = $5`,
-		id, householdID, string(add), title, expectedLen)
+		id, householdID, string(add), title, expectedLen, cc)
 	if err != nil {
 		return fmt.Errorf("appending to chat: %w", err)
 	}
@@ -126,12 +142,15 @@ func (s *Service) AppendChat(ctx context.Context, householdID, id, expectedLen i
 }
 
 func (s *Service) DeleteChat(ctx context.Context, householdID, id int) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM chats WHERE id = $1 AND household_id = $2`, id, householdID)
-	if err != nil {
-		return fmt.Errorf("deleting chat: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.inTx(func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM chats WHERE id = $1 AND household_id = $2`, id, householdID)
+		if err != nil {
+			return fmt.Errorf("deleting chat: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		// A removed file was kept only for the chats still using it.
+		return purgeRemovedFiles(ctx, tx, householdID)
+	})
 }

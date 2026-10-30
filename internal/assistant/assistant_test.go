@@ -109,7 +109,7 @@ func TestReplyRunsToolsUntilAnswered(t *testing.T) {
 	}
 	var text strings.Builder
 	var labels []string
-	turn, err := a.Reply(context.Background(), 1, prior, "How are my goals?", "2026-09-26", func(e Event) {
+	turn, err := a.Reply(context.Background(), 1, prior, "How are my goals?", "2026-09-26", Knowledge{}, func(e Event) {
 		switch e.Kind {
 		case "text":
 			text.WriteString(e.Text)
@@ -189,7 +189,7 @@ func TestReplyRefusal(t *testing.T) {
 		msgStop,
 	)}}
 	a := newTestAssistant(t, api)
-	_, err := a.Reply(context.Background(), 1, nil, "q", "2026-09-26", func(Event) {})
+	_, err := a.Reply(context.Background(), 1, nil, "q", "2026-09-26", Knowledge{}, func(Event) {})
 	if !errors.Is(err, ErrDeclined) {
 		t.Fatalf("err = %v, want ErrDeclined", err)
 	}
@@ -201,7 +201,7 @@ func TestReplyUnavailable(t *testing.T) {
 		w.WriteHeader(529)
 		io.WriteString(w, `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`)
 	}))
-	_, err := a.Reply(context.Background(), 1, nil, "q", "2026-09-26", func(Event) {})
+	_, err := a.Reply(context.Background(), 1, nil, "q", "2026-09-26", Knowledge{}, func(Event) {})
 	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "Overloaded") {
 		t.Fatalf("err = %v, want ErrUnavailable naming the cause", err)
 	}
@@ -211,14 +211,14 @@ func TestReplyUnavailable(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 		io.WriteString(w, `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`)
 	}))
-	_, err = a.Reply(context.Background(), 1, nil, "q", "2026-09-26", func(Event) {})
+	_, err = a.Reply(context.Background(), 1, nil, "q", "2026-09-26", Knowledge{}, func(Event) {})
 	if !errors.Is(err, ErrRejectedKey) {
 		t.Fatalf("401: err = %v, want ErrRejectedKey", err)
 	}
 
 	// A stream that ends without message_stop didn't finish.
 	a = newTestAssistant(t, &fakeAPI{t: t, streams: []string{sse(msgStart)}})
-	_, err = a.Reply(context.Background(), 1, nil, "q", "2026-09-26", func(Event) {})
+	_, err = a.Reply(context.Background(), 1, nil, "q", "2026-09-26", Knowledge{}, func(Event) {})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("truncated stream: err = %v", err)
 	}
@@ -300,5 +300,100 @@ func TestToolSchemasAreObjects(t *testing.T) {
 		if toolsByName[d.Name].label == "" {
 			t.Errorf("tool %s has no label", d.Name)
 		}
+	}
+}
+
+func TestReplyCarriesKnowledge(t *testing.T) {
+	answer := sse(
+		msgStart,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"On track."}}`,
+		`{"type":"content_block_stop","index":0}`,
+		stopWith("end_turn"),
+		msgStop,
+	)
+	api := &fakeAPI{t: t, streams: []string{answer, answer}}
+	a := newTestAssistant(t, api)
+
+	kn := Knowledge{
+		Instructions: "We're saving for a house in 2028.",
+		Files: []File{
+			{Name: "plan.pdf", MediaType: "application/pdf", Data: []byte("%PDF-1.4 fake")},
+			{Name: "goals.md", MediaType: "text/plain", Data: []byte("# Goals\n- house")},
+		},
+	}
+	turn, err := a.Reply(context.Background(), 1, nil, "Are we on track?", "2026-09-26", kn, func(Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := api.requests[0]
+	system, ok := req["system"].([]any)
+	if !ok || len(system) != 2 {
+		t.Fatalf("system = %v, want the fixed prompt then the family's block", req["system"])
+	}
+	if system[0].(map[string]any)["text"] != systemPrompt {
+		t.Error("the fixed system prompt isn't first and unchanged")
+	}
+	extra := system[1].(map[string]any)["text"].(string)
+	for _, want := range []string{"saving for a house in 2028", "plan.pdf, goals.md"} {
+		if !strings.Contains(extra, want) {
+			t.Errorf("system block lacks %q: %s", want, extra)
+		}
+	}
+
+	first := req["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if len(first) != 4 {
+		t.Fatalf("first message has %d blocks, want 2 files then date and question", len(first))
+	}
+	pdf, md := first[0].(map[string]any), first[1].(map[string]any)
+	if pdf["type"] != "document" || pdf["title"] != "plan.pdf" ||
+		pdf["source"].(map[string]any)["data"] != "JVBERi0xLjQgZmFrZQ==" {
+		t.Errorf("pdf block = %v", pdf)
+	}
+	if src := md["source"].(map[string]any); src["type"] != "text" || src["data"] != "# Goals\n- house" {
+		t.Errorf("text block = %v", md)
+	}
+	if pdf["cache_control"] != nil || md["cache_control"] == nil {
+		t.Error("only the last file should carry the cache breakpoint")
+	}
+
+	// The files are sent, never stored: the saved question is just the question.
+	var saved struct {
+		Content []map[string]any `json:"content"`
+	}
+	if err := json.Unmarshal(turn[0], &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Content) != 2 || saved.Content[0]["type"] != "text" {
+		t.Errorf("stored question = %v", saved.Content)
+	}
+
+	// The next turn sends the same front of the conversation.
+	if _, err := a.Reply(context.Background(), 1, turn, "And next year?", "2026-09-26", kn, func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	a0, _ := json.Marshal(api.requests[0]["messages"].([]any)[0])
+	b0, _ := json.Marshal(api.requests[1]["messages"].([]any)[0])
+	if string(a0) != string(b0) {
+		t.Errorf("first message changed between turns:\n%s\n%s", a0, b0)
+	}
+}
+
+func TestReplyWithoutKnowledgeSendsPlainSystem(t *testing.T) {
+	api := &fakeAPI{t: t, streams: []string{sse(
+		msgStart,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi."}}`,
+		`{"type":"content_block_stop","index":0}`,
+		stopWith("end_turn"),
+		msgStop,
+	)}}
+	a := newTestAssistant(t, api)
+	if _, err := a.Reply(context.Background(), 1, nil, "q", "2026-09-26", Knowledge{}, func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if api.requests[0]["system"] != systemPrompt {
+		t.Errorf("system = %v, want the plain prompt string", api.requests[0]["system"])
 	}
 }

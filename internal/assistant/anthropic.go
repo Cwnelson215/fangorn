@@ -44,9 +44,10 @@ type client struct {
 }
 
 type request struct {
-	Model        string            `json:"model"`
-	MaxTokens    int               `json:"max_tokens"`
-	System       string            `json:"system"`
+	Model     string `json:"model"`
+	MaxTokens int    `json:"max_tokens"`
+	// System is a string, or text blocks when the family's knowledge follows it.
+	System       any               `json:"system"`
 	Tools        []toolDef         `json:"tools"`
 	Messages     []json.RawMessage `json:"messages"`
 	Stream       bool              `json:"stream"`

@@ -586,6 +586,27 @@ type Chat struct {
 	Title     string `json:"title"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	// Context is what the chat started with; nil for a chat with no messages
+	// yet, or one from before the assistant had any.
+	Context *ChatContext `json:"-"`
+}
+
+// ChatContext is the family's instructions and attached files as they stood
+// when a chat began. It stays fixed for the chat's life: what came before its
+// first question is part of the history every later answer was built on.
+type ChatContext struct {
+	Instructions string `json:"instructions"`
+	FileIDs      []int  `json:"file_ids"`
+}
+
+// AssistantFile is a file attached for the assistant to read — a plan, a
+// statement summary, notes. The bytes are only loaded to send to the model.
+type AssistantFile struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Size      int    `json:"size"`
+	CreatedAt string `json:"created_at"`
 }
 
 type NetWorthPoint struct {

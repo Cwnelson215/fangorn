@@ -519,6 +519,18 @@ list would be summed as if complete.
 - **Rendering.** `src/lib/markdown.ts` is a small escape-first renderer (paragraphs, lists, tables,
   bold/italic/code; no links or images). Model text can quote what the family typed, so never feed
   it to `{@html}` any other way.
+- **What Claude knows** (the button on `/chat`, `AssistantContextModal.svelte`) is the family's
+  own context, like a claude.ai Project — which the API can't reach, so it lives here:
+  instructions (`households.assistant_instructions`) and attached files (`assistant_files`: PDF or
+  UTF-8 text, 10 MB each, 20 MB together, bytes in the DB). Instructions go in a **second system
+  block** after the constant prompt; files go as `document` blocks in front of the chat's first
+  question **on every request but are never stored** in the transcript, the last one carrying a
+  cache breakpoint so new chats reuse it. A chat with neither sends the plain-string system prompt
+  as before. Each chat **snapshots** them on its first question (`chats.context`, set by
+  `AppendChat`, never replaced): editing them changes new chats only, because changing what
+  precedes the history would invalidate the thinking blocks replayed after it. So a removed file
+  is only marked `removed_at` while a chat still names it, and deleted with the last such chat
+  (`purgeRemovedFiles`).
 - Enabled whenever `ANTHROPIC_API_KEY` is set (independent of `RECEIPTS_PROVIDER`); otherwise
   `GET /api/chats` reports `enabled: false` and the page says so.
 
@@ -552,6 +564,8 @@ monthly goals after).
 `022_splits_and_pay_dates` adds `security_splits`, `splits` and `security_dividends.pay_date`.
 `023_income_plans` adds `income_plans` (one expected monthly income for the household), converting
 each month's income-category budgets into their sum and deleting them.
+`024_assistant_context` adds `households.assistant_instructions`, `assistant_files` and
+`chats.context` (what Ask knows beyond the ledger, snapshotted per chat).
 
 ## Conventions
 

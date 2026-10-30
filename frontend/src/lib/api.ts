@@ -11,6 +11,8 @@ import type {
 	BudgetMonth,
 	Category,
 	CategoryInput,
+	AssistantContext,
+	AssistantFile,
 	Chat,
 	ChatMessage,
 	Dashboard,
@@ -321,6 +323,17 @@ export const createChat = () => send<Chat>('POST', '/api/chats');
 export const getChat = (id: number) =>
 	request<{ chat: Chat; messages: ChatMessage[] }>(`/api/chats/${id}`);
 export const deleteChat = (id: number) => send<void>('DELETE', `/api/chats/${id}`);
+
+export const getAssistantContext = () => request<AssistantContext>('/api/assistant/context');
+export const saveAssistantInstructions = (instructions: string) =>
+	send<{ instructions: string }>('PUT', '/api/assistant/instructions', { instructions });
+export function uploadAssistantFile(file: File): Promise<AssistantFile> {
+	const form = new FormData();
+	form.append('file', file, file.name);
+	return request<AssistantFile>('/api/assistant/files', { method: 'POST', body: form });
+}
+export const removeAssistantFile = (id: number) =>
+	send<void>('DELETE', `/api/assistant/files/${id}`);
 
 export interface ChatStreamHandlers {
 	/** The next piece of the answer. */

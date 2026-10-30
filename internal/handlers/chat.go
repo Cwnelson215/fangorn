@@ -47,6 +47,10 @@ func (h *ChatHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/chats/{id}", h.Get)
 	mux.HandleFunc("DELETE /api/chats/{id}", h.Delete)
 	mux.HandleFunc("POST /api/chats/{id}/messages", h.Send)
+	mux.HandleFunc("GET /api/assistant/context", h.GetContext)
+	mux.HandleFunc("PUT /api/assistant/instructions", h.SetInstructions)
+	mux.HandleFunc("POST /api/assistant/files", h.AddFile)
+	mux.HandleFunc("DELETE /api/assistant/files/{id}", h.RemoveFile)
 }
 
 func (h *ChatHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +141,23 @@ func (h *ChatHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 	today := household.Today().Format(models.DateOnly)
 
+	// A chat's first question fixes what it starts with; later ones reuse it.
+	var start *models.ChatContext
+	cc := chat.Context
+	if len(transcript) == 0 {
+		snap, err := h.svc.SnapshotChatContext(r.Context(), h.householdID)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		start, cc = &snap, &snap
+	}
+	kn, err := h.knowledge(r.Context(), cc)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Now().Add(turnTimeout + 30*time.Second)); err != nil {
 		log.Printf("chat: cannot extend write deadline: %v", err)
@@ -178,7 +199,7 @@ func (h *ChatHandler) Send(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), turnTimeout)
 	defer cancel()
 
-	turn, err := h.assistant.Reply(ctx, h.householdID, transcript, text, today, func(e assistant.Event) {
+	turn, err := h.assistant.Reply(ctx, h.householdID, transcript, text, today, kn, func(e assistant.Event) {
 		switch e.Kind {
 		case "text":
 			send("text", map[string]string{"text": e.Text})
@@ -197,7 +218,7 @@ func (h *ChatHandler) Send(w http.ResponseWriter, r *http.Request) {
 	// A finished answer is kept even if the phone has gone away meanwhile.
 	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 	defer cancelSave()
-	err = h.svc.AppendChat(saveCtx, h.householdID, id, len(transcript), turn, assistant.Title(text))
+	err = h.svc.AppendChat(saveCtx, h.householdID, id, len(transcript), turn, assistant.Title(text), start)
 	if err != nil {
 		if errors.Is(err, ledger.ErrChatChanged) {
 			send("error", map[string]string{"error": "This chat was answered somewhere else at the same time. Reload it to see where it stands."})
