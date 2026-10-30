@@ -13,6 +13,10 @@ package ledger
 // brokerage values a position — which is the same cut portfolio.MarketValue
 // applies in Go, so the two figures agree exactly.
 //
+// A transfer leg dated after today doesn't count yet: that is money between
+// institutions that hasn't landed (TransferInput.CompletionDate). It shows in
+// the register at its date and starts counting — and earning — on it.
+//
 // Callers select from it as a subquery aliased b, joined on b.account_id.
 const accountBalances = `
 	SELECT a.id AS account_id,
@@ -20,7 +24,11 @@ const accountBalances = `
 	       COALESCE(h.value, 0) AS holdings_value
 	FROM accounts a
 	LEFT JOIN (
-		SELECT account_id, SUM(amount) AS total FROM transactions GROUP BY account_id
+		SELECT t.account_id, SUM(t.amount) AS total
+		FROM transactions t
+		JOIN households h ON h.id = t.household_id
+		WHERE ` + landed + `
+		GROUP BY t.account_id
 	) t ON t.account_id = a.id
 	LEFT JOIN (
 		SELECT p.account_id, SUM(TRUNC(p.shares * s.last_price, 2)) AS value
@@ -33,3 +41,7 @@ const accountBalances = `
 		JOIN securities s ON s.symbol = p.symbol
 		GROUP BY p.account_id
 	) h ON h.account_id = a.id`
+
+// landed says a transaction t (joined to its household as h) counts by now. Only
+// a transfer leg can be waiting: one still in transit to its account.
+const landed = `(t.kind <> 'transfer' OR t.date <= (now() AT TIME ZONE h.timezone)::date)`

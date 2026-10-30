@@ -327,8 +327,12 @@ type Transfer struct {
 	ToAccount     string  `json:"to_account"`
 	Amount        float64 `json:"amount"`
 	Date          string  `json:"date"`
-	Description   string  `json:"description"`
-	Notes         *string `json:"notes"`
+	// CompletionDate is when the money lands in ToAccount, when that is later
+	// than Date; InTransit says it hasn't yet.
+	CompletionDate *string `json:"completion_date"`
+	InTransit      bool    `json:"in_transit"`
+	Description    string  `json:"description"`
+	Notes          *string `json:"notes"`
 }
 
 type RecurringRule struct {

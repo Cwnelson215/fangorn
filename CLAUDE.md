@@ -78,6 +78,16 @@ single leg through `/api/transactions` is rejected; deleting one leg deletes bot
 `TransferModal.svelte`, opened from `/transfers` and from a transfer row in Activity (which loads
 the pair with `GET /api/transfers/{groupId}`).
 
+A transfer between institutions can carry a **completion date** (`completion_date`, "Lands on"
+in the form): the source leg is dated the transfer date, the destination leg the completion date.
+A transfer leg dated after the household's today doesn't count toward the balance yet (`landed` in
+`ledger/balances.go`), so the money leaves the source when sent and reaches the destination when it
+lands; net worth dips by it in between. Interest and a cash fund's dividend replay by date, so the
+destination earns from the completion date with no special case. `Transfer.in_transit` says it
+hasn't landed; Drop balance is refused on an account with a leg still in transit. Goals still
+replay every leg by its date, landed or not (planning next month's goal with a future transfer
+relies on that).
+
 **Closing an account** is the "Close this account" card on its page (`CloseAccountCard.svelte`).
 *Remove remaining balance* records a transfer of the cash balance to (or, for a debt or overdraft,
 from) another account, so net worth doesn't drop by money that only moved; securities have to be

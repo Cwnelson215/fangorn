@@ -37,10 +37,17 @@ func (s *Service) DropBalance(ctx context.Context, householdID, accountID int, d
 		}
 
 		var total float64
+		var waiting bool
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE account_id = $1`, accountID,
-		).Scan(&total); err != nil {
+			`SELECT COALESCE(SUM(t.amount), 0), COALESCE(BOOL_OR(NOT `+landed+`), false)
+			 FROM transactions t JOIN households h ON h.id = t.household_id
+			 WHERE t.account_id = $1`, accountID,
+		).Scan(&total, &waiting); err != nil {
 			return fmt.Errorf("reading balance: %w", err)
+		}
+		// A transfer still in transit would land after the balance was dropped.
+		if waiting {
+			return invalid("a transfer to or from this account hasn't landed yet — wait for its completion date")
 		}
 		cash := math.Round((starting+total)*100) / 100
 		if math.Abs(cash) < 0.005 {

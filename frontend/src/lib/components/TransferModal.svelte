@@ -30,6 +30,10 @@
 	let toId = $state(0);
 	let amount = $state('');
 	let date = $state(today());
+	// When the money lands in the other account. Blank means the same day; a move
+	// between institutions often takes a few, and until then the destination's
+	// balance — and any interest or dividend on it — doesn't have the money.
+	let completion = $state('');
 	let description = $state('');
 	let notes = $state('');
 
@@ -49,6 +53,7 @@
 			toId = transfer.to_account_id;
 			amount = String(transfer.amount);
 			date = transfer.date;
+			completion = transfer.completion_date ?? '';
 			description = transfer.description;
 			notes = transfer.notes ?? '';
 		} else {
@@ -58,6 +63,7 @@
 			if (toId === fromId) toId = accounts.find((a) => a.id !== fromId)?.id ?? 0;
 			amount = '';
 			date = today();
+			completion = '';
 			description = '';
 			notes = '';
 		}
@@ -69,18 +75,24 @@
 			to_account_id: toId,
 			amount: Math.abs(parseFloat(amount) || 0),
 			date,
+			completion_date: completion && completion !== date ? completion : null,
 			description: description.trim() || 'Transfer',
 			notes: notes.trim() || null
 		};
 	}
 
 	let sameAccount = $derived(fromId !== 0 && fromId === toId);
+	let landsEarly = $derived(completion !== '' && completion < date);
 
 	async function handleSubmit(event: Event) {
 		event.preventDefault();
 		if (!fromId || !toId || !amount) return;
 		if (sameAccount) {
 			formError = 'Pick two different accounts';
+			return;
+		}
+		if (landsEarly) {
+			formError = "The money can't land before it's sent";
 			return;
 		}
 
@@ -157,6 +169,23 @@
 			</Field>
 		</div>
 
+		<Field
+			label="Lands on (optional)"
+			id="transferCompletion"
+			hint="For a move between banks that takes a few days. The other account gets the money — and starts earning on it — on this date."
+		>
+			<input
+				id="transferCompletion"
+				type="date"
+				min={date}
+				bind:value={completion}
+				disabled={saving}
+			/>
+		</Field>
+		{#if landsEarly}
+			<p class="error-text">The money can't land before it's sent.</p>
+		{/if}
+
 		<Field label="Description" id="transferDesc">
 			<input
 				id="transferDesc"
@@ -182,7 +211,7 @@
 			{/if}
 			<span class="spacer"></span>
 			<Button variant="secondary" onclick={() => (open = false)}>Cancel</Button>
-			<Button type="submit" disabled={saving || deleting || !amount || sameAccount}>
+			<Button type="submit" disabled={saving || deleting || !amount || sameAccount || landsEarly}>
 				{saving ? 'Saving…' : transfer ? 'Save Changes' : 'Record It'}
 			</Button>
 		</div>

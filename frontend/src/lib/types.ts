@@ -201,7 +201,12 @@ export interface Transfer {
 	to_account_id: number;
 	to_account: string;
 	amount: number;
+	/** When the money left the source account. */
 	date: string;
+	/** When it lands in the destination, if later than `date`. */
+	completion_date: string | null;
+	/** It hasn't landed yet, so the destination's balance doesn't include it. */
+	in_transit: boolean;
 	description: string;
 	notes: string | null;
 }
@@ -711,6 +716,8 @@ export interface TransferInput {
 	to_account_id: number;
 	amount: number;
 	date: string;
+	/** When the money reaches the destination, if later than `date`. */
+	completion_date?: string | null;
 	description: string;
 	notes: string | null;
 }

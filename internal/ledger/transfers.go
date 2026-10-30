@@ -25,9 +25,14 @@ import (
 // deleted.
 const DeletedAccountName = "Deleted account"
 
+// The date is the source leg's: when the money left. The destination leg carries
+// the completion date, when it lands — usually the same day, later for a move
+// between institutions. Until then the leg doesn't count (see landed).
 const transferSelect = `
 	SELECT t.transfer_group_id,
-	       MIN(t.date) AS date,
+	       COALESCE(MIN(t.date) FILTER (WHERE t.amount < 0), MIN(t.date)) AS date,
+	       MAX(t.date) FILTER (WHERE t.amount > 0) AS completion_date,
+	       COALESCE(BOOL_OR(t.amount > 0 AND NOT ` + landed + `), false) AS in_transit,
 	       MAX(CASE WHEN t.amount < 0 THEN t.account_id END) AS from_id,
 	       MAX(CASE WHEN t.amount < 0 THEN a.name END)       AS from_name,
 	       MAX(CASE WHEN t.amount > 0 THEN t.account_id END) AS to_id,
@@ -37,21 +42,27 @@ const transferSelect = `
 	       MIN(t.notes) AS notes
 	FROM transactions t
 	JOIN accounts a ON a.id = t.account_id
+	JOIN households h ON h.id = t.household_id
 	WHERE t.household_id = $1 AND t.transfer_group_id IS NOT NULL`
 
 func scanTransfer(rows interface{ Scan(...any) error }) (models.Transfer, error) {
 	var tr models.Transfer
 	var notes sql.NullString
 	var date time.Time
+	var completion sql.NullTime
 	var fromID, toID sql.NullInt64
 	var fromName, toName sql.NullString
 
-	err := rows.Scan(&tr.GroupID, &date, &fromID, &fromName, &toID, &toName,
+	err := rows.Scan(&tr.GroupID, &date, &completion, &tr.InTransit, &fromID, &fromName, &toID, &toName,
 		&tr.Amount, &tr.Description, &notes)
 	if err != nil {
 		return tr, err
 	}
 	tr.Date = dateStr(date)
+	if completion.Valid && !completion.Time.Equal(date) {
+		c := dateStr(completion.Time)
+		tr.CompletionDate = &c
+	}
 	tr.Notes = strPtr(notes)
 	if fromID.Valid {
 		tr.FromAccountID = int(fromID.Int64)
@@ -118,8 +129,19 @@ type TransferInput struct {
 	ToAccountID   int     `json:"to_account_id"`
 	Amount        float64 `json:"amount"`
 	Date          string  `json:"date"`
-	Description   string  `json:"description"`
-	Notes         *string `json:"notes"`
+	// CompletionDate is when the money reaches the destination, for a move
+	// between institutions that takes days. Empty means the same day as Date.
+	CompletionDate *string `json:"completion_date"`
+	Description    string  `json:"description"`
+	Notes          *string `json:"notes"`
+}
+
+// arrives is the destination leg's date.
+func (in TransferInput) arrives() string {
+	if in.CompletionDate != nil {
+		return *in.CompletionDate
+	}
+	return in.Date
 }
 
 func (in *TransferInput) normalize() error {
@@ -141,6 +163,18 @@ func (in *TransferInput) normalize() error {
 	}
 	if _, err := models.ParseDate(in.Date); err != nil {
 		return invalid("date must be YYYY-MM-DD")
+	}
+	if in.CompletionDate != nil {
+		c := strings.TrimSpace(*in.CompletionDate)
+		if c == "" || c == in.Date {
+			in.CompletionDate = nil
+		} else if _, err := models.ParseDate(c); err != nil {
+			return invalid("completion date must be YYYY-MM-DD")
+		} else if c < in.Date {
+			return invalid("the completion date can't be before the transfer date")
+		} else {
+			in.CompletionDate = &c
+		}
 	}
 	in.Amount = math.Abs(in.Amount)
 	return nil
@@ -235,10 +269,11 @@ func insertTransferLegs(ctx context.Context, tx *sql.Tx, householdID int, groupI
 
 	legs := []struct {
 		accountID int
+		date      string
 		amount    float64
 	}{
-		{in.FromAccountID, -in.Amount},
-		{in.ToAccountID, in.Amount},
+		{in.FromAccountID, in.Date, -in.Amount},
+		{in.ToAccountID, in.arrives(), in.Amount},
 	}
 
 	for _, leg := range legs {
@@ -247,7 +282,7 @@ func insertTransferLegs(ctx context.Context, tx *sql.Tx, householdID int, groupI
 			   (household_id, account_id, date, amount, kind, description, notes,
 			    transfer_group_id, recurring_rule_id, source)
 			 VALUES ($1,$2,$3,$4,'transfer',$5,$6,$7,$8,$9)`,
-			householdID, leg.accountID, in.Date, leg.amount, in.Description,
+			householdID, leg.accountID, leg.date, leg.amount, in.Description,
 			nullStr(in.Notes), groupID, nullInt(ruleID), source,
 		)
 		if err != nil {

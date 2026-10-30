@@ -97,6 +97,12 @@
 									{transfer.to_account}
 									{#if isDebtPayment(transfer)}· debt payment{/if}
 								</span>
+								{#if transfer.completion_date}
+									<span class="lands" class:pending={transfer.in_transit}>
+										{transfer.in_transit ? 'In transit · lands' : 'Landed'}
+										{formatDate(transfer.completion_date)}
+									</span>
+								{/if}
 							</span>
 							<span class="amount">{formatCurrency(transfer.amount)}</span>
 						</button>
@@ -175,6 +181,15 @@
 	}
 
 	.arrow {
+		color: var(--accent);
+	}
+
+	.lands {
+		font-size: 0.75rem;
+		color: var(--muted-light);
+	}
+
+	.lands.pending {
 		color: var(--accent);
 	}
 
