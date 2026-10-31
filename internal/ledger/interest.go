@@ -366,7 +366,8 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 			continue // rates left from an older type; the update guard prevents new ones
 		}
 		description, category := earningLabel(a.typ, a.fund.String)
-		n, err := s.postAccountInterest(ctx, householdID, a.id, earning{description, category}, a.start, today)
+		label := earning{description, category, paysOnBusinessDay(a.typ)}
+		n, err := s.postAccountInterest(ctx, householdID, a.id, label, a.start, today)
 		posted += n
 		if err != nil {
 			return posted, fmt.Errorf("account %d: %w", a.id, err)
@@ -375,8 +376,20 @@ func (s *Service) PostInterest(ctx context.Context, householdID int, today time.
 	return posted, nil
 }
 
-// earning is how an account's monthly earnings are described and filed.
-type earning struct{ description, category string }
+// earning is how an account's monthly earnings are described, filed and
+// dated: on the month's last business day for a money market fund, its last
+// day for a bank (interest.PayDay).
+type earning struct {
+	description, category string
+	moneyMarket           bool
+}
+
+// paysOnBusinessDay reports whether the account's cash earns like a money
+// market fund — the cash yield of an investment or retirement account — rather
+// than like a bank's savings account.
+func paysOnBusinessDay(accountType string) bool {
+	return accountType != models.AccountHighYieldSavings
+}
 
 func (s *Service) postAccountInterest(ctx context.Context, householdID, accountID int, label earning, start, today time.Time) (int, error) {
 	rates, accruesFrom, err := s.interestRates(ctx, accountID, start)
@@ -393,8 +406,14 @@ func (s *Service) postAccountInterest(ctx context.Context, householdID, accountI
 		earliest = start
 	}
 	first := interest.MonthStart(earliest)
-	// Only months that are completely over: the current one is still earning.
-	last := interest.MonthStart(today).AddDate(0, -1, 0)
+	// Only months whose pay day is over, so the pay day's own transactions are
+	// in. That is the month's last day for a bank, so it posts on the 1st; a
+	// money market fund pays on the last business day, which can be a day or
+	// three before the month ends.
+	last := interest.MonthStart(today)
+	if !today.After(interest.PayDay(last, label.moneyMarket)) {
+		last = last.AddDate(0, -1, 0)
+	}
 
 	done := map[string]bool{}
 	rows, err := s.db.QueryContext(ctx,
@@ -444,13 +463,13 @@ func earningLabel(accountType, fund string) (description, category string) {
 	return "Money market dividend", "Dividends"
 }
 
-// postInterestMonth works out one month and records it. The postings row and
+// postInterestMonth works out one month and records it, dated its pay day. The postings row and
 // the transaction go in together; a row that already exists means another pass
 // got there first, and nothing is written. It earns on each day's cash balance,
 // so an investment account's holdings don't earn the cash rate and money that
 // arrived on the 20th earns from the 20th.
 func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID int, label earning, month time.Time, rates []interest.Rate, accruesFrom time.Time) (bool, error) {
-	end := interest.MonthEnd(month)
+	payDay := interest.PayDay(month, label.moneyMarket)
 	wrote := false
 	err := s.inTx(func(tx *sql.Tx) error {
 		balances, err := dailyCashBalances(ctx, tx, accountID, month)
@@ -486,7 +505,7 @@ func (s *Service) postInterestMonth(ctx context.Context, householdID, accountID 
 			   (household_id, account_id, date, amount, kind, description, category_id, source)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 			 RETURNING id`,
-			householdID, accountID, dateStr(end), amount, models.KindIncome, label.description,
+			householdID, accountID, dateStr(payDay), amount, models.KindIncome, label.description,
 			categoryID, models.SourceInterest).Scan(&txnID)
 		if err != nil {
 			return fmt.Errorf("posting interest: %w", err)
@@ -531,7 +550,8 @@ func incomeCategory(ctx context.Context, tx *sql.Tx, householdID int, name strin
 // Rates is empty on an investment account whose cash yield was never set.
 type SavingsOutlook struct {
 	Rates []models.SavingsRate `json:"rates"`
-	// ProjectedDate is the last day of this month, when the interest posts.
+	// ProjectedDate is when the month's interest or dividend posts
+	// (interest.PayDay). Once this month's has posted, it is next month's.
 	ProjectedDate   string  `json:"projected_date"`
 	ProjectedAmount float64 `json:"projected_amount"`
 
@@ -555,13 +575,16 @@ func (s *Service) SavingsOutlookFor(ctx context.Context, householdID, accountID 
 	if err != nil {
 		return out, err
 	}
-	month := interest.MonthStart(household.Today())
-	out.ProjectedDate = dateStr(interest.MonthEnd(month))
-
-	_, start, err := s.assertEarnsOnCash(ctx, s.db, householdID, accountID)
+	typ, start, err := s.assertEarnsOnCash(ctx, s.db, householdID, accountID)
 	if err != nil {
 		return out, err
 	}
+	today := household.Today()
+	month := interest.MonthStart(today)
+	if today.After(interest.PayDay(month, paysOnBusinessDay(typ))) {
+		month = month.AddDate(0, 1, 0) // this month's has been paid
+	}
+	out.ProjectedDate = dateStr(interest.PayDay(month, paysOnBusinessDay(typ)))
 	calc, accruesFrom, err := s.interestRates(ctx, accountID, start)
 	if err != nil {
 		return out, err

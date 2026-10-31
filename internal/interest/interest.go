@@ -97,3 +97,45 @@ func rateOn(sorted []Rate, d time.Time) (Rate, bool) {
 func round2(x float64) float64 {
 	return math.Round(x*100) / 100
 }
+
+// PayDay is the day the month starting at monthStart pays what it earned. A
+// bank credits savings interest on the month's last day. A money market fund
+// (SPAXX, VMFXX) pays its dividend on the month's last business day, covering
+// the days after it too: October 2026 ends on a Saturday, and Fidelity paid
+// that month's SPAXX dividend on Friday the 30th.
+func PayDay(monthStart time.Time, moneyMarket bool) time.Time {
+	d := MonthEnd(monthStart)
+	if !moneyMarket {
+		return d
+	}
+	for d.Weekday() == time.Saturday || d.Weekday() == time.Sunday || marketHoliday(d) {
+		d = d.AddDate(0, 0, -1)
+	}
+	return d
+}
+
+// marketHoliday reports the NYSE holidays that can fall on a month's last
+// weekday: Good Friday (March 20 to April 23, so it can end March) and
+// Memorial Day (the last Monday of May). No other one can — New Year's Day on
+// a Saturday is not observed on December 31st.
+func marketHoliday(d time.Time) bool {
+	if d.Month() == time.May && d.Weekday() == time.Monday && d.AddDate(0, 0, 7).Month() != time.May {
+		return true
+	}
+	return d.Equal(easter(d.Year()).AddDate(0, 0, -2))
+}
+
+// easter is Easter Sunday in the Gregorian calendar (the anonymous Gregorian
+// algorithm).
+func easter(y int) time.Time {
+	a, b, c := y%19, y/100, y%100
+	d, e := b/4, b%4
+	f := (b + 8) / 25
+	g := (b - f + 1) / 3
+	h := (19*a + b - d - g + 15) % 30
+	i, k := c/4, c%4
+	l := (32 + 2*e + 2*i - h - k) % 7
+	m := (a + 11*h + 22*l) / 451
+	n := h + l - 7*m + 114
+	return time.Date(y, time.Month(n/31), n%31+1, 0, 0, 0, 0, time.UTC)
+}

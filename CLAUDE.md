@@ -147,7 +147,11 @@ The same machinery gives an `investment` or `retirement` account an optional **c
 money market fund its uninvested cash sits in (SPAXX at Fidelity) pays a monthly dividend. It posts
 on the **cash balance only** (`dailyCashBalances`: starting balance + transactions, trade legs
 included, so holdings never earn the cash rate), described "Money market dividend" under
-**Dividends**. `models.EarnsOnCash` decides which types can keep rates; a high-yield savings account
+**Dividends**. It is dated the fund's pay day, the month's **last business day** (`interest.PayDay`:
+weekends, Good Friday and Memorial Day skipped — Oct 2026 ends on a Saturday, so Fidelity paid
+SPAXX on Friday the 30th), and still covers the days after it; savings interest stays on the last
+day. Either posts once its pay day is over, so that day's own transactions are counted.
+`models.EarnsOnCash` decides which types can keep rates; a high-yield savings account
 must keep at least one, an investment account may remove its last to turn the dividend off.
 
 Better than typing it: the account names its fund (`accounts.cash_fund`, e.g. `SPAXX`) — the

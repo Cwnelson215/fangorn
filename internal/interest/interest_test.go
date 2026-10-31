@@ -114,3 +114,34 @@ func TestMonthBoundaries(t *testing.T) {
 		t.Error("MonthStart wrong")
 	}
 }
+
+func TestPayDay(t *testing.T) {
+	cases := []struct {
+		month       string
+		moneyMarket bool
+		want        string
+	}{
+		{"2026-10-01", false, "2026-10-31"}, // a bank credits the last day, Saturday or not
+		{"2026-10-01", true, "2026-10-30"},  // Saturday the 31st: Friday
+		{"2026-11-01", true, "2026-11-30"},  // a Monday
+		{"2026-05-01", true, "2026-05-29"},  // Sunday the 31st: Friday
+		{"2027-05-01", true, "2027-05-28"},  // Monday the 31st is Memorial Day
+		{"2024-03-01", true, "2024-03-28"},  // Good Friday the 29th, then a weekend
+		{"2028-03-01", true, "2028-03-31"},  // Good Friday is April 14th
+		{"2027-12-01", true, "2027-12-31"},  // New Year's on a Saturday isn't observed the 31st
+	}
+	for _, c := range cases {
+		m, _ := time.Parse("2006-01-02", c.month)
+		if got := PayDay(m, c.moneyMarket).Format("2006-01-02"); got != c.want {
+			t.Errorf("PayDay(%s, %v) = %s, want %s", c.month, c.moneyMarket, got, c.want)
+		}
+	}
+}
+
+func TestEaster(t *testing.T) {
+	for y, want := range map[int]string{2024: "2024-03-31", 2025: "2025-04-20", 2026: "2026-04-05", 2027: "2027-03-28"} {
+		if got := easter(y).Format("2006-01-02"); got != want {
+			t.Errorf("easter(%d) = %s, want %s", y, got, want)
+		}
+	}
+}

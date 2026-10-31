@@ -442,6 +442,48 @@ func TestCashFundPaysItsWholeFirstMonth(t *testing.T) {
 	money(t, "September in full: 10350.74 × 3.33% ÷ 12", txns[0].Amount, 28.72)
 }
 
+// A money market fund pays on the month's last business day, not its last
+// day: October 2026 ends on a Saturday, so its dividend posts and is dated on
+// Friday the 30th — posted the next day, once the 30th's own transactions are
+// in — and still counts the weekend.
+func TestCashFundPaysOnLastBusinessDay(t *testing.T) {
+	f := newFixture(t)
+	fund := f.sym("SPAXX")
+	f.price(fund, 1, 1)
+	brokerage := f.investment("Fidelity", "2026-10-01", 12000, &fund)
+	if err := f.svc.SaveFundYield(f.ctx, fund, day("2026-10-01"), 3.6); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := f.postInterest("2026-10-30"); n != 0 {
+		t.Fatalf("posted %d on the pay day itself, before its own transactions are in", n)
+	}
+	if n := f.postInterest("2026-10-31"); n != 1 {
+		t.Fatalf("posted %d on the 31st, want October's", n)
+	}
+	txns := f.interestTxns(brokerage.ID)
+	if len(txns) != 1 || txns[0].Date != "2026-10-30" {
+		t.Fatalf("dividends = %+v", txns)
+	}
+	money(t, "all of October: 12000 × 3.6% ÷ 12", txns[0].Amount, 36.00)
+	if n := f.postInterest("2026-11-01"); n != 0 {
+		t.Errorf("posted %d again on the 1st", n)
+	}
+}
+
+// A bank still credits savings interest on the month's last day, weekend or not.
+func TestHighYieldPaysOnLastDay(t *testing.T) {
+	f := newFixture(t)
+	hysa := f.highYield("HYSA", 1000, "2026-10-01", 4.0)
+	if n := f.postInterest("2026-10-31"); n != 0 {
+		t.Fatalf("posted %d before the month was over", n)
+	}
+	f.postInterest("2026-11-01")
+	if txns := f.interestTxns(hysa.ID); len(txns) != 1 || txns[0].Date != "2026-10-31" {
+		t.Fatalf("interest = %+v", txns)
+	}
+}
+
 // Saving the account again keeps the fund's original date; naming a fund on
 // an account that already exists counts from today, so months that may have
 // been entered by hand stay as they were; clearing it unlinks.
@@ -510,7 +552,7 @@ func TestCashFundOnExistingAccount(t *testing.T) {
 	for i := range txns {
 		if txns[i].Date < dateStr(month) {
 			before += txns[i].Amount
-		} else if txns[i].Date == dateStr(interest.MonthEnd(month)) {
+		} else if txns[i].Date == dateStr(interest.PayDay(month, true)) {
 			got = &txns[i]
 		}
 	}
