@@ -36,6 +36,15 @@ func (f goalFill) DrainedIn(monthStart string) float64 {
 	return cents(f.drained[monthKey(monthStart)])
 }
 
+// goalDate is the day a transaction counts for goals: a transfer counts on the
+// day it was sent, not the day it lands. Money sent on the 30th toward this
+// month's savings is this month's saving even if it arrives on the 2nd. Every
+// other row counts on its own date. (The source leg is already the earliest
+// date in its group, so this only moves a destination leg that has a
+// completion date.)
+const goalDate = `LEAST(t.date, (SELECT MIN(o.date) FROM transactions o
+	WHERE o.transfer_group_id = t.transfer_group_id))`
+
 // goalFills replays every account that has goals linked to it and returns what
 // each of those goals holds, by goal id. Goals without an account aren't in it:
 // they count logged contributions instead.
@@ -131,15 +140,17 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 		// so they count neither way.
 		var before float64
 		if err := s.db.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(amount), 0) FROM transactions
-			 WHERE household_id = $1 AND account_id = $2 AND kind <> 'trade' AND date < $3`,
+			`SELECT COALESCE(SUM(t.amount), 0) FROM transactions t
+			 WHERE t.household_id = $1 AND t.account_id = $2 AND t.kind <> 'trade'
+			   AND `+goalDate+` < $3`,
 			householdID, accountID, a.from).Scan(&before); err != nil {
 			return nil, fmt.Errorf("totalling before the goals: %w", err)
 		}
 		mrows, err := s.db.QueryContext(ctx,
-			`SELECT t.id, t.date, t.amount, `+goalMoney+` FROM transactions t
-			 WHERE t.household_id = $1 AND t.account_id = $2 AND t.kind <> 'trade' AND t.date >= $3
-			 ORDER BY t.date, t.id`,
+			`SELECT t.id, `+goalDate+` AS goal_date, t.amount, `+goalMoney+` FROM transactions t
+			 WHERE t.household_id = $1 AND t.account_id = $2 AND t.kind <> 'trade'
+			   AND `+goalDate+` >= $3
+			 ORDER BY goal_date, t.id`,
 			householdID, accountID, a.from)
 		if err != nil {
 			return nil, fmt.Errorf("loading the goals' account: %w", err)

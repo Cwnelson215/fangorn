@@ -84,9 +84,10 @@ A transfer leg dated after the household's today doesn't count toward the balanc
 `ledger/balances.go`), so the money leaves the source when sent and reaches the destination when it
 lands; net worth dips by it in between. Interest and a cash fund's dividend replay by date, so the
 destination earns from the completion date with no special case. `Transfer.in_transit` says it
-hasn't landed; Drop balance is refused on an account with a leg still in transit. Goals still
-replay every leg by its date, landed or not (planning next month's goal with a future transfer
-relies on that).
+hasn't landed; Drop balance is refused on an account with a leg still in transit. Goals replay
+every leg landed or not (planning next month's goal with a future transfer relies on that), and
+count a transfer on the day it was **sent** (`goalDate` in `ledger/goalfill.go`): money sent on
+the 30th is that month's saving even if it lands on the 2nd.
 
 **Closing an account** is the "Close this account" card on its page (`CloseAccountCard.svelte`).
 *Remove remaining balance* records a transfer of the cash balance to (or, for a debt or overdraft,

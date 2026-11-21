@@ -3,6 +3,7 @@ package ledger_test
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/cwnelson/fangorn/internal/ledger"
 	"github.com/cwnelson/fangorn/internal/models"
@@ -106,5 +107,50 @@ func TestTransferEarnsFromCompletionDate(t *testing.T) {
 	// Each is rounded to the cent, so allow one.
 	if want := early[0].Amount * 10 / 15; math.Abs(txns[0].Amount-want) > 0.011 {
 		t.Fatalf("June interest = %v, want about %v", txns[0].Amount, want)
+	}
+}
+
+// A goal counts a transfer on the day it was sent, not the day it lands: money
+// sent on the last day of a month is that month's saving.
+func TestGoalCountsTransferWhenSent(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Gesa Checking", models.AccountChecking, 5000)
+	house := f.account("House Fund", models.AccountSavings, 0)
+
+	today := day(f.today())
+	next := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	after := next.AddDate(0, 1, 0)
+	nextYM, afterYM := next.Format("2006-01"), after.Format("2006-01")
+
+	goal := func(month *string) models.Goal {
+		g, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
+			Name: "House " + *month, TargetAmount: 1000, AccountID: &house.ID, Month: month,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	sentMonth, landMonth := goal(&nextYM), goal(&afterYM)
+
+	sent := after.AddDate(0, 0, -1).Format(models.DateOnly)
+	lands := after.AddDate(0, 0, 1).Format(models.DateOnly)
+	if _, err := f.svc.CreateTransfer(f.ctx, f.hh, ledger.TransferInput{
+		FromAccountID: checking.ID, ToAccountID: house.ID, Amount: 400,
+		Date: sent, CompletionDate: &lands,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct {
+		name string
+		id   int
+		want float64
+	}{{"month it was sent", sentMonth.ID, 400}, {"month it landed", landMonth.ID, 0}} {
+		g, err := f.svc.GetGoal(f.ctx, f.hh, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		money(t, c.name, g.Saved, c.want)
 	}
 }
