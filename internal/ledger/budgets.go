@@ -81,9 +81,9 @@ func (s *Service) BudgetMonth(ctx context.Context, householdID int, month string
 		return models.BudgetMonth{}, err
 	}
 	return models.BudgetMonth{
-		Month:            monthStart,
-		Budgets:          budgets,
-		UnbudgetedSpent:  round2(unbudgeted),
+		Month:           monthStart,
+		Budgets:         budgets,
+		UnbudgetedSpent: round2(unbudgeted),
 		Income: models.IncomeLine{
 			Expected:       expected,
 			Received:       round2(income),
@@ -152,10 +152,30 @@ func (s *Service) savingsLines(ctx context.Context, householdID int, monthStart 
 	if err != nil {
 		return nil, nil, err
 	}
+	// Money added to an account past what this month's lines took — more than
+	// planned, or what a goal with no line this month (a long-term goal without
+	// a plan) soaked up — fell through to the bottom: it shows on the account's
+	// last line, so the month says what was really put in.
+	month := monthKey(monthStart)
+	last := map[int]int{}
+	taken := map[int]int64{}
 	for i := range out {
-		if f, ok := fills[out[i].GoalID]; ok {
-			out[i].Saved = f.Saved
-			out[i].Moved = f.MovedIn(monthStart)
+		out[i].Added = out[i].Moved
+		f, ok := fills[out[i].GoalID]
+		if !ok {
+			continue
+		}
+		out[i].Saved = f.Saved
+		out[i].Moved = f.MovedIn(monthStart)
+		out[i].Added = out[i].Moved
+		if f.added != nil {
+			last[*out[i].AccountID] = i
+			taken[*out[i].AccountID] += f.FilledIn(monthStart)
+		}
+	}
+	for accountID, i := range last {
+		if extra := fills[out[i].GoalID].added[month] - taken[accountID]; extra > 0 {
+			out[i].Added = round2(out[i].Moved + cents(extra))
 		}
 	}
 	return out, fills, nil

@@ -22,6 +22,25 @@ type goalFill struct {
 	// entries is what each transaction on the account did to the goal
 	// (goalfill.Entry, whose ID is the transaction's).
 	entries []goalfill.Entry
+	// added is all the money added to the goal's account toward goals, by
+	// month — what the goals were offered, before any of them capped it. The
+	// same for every goal on the account; nil on the income account, where money
+	// past the goals' shares is there for the bills, not savings.
+	added map[time.Time]int64
+}
+
+// FilledIn is what money added put into the goal during the month, before
+// anything drained it.
+func (f goalFill) FilledIn(monthStart string) int64 {
+	from := monthKey(monthStart)
+	to := from.AddDate(0, 1, 0)
+	var sum int64
+	for _, e := range f.entries {
+		if e.Amount > 0 && !e.Date.Before(from) && e.Date.Before(to) {
+			sum += e.Amount
+		}
+	}
+	return sum
 }
 
 // MovedIn is the change in what the goal held during the month starting at
@@ -156,6 +175,10 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 			return nil, fmt.Errorf("loading the goals' account: %w", err)
 		}
 		var movements []goalfill.Movement
+		var added map[time.Time]int64
+		if !a.income {
+			added = map[time.Time]int64{}
+		}
 		for mrows.Next() {
 			var m goalfill.Movement
 			var date time.Time
@@ -166,6 +189,9 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 			}
 			m.Date = midnight(date)
 			m.Amount = toCents(amount)
+			if added != nil && m.Saving && m.Amount > 0 {
+				added[goalfill.MonthStart(m.Date)] += m.Amount
+			}
 			movements = append(movements, m)
 		}
 		mrows.Close()
@@ -174,10 +200,10 @@ func (s *Service) goalFills(ctx context.Context, householdID int) (map[int]goalF
 		}
 
 		results := goalfill.Replay(goalfill.Account{
-			Opening: toCents(a.opening + before), Income: a.income,
+			Opening: toCents(a.opening + before),
 		}, a.goals, movements)
 		for id, r := range results {
-			out[id] = goalFill{Saved: cents(r.Saved), moved: r.Moved, drained: r.Drained, entries: r.Entries}
+			out[id] = goalFill{Saved: cents(r.Saved), moved: r.Moved, drained: r.Drained, entries: r.Entries, added: added}
 		}
 	}
 	return out, nil

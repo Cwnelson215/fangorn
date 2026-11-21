@@ -511,7 +511,12 @@ type SavingsLine struct {
 	Monthly     float64 `json:"monthly_amount"`
 	// Moved is what went toward the goal in the month, net of what was drained
 	// back out of it (see Goal.Saved), or contributions for a goal with none.
-	Moved  float64 `json:"moved"`
+	Moved float64 `json:"moved"`
+	// Added is Moved plus, on the account's last line this month, the money
+	// added to the account past what its lines took, so a month that saved more
+	// than planned says how much. Equal to Moved on every other line, and on
+	// the income account, where that extra is left for the bills.
+	Added  float64 `json:"added"`
 	Saved  float64 `json:"saved"`
 	Target float64 `json:"target_amount"`
 	// Overspent is this goal's share of the month's savings shortfall: money

@@ -9,10 +9,9 @@
 //   - Money added (a transfer in, or income other than interest) fills the
 //     goals in priority order, each up to what is left of its share for that
 //     month: a monthly goal's whole target, or a long-term goal's plan in force.
-//     On an account that isn't where income lands, whatever is left then fills
-//     the goals up to their targets, in the same order — money moved into a
-//     savings account is being saved. On the income account it stays free: that
-//     money is there to pay the bills.
+//     Whatever is left then fills the goals up to their targets, in the same
+//     order — on the income account too, so a long-term goal kept there fills
+//     from paychecks. Only what's left past every goal's target is free.
 //   - Any other money in (interest, refunds, the starting balance) is free.
 //   - Money going out comes from free money first. Only once that runs out does
 //     it come off the goals, lowest priority first.
@@ -68,9 +67,6 @@ type Movement struct {
 type Account struct {
 	// Opening is the money already there before the first movement: free.
 	Opening int64
-	// Income is set on the account income lands in: money added past the
-	// goals' monthly shares stays free rather than filling their targets.
-	Income bool
 }
 
 // Result is what one goal ended up with.
@@ -146,7 +142,7 @@ func Replay(account Account, goals []Goal, movements []Movement) map[int]*Result
 				continue
 			}
 			if m.Saving {
-				free += fill(states, m, !account.Income)
+				free += fill(states, m)
 			} else {
 				free += m.Amount
 			}
@@ -171,7 +167,7 @@ func Replay(account Account, goals []Goal, movements []Movement) map[int]*Result
 
 // fill hands the money m added to the goals in priority order and returns what
 // none of them took.
-func fill(states []*state, m Movement, overflow bool) int64 {
+func fill(states []*state, m Movement) int64 {
 	day, amount := m.Date, m.Amount
 	month := MonthStart(day)
 	var open []*state
@@ -184,10 +180,8 @@ func fill(states []*state, m Movement, overflow bool) int64 {
 		room := min(s.share(month)-s.res.Moved[month], s.goal.Target-s.held)
 		amount -= s.take(m, min(room, amount))
 	}
-	if overflow {
-		for _, s := range open {
-			amount -= s.take(m, min(s.goal.Target-s.held, amount))
-		}
+	for _, s := range open {
+		amount -= s.take(m, min(s.goal.Target-s.held, amount))
 	}
 	return amount
 }

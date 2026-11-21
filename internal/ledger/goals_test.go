@@ -321,9 +321,10 @@ func TestMonthlyGoal(t *testing.T) {
 	wantInvalid(t, err)
 }
 
-// Goals sharing the income account fill from income in priority order, each up
-// to its share of the month, and spending past the free money drains them from
-// the lowest priority up.
+// Goals sharing the income account fill from income in priority order, each
+// share of the month before any target, and spending past the free money drains
+// them from the lowest priority up. (Targets equal to the shares keep the rest
+// of each paycheck free.)
 func TestGoalsShareTheIncomeAccount(t *testing.T) {
 	f := newFixture(t)
 	joint := f.account("Joint", models.AccountChecking, 0)
@@ -336,8 +337,8 @@ func TestGoalsShareTheIncomeAccount(t *testing.T) {
 	five, three := 500.0, 300.0
 	var ids []int
 	for _, g := range []ledger.GoalInput{
-		{Name: "Emergency", TargetAmount: 5000, AccountID: &joint.ID, MonthlyAmount: &five},
-		{Name: "Vacation", TargetAmount: 3000, AccountID: &joint.ID, MonthlyAmount: &three},
+		{Name: "Emergency", TargetAmount: 500, AccountID: &joint.ID, MonthlyAmount: &five},
+		{Name: "Vacation", TargetAmount: 300, AccountID: &joint.ID, MonthlyAmount: &three},
 	} {
 		created, err := f.svc.CreateGoal(f.ctx, f.hh, g)
 		if err != nil {
@@ -365,8 +366,8 @@ func TestGoalsShareTheIncomeAccount(t *testing.T) {
 
 	f.txn(joint.ID, models.KindIncome, day, 3000, &pay.ID)
 	got = saved()
-	money(t, "emergency's month is full", got["Emergency"][0], 500)
-	money(t, "vacation's month is full", got["Vacation"][0], 300)
+	money(t, "emergency is full", got["Emergency"][0], 500)
+	money(t, "vacation is full", got["Vacation"][0], 300)
 
 	// $2,800 is free; spending $3,000 takes $200 from Vacation, the lower one.
 	f.txn(joint.ID, models.KindExpense, day, 3000, &food.ID)
@@ -453,5 +454,57 @@ func TestReorderGoals(t *testing.T) {
 	}
 	if err := f.svc.ReorderGoals(f.ctx, f.hh, []int{ids[0], theirs.ID}); err != ledger.ErrNotFound {
 		t.Errorf("another household's goal: err = %v, want not found", err)
+	}
+}
+
+// A month's Savings line says what was really added to its account, not just
+// what its goal took: money past the goals on the account falls through to the
+// account's last line. Not on the income account: there the extra is pay.
+func TestSavingsLineShowsMoneyAddedPastTheGoal(t *testing.T) {
+	f := newFixture(t)
+	checking := f.account("Checking", models.AccountChecking, 10000)
+	house := f.account("House Fund", models.AccountSavings, 0)
+	if _, err := f.svc.UpdateSettings(f.ctx, f.hh, ledger.Settings{IncomeAccountID: &checking.ID}); err != nil {
+		t.Fatal(err)
+	}
+	today := ledger.Household{Timezone: "America/Denver"}.Today()
+	next := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	nextYM := next.Format("2006-01")
+
+	// A long-term goal with no plan takes whatever its month's goals leave.
+	if _, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
+		Name: "Down payment", TargetAmount: 50000, AccountID: &house.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	monthly, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
+		Name: "House this month", TargetAmount: 100, AccountID: &house.ID, Month: &nextYM,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	onIncome, err := f.svc.CreateGoal(f.ctx, f.hh, ledger.GoalInput{
+		Name: "Cushion", TargetAmount: 50, AccountID: &checking.ID, Month: &nextYM,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.transfer(checking.ID, house.ID, 600, next.Format(models.DateOnly))
+	pay := f.category("Pay", models.KindIncome)
+	f.txn(checking.ID, models.KindIncome, next.Format(models.DateOnly), 2000, &pay.ID)
+
+	bm, err := f.svc.BudgetMonth(f.ctx, f.hh, nextYM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range bm.Savings {
+		switch l.GoalID {
+		case monthly.ID:
+			money(t, "goal's part", l.Moved, 100)
+			money(t, "added to its account", l.Added, 600)
+		case onIncome.ID:
+			money(t, "income account goal's part", l.Moved, 50)
+			money(t, "income account added", l.Added, 50)
+		}
 	}
 }

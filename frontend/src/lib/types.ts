@@ -369,6 +369,11 @@ export interface SavingsLine {
 	monthly_amount: number;
 	/** Put toward the goal this month. */
 	moved: number;
+	/**
+	 * `moved` plus, on its account's last line this month, money added to the account past what
+	 * the lines took — what was really put in, uncapped. Equal to `moved` otherwise.
+	 */
+	added: number;
 	saved: number;
 	target_amount: number;
 	/** This goal's share of money meant for savings that was spent from the income account. */

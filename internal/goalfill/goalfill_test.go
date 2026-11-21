@@ -33,42 +33,39 @@ func check(t *testing.T, what string, got, wantDollars int64) {
 	}
 }
 
-// On the income account a paycheck fills each goal's monthly share in priority
-// order, and the rest stays free for the bills.
-func TestIncomeFillsSharesInPriorityOrder(t *testing.T) {
+// Money added fills every goal's share of the month in priority order first,
+// and only then fills goals toward their targets, in the same order.
+func TestSharesBeforeTargets(t *testing.T) {
 	goals := []Goal{longTerm(2, 2, 5000, 300), longTerm(1, 1, 5000, 500)}
-	got := Replay(Account{Income: true}, goals, []Movement{
+	got := Replay(Account{}, goals, []Movement{in("2026-01-15", 600)})
+	check(t, "first goal", got[1].Saved, 500)
+	check(t, "second goal", got[2].Saved, 100)
+
+	// The second goal's share is finished before the first takes more.
+	got = Replay(Account{}, goals, []Movement{
 		in("2026-01-15", 600),
 		in("2026-01-31", 3000),
 	})
-	check(t, "first goal", got[1].Saved, 500)
+	check(t, "first goal", got[1].Saved, 3300)
 	check(t, "second goal", got[2].Saved, 300)
-	check(t, "first goal's month", got[1].Moved[d("2026-01-01")], 500)
-
-	// Next month's shares start over.
-	got = Replay(Account{Income: true}, goals, []Movement{
-		in("2026-01-15", 3000),
-		in("2026-02-15", 3000),
-	})
-	check(t, "first goal over two months", got[1].Saved, 1000)
-	check(t, "second goal over two months", got[2].Saved, 600)
+	check(t, "first goal's month", got[1].Moved[d("2026-01-01")], 3300)
 }
 
-// A goal never takes past its target, and a goal with no plan takes nothing
-// from the income account.
+// A goal never takes past its target, and a goal with no plan takes only what
+// is left past the shares.
 func TestTargetsAndNoPlan(t *testing.T) {
 	goals := []Goal{longTerm(1, 1, 200, 500), longTerm(2, 2, 5000, 0), longTerm(3, 3, 5000, 100)}
-	got := Replay(Account{Income: true}, goals, []Movement{in("2026-01-15", 3000)})
+	got := Replay(Account{}, goals, []Movement{in("2026-01-15", 3000)})
 	check(t, "capped at target", got[1].Saved, 200)
-	check(t, "no plan", got[2].Saved, 0)
+	check(t, "no plan", got[2].Saved, 2700)
 	check(t, "next in line", got[3].Saved, 100)
 }
 
 // Spending comes out of free money first, then off the goals from the lowest
 // priority up.
 func TestSpendingDrainsInReverseOrder(t *testing.T) {
-	goals := []Goal{longTerm(1, 1, 5000, 500), longTerm(2, 2, 5000, 300)}
-	got := Replay(Account{Income: true, Opening: 100 * 100}, goals, []Movement{
+	goals := []Goal{longTerm(1, 1, 500, 500), longTerm(2, 2, 300, 300)}
+	got := Replay(Account{Opening: 100 * 100}, goals, []Movement{
 		in("2026-01-15", 1000), // 500 + 300 to goals, 200 free (+100 opening)
 		other("2026-01-20", -500),
 	})
@@ -78,7 +75,7 @@ func TestSpendingDrainsInReverseOrder(t *testing.T) {
 	check(t, "second goal drained this month", got[2].Drained[d("2026-01-01")], 200)
 
 	// A deeper hole reaches the first goal, and past both goes overdrawn.
-	got = Replay(Account{Income: true}, goals, []Movement{
+	got = Replay(Account{}, goals, []Movement{
 		in("2026-01-15", 800),
 		other("2026-01-20", -1000),
 	})
@@ -88,29 +85,29 @@ func TestSpendingDrainsInReverseOrder(t *testing.T) {
 
 // Same-day money in is counted before money out.
 func TestSameDayBillDoesNotDrain(t *testing.T) {
-	goals := []Goal{longTerm(1, 1, 5000, 500)}
-	got := Replay(Account{Income: true}, goals, []Movement{
+	goals := []Goal{longTerm(1, 1, 500, 500)}
+	got := Replay(Account{}, goals, []Movement{
 		other("2026-01-15", -400),
 		in("2026-01-15", 1000),
 	})
 	check(t, "goal", got[1].Saved, 500)
 }
 
-// A drained goal gets its money back before the month's share is counted as
-// met.
+// A drained goal gets its share back before goals fill toward their targets.
 func TestRefillAfterDrain(t *testing.T) {
-	goals := []Goal{longTerm(1, 1, 5000, 500)}
-	got := Replay(Account{Income: true}, goals, []Movement{
+	goals := []Goal{longTerm(1, 2, 5000, 500), longTerm(2, 1, 5000, 0)}
+	got := Replay(Account{}, goals, []Movement{
 		in("2026-01-01", 500),
 		other("2026-01-05", -200),
 		in("2026-01-15", 1000),
 	})
-	check(t, "goal", got[1].Saved, 500)
+	check(t, "refilled to its share", got[1].Saved, 500)
 	check(t, "month", got[1].Moved[d("2026-01-01")], 500)
+	check(t, "the rest toward the other's target", got[2].Saved, 800)
 }
 
-// Off the income account, money moved in past the monthly shares still fills
-// the goals up to their targets, in order.
+// Money moved in past the monthly shares fills the goals up to their targets,
+// in order.
 func TestSavingsAccountOverflow(t *testing.T) {
 	goals := []Goal{longTerm(1, 1, 1000, 200), longTerm(2, 2, 5000, 100)}
 	got := Replay(Account{}, goals, []Movement{in("2026-01-15", 1500)})
@@ -143,16 +140,16 @@ func TestBeforeStart(t *testing.T) {
 func TestMonthlyGoal(t *testing.T) {
 	monthly := Goal{ID: 1, Priority: 1, Start: d("2026-02-01"), End: d("2026-03-01"), Target: 400 * 100}
 	lt := longTerm(2, 2, 5000, 300)
-	got := Replay(Account{Income: true}, []Goal{monthly, lt}, []Movement{
+	got := Replay(Account{}, []Goal{monthly, lt}, []Movement{
 		in("2026-01-15", 1000), // before its month: only the long-term goal
-		in("2026-02-15", 1000),
-		other("2026-03-10", -1000), // after its month: free money (700+300) then the long-term goal
+		in("2026-02-15", 1000), // 400 to the monthly goal, 600 to the long-term
+		other("2026-03-10", -1000), // after its month: its 400, now free, then the long-term goal
 	})
 	check(t, "monthly goal saved", got[1].Saved, 400)
-	check(t, "long-term goal", got[2].Saved, 600)
+	check(t, "long-term goal", got[2].Saved, 1000)
 
 	// Inside its month, spending that reaches it lowers it.
-	got = Replay(Account{Income: true}, []Goal{monthly, lt}, []Movement{
+	got = Replay(Account{}, []Goal{monthly, lt}, []Movement{
 		in("2026-02-15", 700),
 		other("2026-02-20", -500),
 	})
@@ -164,19 +161,21 @@ func TestMonthlyGoal(t *testing.T) {
 func TestReachedGoal(t *testing.T) {
 	g := longTerm(1, 1, 5000, 500)
 	g.Reached = d("2026-02-01")
-	got := Replay(Account{Income: true}, []Goal{g}, []Movement{
+	got := Replay(Account{}, []Goal{g}, []Movement{
 		in("2026-01-15", 1000),
 		in("2026-02-15", 1000),
 	})
-	check(t, "goal", got[1].Saved, 500)
+	check(t, "goal", got[1].Saved, 1000)
 }
 
-// A plan change applies from its month; a stopped plan takes nothing.
+// A plan change applies from its month; a stopped plan takes no share. (A goal
+// ahead of it with no plan takes the rest, so only the shares reach it.)
 func TestPlanByMonth(t *testing.T) {
-	g := longTerm(1, 1, 5000, 500)
+	g := longTerm(1, 2, 5000, 500)
 	g.Plans = append(g.Plans, Plan{From: d("2026-02-01"), Amount: 100 * 100, Set: true},
 		Plan{From: d("2026-03-01")})
-	got := Replay(Account{Income: true}, []Goal{g}, []Movement{
+	ahead := longTerm(2, 1, 100000, 0)
+	got := Replay(Account{}, []Goal{g, ahead}, []Movement{
 		in("2026-01-15", 1000), in("2026-02-15", 1000), in("2026-03-15", 1000),
 	})
 	check(t, "goal", got[1].Saved, 600)
@@ -188,7 +187,7 @@ func TestEntriesNameTheMovements(t *testing.T) {
 	goals := []Goal{longTerm(1, 1, 5000, 500), longTerm(2, 2, 5000, 300)}
 	paycheck, groceries := in("2026-01-15", 600), other("2026-01-20", -100)
 	paycheck.ID, groceries.ID = 7, 8
-	got := Replay(Account{Income: true}, goals, []Movement{paycheck, groceries})
+	got := Replay(Account{}, goals, []Movement{paycheck, groceries})
 
 	if e := got[1].Entries; len(e) != 1 || e[0].ID != 7 || e[0].Amount != 500*100 {
 		t.Errorf("first goal's entries = %+v, want $500 of movement 7", e)
@@ -198,7 +197,7 @@ func TestEntriesNameTheMovements(t *testing.T) {
 		t.Errorf("second goal's entries = %+v, want $100 of 7 then -$100 of 8", e)
 	}
 
-	// Off the income account one transfer reaches a goal twice — its share,
+	// One movement can reach a goal twice — its share,
 	// then the overflow toward its target — and still reads as one entry.
 	transfer := in("2026-01-15", 2000)
 	transfer.ID = 9

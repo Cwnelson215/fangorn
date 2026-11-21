@@ -719,7 +719,8 @@
 				</p>
 				<div class="list">
 					{#each savings as line, i (line.goal_id)}
-						{@const toGo = line.monthly_amount - line.moved}
+						{@const toGo = line.monthly_amount - line.added}
+						{@const over = line.added - line.monthly_amount}
 						<div class="item">
 							<div class="item-head">
 								<span class="item-name">
@@ -766,16 +767,17 @@
 								</span>
 							</div>
 							<BudgetBar
-								spent={line.moved}
+								spent={line.added}
 								amount={line.monthly_amount}
 								color="var(--info)"
 								pace={incomePace(month)}
 							/>
 							<div class="item-foot muted">
-								{formatCurrency(line.moved)} of {formatCurrency(line.monthly_amount)} this month
+								{formatCurrency(line.added)} of {formatCurrency(line.monthly_amount)} this month
+								{#if over > 0.005}· <span class="pos">{formatCurrency(over)} over</span>{/if}
 								{#if line.overspent > 0.005}
 									· <span class="neg">−{formatCurrency(line.overspent)} spent from savings</span>
-									{#if line.moved > 0.005}= {formatCurrency(Math.max(0, line.moved - line.overspent))} saved{/if}
+									{#if line.added > 0.005}= {formatCurrency(Math.max(0, line.added - line.overspent))} saved{/if}
 								{/if}
 								{#if toGo > 0.005}· {formatCurrency(toGo)} to go{/if}
 								{#if !line.month}

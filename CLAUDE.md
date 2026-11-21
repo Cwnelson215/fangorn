@@ -294,9 +294,9 @@ account (`internal/goalfill`, pure, in cents; `ledger.goalFills` loads it):
   Dividends or Interest category — a Roth's dividends aren't contributions) — fills the
   account's open goals in priority order, each up to what is left of its **share of that month** (a
   monthly goal's target; a long-term goal's plan in force, none without one), never past its target.
-  Off the income account, what's left then fills the goals up to their targets in the same order
-  (money moved into savings is being saved); **on the income account it stays free** for the bills,
-  so a paycheck landing there sets aside each goal's month and no more.
+  What's left then fills the goals up to their targets in the same order — **on the income account
+  too**, so a long-term goal kept there fills from paychecks (a monthly goal's target is its share,
+  so it takes no more). Only money past every goal's target is free.
 - Any other money in — the starting balance, interest, refunds, money from before a goal started —
   is **free**. Trades count neither way (the cash is still in the account as shares).
 - Money **leaving** comes out of free money first; only past that does it come off the goals,
@@ -316,7 +316,9 @@ target is the month's amount. `ListGoals` (the Long-term Goals card and the dash
 long-term goals only, in priority order; monthly goals are created and edited from the month's
 Savings section (`GET /api/goals/{id}` fetches one). A goal can't switch kinds. Each month's Savings
 lines (`BudgetMonth.savings`, in priority order, `moved` = that month's change in what the goal
-holds) are the long-term goals whose plan in force has an amount plus the monthly goals for that
+holds; `added` = `moved` plus, on the account's last line, money added to the account that month
+past what its lines took — more than planned, or what a plan-less long-term goal soaked up — so the
+line shows what was really put in; not on the income account, where that extra is just pay) are the long-term goals whose plan in force has an amount plus the monthly goals for that
 month. "Add money" on the line is a real transfer from the income account into the goal's account —
 which then fills that account's goals in order, so on a shared account it isn't aimed at one goal —
 and is hidden for goals on the income account, which fill from income by themselves. A goal with no
